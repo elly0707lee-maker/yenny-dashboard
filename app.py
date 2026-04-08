@@ -405,34 +405,6 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
     <div class="content-body" id="briefing-body"><span class="content-empty">버튼을 누르면 Claude가 CNBC·Bloomberg·WSJ를 참조해서 브리핑을 생성합니다.</span></div>
   </div>
 
-  <!-- 시간외/에프터마켓 특징주 -->
-  <div class="section-label">시간외 / 에프터마켓 특징주</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">🕐 시간외 특징주</span>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span class="saved-badge" id="aftermarket-badge">✓ 저장됨</span>
-        <button class="btn btn-primary" onclick="processAftermarket()" id="aftermarket-btn">✦ 가공하기</button>
-      </div>
-    </div>
-    <textarea class="input-area" id="aftermarket-input" placeholder="여기에 시간외/에프터마켓 특징주 내용을 붙여넣으세요..."></textarea>
-    <div id="aftermarket-result" style="margin-top:12px;"></div>
-  </div>
-
-  <!-- 특징 리포트 -->
-  <div class="section-label">특징 리포트</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📝 특징 리포트</span>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <span class="saved-badge" id="report-badge">✓ 저장됨</span>
-        <button class="btn btn-green" onclick="saveReport()">저장</button>
-      </div>
-    </div>
-    <textarea class="input-area" id="report-input" placeholder="리포트 내용을 직접 입력하세요..." style="min-height:120px;"></textarea>
-    <div id="report-saved" class="content-body" style="margin-top:12px;display:none;"></div>
-  </div>
-
   <!-- 체크포인트 -->
   <div class="section-label">체크포인트</div>
   <div class="content-card">
@@ -440,8 +412,35 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
     <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
+  <!-- 시간외특징주 + 특징리포트 2분할 -->
+  <div class="section-label">시간외 특징주 / 특징 리포트</div>
+  <div class="grid2">
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">🕐 시간외 특징주</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="saved-badge" id="aftermarket-badge">✓ 저장됨</span>
+          <button class="btn btn-primary" onclick="processAftermarket()" id="aftermarket-btn">✦ 가공</button>
+        </div>
+      </div>
+      <textarea class="input-area" id="aftermarket-input" placeholder="시간외/에프터마켓 특징주 붙여넣기..." style="min-height:120px;"></textarea>
+      <div id="aftermarket-result" style="margin-top:10px;"></div>
+    </div>
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">📝 특징 리포트</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="saved-badge" id="report-badge">✓ 저장됨</span>
+          <button class="btn btn-green" onclick="saveReport()">저장</button>
+        </div>
+      </div>
+      <textarea class="input-area" id="report-input" placeholder="리포트 내용 직접 입력..." style="min-height:120px;"></textarea>
+      <div id="report-saved" class="content-body" style="margin-top:10px;display:none;"></div>
+    </div>
+  </div>
+
   <!-- 마감일지 -->
-  <div class="section-label">마감일지</div>
+  <div class="section-label" style="margin-top:16px;">마감일지</div>
   <div class="content-card">
     <div class="content-header"><span class="content-title">📋 마감일지</span><span class="content-date" id="closing-date"></span></div>
     <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
