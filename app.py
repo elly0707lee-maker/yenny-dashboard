@@ -1,14 +1,14 @@
 from flask import Flask, jsonify, request, Response
 import requests
-import sqlite3
 import os
 from datetime import datetime
 from functools import wraps
 import anthropic
+import psycopg2
 
 app = Flask(__name__)
 
-DB_PATH = "dashboard.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "")
 KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "")
@@ -18,10 +18,13 @@ API_SECRET = os.environ.get("API_SECRET", "moneyplus")
 _kis_token_cache = {"token": ""}
 
 
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
     conn.cursor().execute("""CREATE TABLE IF NOT EXISTS posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         type TEXT NOT NULL, content TEXT NOT NULL,
         date TEXT NOT NULL, created_at TEXT NOT NULL)""")
     conn.commit(); conn.close()
@@ -145,18 +148,19 @@ def get_global_market():
 
 
 def save_post(t, content, date):
-    conn = sqlite3.connect(DB_PATH)
-    conn.cursor().execute(
-        "INSERT INTO posts (type,content,date,created_at) VALUES (?,?,?,?)",
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO posts (type,content,date,created_at) VALUES (%s,%s,%s,%s)",
         (t, content, date, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit(); conn.close()
 
 
 def get_latest_post(t):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT content,date FROM posts WHERE type=? ORDER BY id DESC LIMIT 1", (t,))
-    row = c.fetchone(); conn.close()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT content,date FROM posts WHERE type=%s ORDER BY id DESC LIMIT 1", (t,))
+    row = cur.fetchone(); conn.close()
     return {"content": row[0], "date": row[1]} if row else None
 
 
