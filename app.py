@@ -212,7 +212,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -220,7 +220,7 @@ def api_get_post(pt):
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -234,6 +234,14 @@ def api_save_post(pt):
     if not content:
         return jsonify({"error": "content required"}), 400
     save_post(pt, content, date)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/report/clear", methods=["POST"])
+@requires_auth
+def clear_report():
+    for t in ("report_up","report_dn","report_feature"):
+        save_post(t, "", datetime.now().strftime("%Y-%m-%d"))
     return jsonify({"ok": True})
 
 
@@ -441,11 +449,18 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
         <span class="content-title">📝 특징 리포트</span>
         <div style="display:flex;gap:6px;align-items:center;">
           <span class="saved-badge" id="report-badge">✓ 저장됨</span>
-          <button class="btn btn-green" onclick="saveReport()">저장</button>
+          <button class="btn btn-green" onclick="saveReportTab()">저장</button>
+          <button class="btn" onclick="clearReport()" style="color:#f87171;border-color:#3a1a1a;">↺ 초기화</button>
         </div>
       </div>
-      <textarea class="input-area" id="report-input" placeholder="리포트 내용 직접 입력..." style="min-height:120px;"></textarea>
-      <div id="report-saved" class="content-body" style="margin-top:10px;display:none;"></div>
+      <div class="tab-bar">
+        <button class="tab active" onclick="reportTab(this,'up')" id="rtab-up">📈 상승</button>
+        <button class="tab" onclick="reportTab(this,'dn')" id="rtab-dn">📉 하락</button>
+        <button class="tab" onclick="reportTab(this,'feature')" id="rtab-feature">⭐ 특징</button>
+      </div>
+      <textarea class="input-area" id="report-up-input" placeholder="상승 내용 입력..." style="min-height:120px;"></textarea>
+      <textarea class="input-area" id="report-dn-input" placeholder="하락 내용 입력..." style="min-height:120px;display:none;"></textarea>
+      <textarea class="input-area" id="report-feature-input" placeholder="특징 내용 입력..." style="min-height:120px;display:none;"></textarea>
     </div>
   </div>
 
@@ -589,33 +604,58 @@ async function saveFutures(){
   setTimeout(()=>badge.style.display='none',2000);
 }
 
-async function saveReport(){
-  const val=document.getElementById('report-input').value.trim();
-  if(!val)return;
-  await fetch('/api/post/report',{
+
+
+
+
+
+
+let _reportTab = 'up';
+
+function reportTab(btn, key){
+  document.querySelectorAll('#rtab-up,#rtab-dn,#rtab-feature').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  _reportTab = key;
+  ['up','dn','feature'].forEach(k=>{
+    const el=document.getElementById('report-'+k+'-input');
+    if(el) el.style.display = k===key?'block':'none';
+  });
+}
+
+async function saveReportTab(){
+  const key = _reportTab;
+  const val = document.getElementById('report-'+key+'-input').value.trim();
+  if(!val) return;
+  await fetch('/api/post/report_'+key,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
   });
-  const saved=document.getElementById('report-saved');
-  saved.textContent=val;saved.style.display='block';
-  document.getElementById('report-input').value='';
   const badge=document.getElementById('report-badge');
   badge.style.display='inline';
   setTimeout(()=>badge.style.display='none',2000);
 }
 
-async function loadReport(){
-  try{
-    const d=await fetch('/api/post/report').then(r=>r.json());
-    if(d.content){
-      const el=document.getElementById('report-saved');
-      el.textContent=d.content;el.style.display='block';
-    }
-  }catch(e){}
+async function clearReport(){
+  if(!confirm('리포트 전체 초기화할까요?')) return;
+  await fetch('/api/report/clear',{method:'POST'});
+  ['up','dn','feature'].forEach(k=>{
+    const el=document.getElementById('report-'+k+'-input');
+    if(el) el.value='';
+  });
 }
 
-
+async function loadReportTabs(){
+  for(const k of ['up','dn','feature']){
+    try{
+      const d=await fetch('/api/post/report_'+k).then(r=>r.json());
+      if(d.content){
+        const el=document.getElementById('report-'+k+'-input');
+        if(el) el.value=d.content;
+      }
+    }catch(e){}
+  }
+}
 
 async function generateBriefing(){
   const btn=document.getElementById('briefing-btn');
@@ -696,7 +736,7 @@ async function loadAll(){
 // 초기 로드
 loadAll();
 loadFutures();
-loadReport();
+loadReportTabs();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
