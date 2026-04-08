@@ -121,24 +121,26 @@ def get_korean_market():
 
 
 # 코스피 업종 코드 → 이름
-KOSPI_SECTORS = [
-    ("전기전자", "014"), ("화학", "008"), ("의약품", "009"),
-    ("철강금속", "011"), ("금융업", "022"), ("운수장비", "016"),
-    ("건설업", "019"), ("기계", "012"), ("통신업", "021"),
-    ("서비스업", "028"), ("은행", "024"), ("증권", "026"),
+# 코스피 업종 ETF (Yahoo Finance 심볼)
+SECTOR_ETFS = [
+    ("반도체",   "091160.KS"),
+    ("2차전지",  "305720.KS"),
+    ("바이오",   "207920.KS"),
+    ("금융",     "139270.KS"),
+    ("에너지",   "117700.KS"),
+    ("방산",     "471550.KS"),
+    ("조선",     "466920.KS"),
+    ("자동차",   "091180.KS"),
+    ("건설",     "102960.KS"),
+    ("IT",       "148020.KS"),
 ]
 
 def get_sector_data():
     result = []
-    for name, code in KOSPI_SECTORS:
-        d = kis_get("/uapi/domestic-stock/v1/quotations/inquire-index-price",
-                    "FHPUP02100000",
-                    {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": code}).get("output", {})
-        try:
-            chg = float(d.get("bstp_nmix_prdy_ctrt", ""))
-            result.append({"name": name, "change": chg})
-        except:
-            pass
+    for name, symbol in SECTOR_ETFS:
+        q = get_yahoo_quote(symbol)
+        if q["change"] is not None:
+            result.append({"name": name, "change": q["change"]})
     result.sort(key=lambda x: x["change"], reverse=True)
     return {"top5": result[:5], "bot5": list(reversed(result[-5:]))}
 
