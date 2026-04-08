@@ -323,6 +323,10 @@ input.input-line{width:100%;background:#0f0f13;border:1px solid #2a2a38;border-r
 input.input-line:focus{outline:none;border-color:#3d3d8b}
 .input-row{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
 .saved-badge{font-size:11px;color:#6adf6a;margin-left:8px;display:none}
+.tab-bar{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
+.tab{padding:4px 10px;border-radius:6px;border:1px solid #2a2a38;background:#1a1a24;color:#666;font-size:11px;cursor:pointer;transition:all .15s}
+.tab.active{background:#2d2d6b;border-color:#3d3d8b;color:#aaaaff}
+.tab:hover{color:#ccc}
 </style>
 </head>
 <body>
@@ -419,7 +423,18 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
   <!-- 체크포인트 -->
   <div class="section-label">체크포인트</div>
   <div class="content-card">
-    <div class="content-header"><span class="content-title">☑ 오늘 체크포인트</span><span class="content-date" id="checkpoint-date"></span></div>
+    <div class="content-header">
+      <span class="content-title">☑ 오늘 체크포인트</span>
+      <span class="content-date" id="checkpoint-date"></span>
+    </div>
+    <div class="tab-bar" id="cp-tabs">
+      <button class="tab active" onclick="cpTab(this,'all')">전체</button>
+      <button class="tab" onclick="cpTab(this,'indicator')">📌지표</button>
+      <button class="tab" onclick="cpTab(this,'sector')">📌섹터</button>
+      <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
+      <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
+      <button class="tab" onclick="cpTab(this,'after')">📌시간외</button>
+    </div>
     <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
@@ -453,7 +468,19 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:16px;">마감일지</div>
   <div class="content-card">
-    <div class="content-header"><span class="content-title">📋 마감일지</span><span class="content-date" id="closing-date"></span></div>
+    <div class="content-header">
+      <span class="content-title">📋 마감일지</span>
+      <span class="content-date" id="closing-date"></span>
+    </div>
+    <div class="tab-bar" id="cl-tabs">
+      <button class="tab active" onclick="clTab(this,'all')">전체</button>
+      <button class="tab" onclick="clTab(this,'figure')">마감수치</button>
+      <button class="tab" onclick="clTab(this,'factor')">지수팩터</button>
+      <button class="tab" onclick="clTab(this,'supply')">수급</button>
+      <button class="tab" onclick="clTab(this,'sector')">특징업종</button>
+      <button class="tab" onclick="clTab(this,'stock')">특징주</button>
+      <button class="tab" onclick="clTab(this,'schedule')">내일일정</button>
+    </div>
     <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
@@ -542,7 +569,12 @@ async function loadPost(type,bid,did){
     const d=await fetch('/api/post/'+type).then(r=>r.json());
     if(d.content){
       const b=document.getElementById(bid),dt=document.getElementById(did);
-      if(b)b.textContent=d.content;if(dt&&dt)dt.textContent=d.date||'';
+      if(dt)dt.textContent=d.date||'';
+      if(b){
+        b.textContent=d.content;
+        if(type==='checkpoint') _cpRaw=d.content;
+        if(type==='closing') _clRaw=d.content;
+      }
     }
   }catch(e){}
 }
@@ -635,6 +667,64 @@ async function generateBriefing(){
     else body.innerHTML='<span class="content-empty">오류: '+(d.error||'알 수 없는 오류')+'</span>';
   }catch(e){body.innerHTML='<span class="content-empty">네트워크 오류</span>';}
   btn.classList.remove('ls');btn.innerHTML='✦ 브리핑 생성';
+}
+
+// 체크포인트 파싱
+const CP_SECTIONS = {
+  indicator: ['📌지표'],
+  sector: ['📌Sector','📌sector'],
+  kospi: ['📌코스피'],
+  kosdaq: ['📌코스닥'],
+  after: ['📌시간외','📌NXT']
+};
+const CL_SECTIONS = {
+  figure: ['📌 마감수치','📌마감수치'],
+  factor: ['📌 지수 팩터','📌지수 팩터','📌 지수팩터'],
+  supply: ['📌 수급','📌수급'],
+  sector: ['📌 특징 업종','📌특징 업종'],
+  stock: ['📌 특징주','📌특징주'],
+  schedule: ['📌 내일 일정','📌내일 일정']
+};
+
+function parseSection(text, headers){
+  if(!text) return null;
+  const lines = text.split('
+');
+  let capturing = false, result = [];
+  for(let i=0;i<lines.length;i++){
+    const l = lines[i];
+    const isHeader = headers.some(h=>l.includes(h));
+    const isOtherHeader = l.match(/^📌/) && !isHeader;
+    if(isHeader){ capturing=true; result.push(l); continue; }
+    if(capturing){
+      if(isOtherHeader) break;
+      result.push(l);
+    }
+  }
+  return result.length ? result.join('
+') : null;
+}
+
+let _cpRaw = '', _clRaw = '';
+
+function cpTab(btn, key){
+  document.querySelectorAll('#cp-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const el = document.getElementById('checkpoint-body');
+  if(!_cpRaw){ return; }
+  if(key==='all'){ el.textContent=_cpRaw; return; }
+  const sec = parseSection(_cpRaw, CP_SECTIONS[key]||[]);
+  el.textContent = sec || '해당 섹션 없음';
+}
+
+function clTab(btn, key){
+  document.querySelectorAll('#cl-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const el = document.getElementById('closing-body');
+  if(!_clRaw){ return; }
+  if(key==='all'){ el.textContent=_clRaw; return; }
+  const sec = parseSection(_clRaw, CL_SECTIONS[key]||[]);
+  el.textContent = sec || '해당 섹션 없음';
 }
 
 async function loadAll(){
