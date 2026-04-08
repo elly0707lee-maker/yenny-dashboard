@@ -110,23 +110,23 @@ def get_korean_market():
     return result
 
 
-SECTOR_ETFS = [
-    ("반도체", "091160"), ("2차전지", "305720"), ("바이오", "207920"),
-    ("금융", "139270"), ("에너지", "117700"), ("방산", "471550"),
-    ("조선", "466920"), ("자동차", "091180"), ("건설", "102960"),
-    ("IT", "148020"),
+# 코스피 업종 코드 → 이름
+KOSPI_SECTORS = [
+    ("전기전자", "014"), ("화학", "008"), ("의약품", "009"),
+    ("철강금속", "011"), ("금융업", "022"), ("운수장비", "016"),
+    ("건설업", "019"), ("기계", "012"), ("통신업", "021"),
+    ("서비스업", "028"), ("은행", "024"), ("증권", "026"),
 ]
 
-
-def get_sector_etf():
+def get_sector_data():
     result = []
-    for name, code in SECTOR_ETFS:
-        d = kis_get("/uapi/domestic-stock/v1/quotations/inquire-price",
-                    "FHKST01010100",
-                    {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}).get("output", {})
+    for name, code in KOSPI_SECTORS:
+        d = kis_get("/uapi/domestic-stock/v1/quotations/inquire-index-price",
+                    "FHPUP02100000",
+                    {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": code}).get("output", {})
         try:
-            chg_f = float(d.get("prdy_ctrt", ""))
-            result.append({"name": name, "change": chg_f})
+            chg = float(d.get("bstp_nmix_prdy_ctrt", ""))
+            result.append({"name": name, "change": chg})
         except:
             pass
     result.sort(key=lambda x: x["change"], reverse=True)
@@ -136,7 +136,10 @@ def get_sector_etf():
 def get_global_market():
     syms = {
         "nasdaq": "%5EIXIC", "dow": "%5EDJI", "sp500": "%5EGSPC",
-        "wti": "CL%3DF", "usdkrw": "KRW%3DX", "vix": "%5EVIX", "ewy": "EWY"
+        "wti": "CL%3DF", "brent": "BZ%3DF",
+        "usdkrw": "USDKRW%3DX",
+        "vix": "%5EVIX", "ewy": "EWY",
+        "tnx": "%5ETNX", "sox": "%5ESOX"
     }
     return {k: get_yahoo_quote(v) for k, v in syms.items()}
 
@@ -174,22 +177,27 @@ def api_market():
 @app.route("/api/sector")
 @requires_auth
 def api_sector():
-    return jsonify(get_sector_etf())
+    return jsonify(get_sector_data())
 
 
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    if pt not in ("checkpoint", "closing", "briefing"):
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report")
+    if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
 
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    if pt not in ("checkpoint", "closing", "briefing"):
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report")
+    if pt not in valid:
         return jsonify({"error": "invalid"}), 400
-    if request.headers.get("X-API-Secret", "") != API_SECRET:
+    # 대시보드 직접 저장은 인증 필요
+    auth = request.authorization
+    bot_secret = request.headers.get("X-API-Secret", "")
+    if bot_secret != API_SECRET and (not auth or auth.password != DASHBOARD_PASSWORD):
         return jsonify({"error": "unauthorized"}), 401
     body = request.json or {}
     content = body.get("content", "")
@@ -224,6 +232,33 @@ def generate_briefing():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/aftermarket/process", methods=["POST"])
+@requires_auth
+def process_aftermarket():
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY 없음"}), 500
+    body = request.json or {}
+    raw = body.get("content", "")
+    if not raw:
+        return jsonify({"error": "내용 없음"}), 400
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            messages=[{"role": "user", "content":
+                f"아래는 시간외/에프터마켓 특징주 데이터입니다. "
+                f"종목별로 깔끔하게 정리해줘. 종목명, 등락률, 이유 한 줄 형식으로. "
+                f"테마 편승 종목은 제외하고 개별 이슈 있는 종목만 남겨줘.\n\n{raw}"}]
+        )
+        content = msg.content[0].text
+        date = datetime.now().strftime("%Y-%m-%d")
+        save_post("aftermarket", content, date)
+        return jsonify({"content": content, "date": date})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 def get_html():
     return r"""<!DOCTYPE html>
 <html lang="ko">
@@ -241,18 +276,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-ser
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-@media(max-width:640px){.grid3{grid-template-columns:1fr 1fr}.grid4{grid-template-columns:1fr 1fr}}
+.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+@media(max-width:640px){.grid3{grid-template-columns:1fr 1fr}.grid4{grid-template-columns:1fr 1fr}.grid5{grid-template-columns:1fr 1fr}}
 .card{background:#17171f;border:1px solid #1e1e28;border-radius:12px;padding:14px}
 .metric-label{font-size:11px;color:#555;margin-bottom:6px}
 .metric-val{font-size:20px;font-weight:600;color:#f0f0f4;letter-spacing:-.5px}
 .metric-chg{font-size:12px;margin-top:4px}
 .metric-sup{font-size:11px;color:#666;margin-top:6px;display:flex;gap:10px}
-.up{color:#e84c4c}
-.dn{color:#4c7ee8}
-.flat{color:#888}
+.up{color:#e84c4c}.dn{color:#4c7ee8}.flat{color:#888}
 .loading{color:#444}
 .content-card{background:#17171f;border:1px solid #1e1e28;border-radius:12px;padding:16px;margin-bottom:10px}
-.content-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.content-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
 .content-title{font-size:13px;font-weight:600;color:#ccc}
 .content-date{font-size:11px;color:#555}
 .content-body{font-size:13px;color:#999;line-height:1.7;white-space:pre-wrap;max-height:260px;overflow-y:auto}
@@ -261,15 +295,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-ser
 .btn:hover{background:#252535;color:#fff}
 .btn-primary{background:#2d2d6b;border-color:#3d3d8b;color:#aaaaff}
 .btn-primary:hover{background:#35358a;color:#ccccff}
+.btn-green{background:#1a3a1a;border-color:#2a5a2a;color:#6adf6a}
+.btn-green:hover{background:#1f4a1f;color:#8aef8a}
 .btn.ls{opacity:.5;pointer-events:none}
 .refresh-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .spinner{display:inline-block;width:13px;height:13px;border:2px solid #333;border-top-color:#aaaaff;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.etf-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e1e28;font-size:12px}
+.etf-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e1e28;font-size:12px}
 .etf-row:last-child{border-bottom:none}
 .etf-name{color:#aaa}
 .etf-chg{font-weight:600}
+textarea.input-area{width:100%;background:#0f0f13;border:1px solid #2a2a38;border-radius:8px;color:#ccc;font-size:13px;padding:10px 12px;resize:vertical;min-height:80px;font-family:inherit;line-height:1.6}
+textarea.input-area:focus{outline:none;border-color:#3d3d8b}
+input.input-line{width:100%;background:#0f0f13;border:1px solid #2a2a38;border-radius:8px;color:#ccc;font-size:14px;padding:10px 12px;font-family:inherit}
+input.input-line:focus{outline:none;border-color:#3d3d8b}
+.input-row{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
+.saved-badge{font-size:11px;color:#6adf6a;margin-left:8px;display:none}
 </style>
 </head>
 <body>
@@ -280,8 +322,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-ser
     <span id="clock" style="font-size:12px;color:#666;"></span>
   </div>
 </div>
+
 <div class="container">
 
+  <!-- 국내 시장 -->
   <div class="section-label">국내 시장</div>
   <div class="grid3">
     <div class="card">
@@ -303,6 +347,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-ser
     </div>
   </div>
 
+  <!-- 야간선물 입력 -->
+  <div class="content-card" style="margin-top:8px;">
+    <div class="content-header">
+      <span class="content-title">🌙 야간선물</span>
+      <span class="saved-badge" id="futures-badge">✓ 저장됨</span>
+    </div>
+    <div id="futures-display" style="font-size:20px;font-weight:600;color:#f0f0f4;margin-bottom:10px;" id="futures-val">—</div>
+    <div class="input-row">
+      <input class="input-line" id="futures-input" placeholder="예) 345.2 (+0.3pt)" style="flex:1;" />
+      <button class="btn btn-green" onclick="saveFutures()">저장</button>
+    </div>
+  </div>
+
+  <!-- 미국·글로벌 -->
   <div class="section-label">미국·글로벌</div>
   <div class="grid4">
     <div class="card"><div class="metric-label">나스닥</div><div class="metric-val" id="nasdaq-val"><span class="loading">—</span></div><div class="metric-chg" id="nasdaq-chg"></div></div>
@@ -310,26 +368,33 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-ser
     <div class="card"><div class="metric-label">S&amp;P 500</div><div class="metric-val" id="sp500-val"><span class="loading">—</span></div><div class="metric-chg" id="sp500-chg"></div></div>
     <div class="card"><div class="metric-label">EWY</div><div class="metric-val" id="ewy-val"><span class="loading">—</span></div><div class="metric-chg" id="ewy-chg"></div></div>
   </div>
-  <div class="grid2" style="margin-top:8px;">
+  <div class="grid4" style="margin-top:8px;">
     <div class="card"><div class="metric-label">WTI 유가</div><div class="metric-val" id="wti-val"><span class="loading">—</span></div><div class="metric-chg" id="wti-chg"></div></div>
+    <div class="card"><div class="metric-label">브렌트유</div><div class="metric-val" id="brent-val"><span class="loading">—</span></div><div class="metric-chg" id="brent-chg"></div></div>
     <div class="card"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
+    <div class="card"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
   </div>
-  <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-    <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
+  <div class="grid2" style="margin-top:8px;">
+    <div class="card"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
+    <div class="card" style="display:flex;align-items:center;justify-content:center;">
+      <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
+    </div>
   </div>
 
-  <div class="section-label">섹터 ETF 등락률</div>
+  <!-- 업종 등락률 -->
+  <div class="section-label">업종 등락률 (코스피)</div>
   <div class="grid2">
     <div class="content-card">
       <div class="content-header"><span class="content-title">📈 상위 5</span></div>
-      <div id="etf-top"><span class="content-empty">로딩 중...</span></div>
+      <div id="sector-top"><span class="content-empty">로딩 중...</span></div>
     </div>
     <div class="content-card">
       <div class="content-header"><span class="content-title">📉 하위 5</span></div>
-      <div id="etf-bot"><span class="content-empty">로딩 중...</span></div>
+      <div id="sector-bot"><span class="content-empty">로딩 중...</span></div>
     </div>
   </div>
 
+  <!-- 미증시 브리핑 -->
   <div class="section-label">미증시 브리핑</div>
   <div class="content-card">
     <div class="content-header">
@@ -340,12 +405,42 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-ser
     <div class="content-body" id="briefing-body"><span class="content-empty">버튼을 누르면 Claude가 CNBC·Bloomberg·WSJ를 참조해서 브리핑을 생성합니다.</span></div>
   </div>
 
+  <!-- 시간외/에프터마켓 특징주 -->
+  <div class="section-label">시간외 / 에프터마켓 특징주</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">🕐 시간외 특징주</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="saved-badge" id="aftermarket-badge">✓ 저장됨</span>
+        <button class="btn btn-primary" onclick="processAftermarket()" id="aftermarket-btn">✦ 가공하기</button>
+      </div>
+    </div>
+    <textarea class="input-area" id="aftermarket-input" placeholder="여기에 시간외/에프터마켓 특징주 내용을 붙여넣으세요..."></textarea>
+    <div id="aftermarket-result" style="margin-top:12px;"></div>
+  </div>
+
+  <!-- 특징 리포트 -->
+  <div class="section-label">특징 리포트</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📝 특징 리포트</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="saved-badge" id="report-badge">✓ 저장됨</span>
+        <button class="btn btn-green" onclick="saveReport()">저장</button>
+      </div>
+    </div>
+    <textarea class="input-area" id="report-input" placeholder="리포트 내용을 직접 입력하세요..." style="min-height:120px;"></textarea>
+    <div id="report-saved" class="content-body" style="margin-top:12px;display:none;"></div>
+  </div>
+
+  <!-- 체크포인트 -->
   <div class="section-label">체크포인트</div>
   <div class="content-card">
     <div class="content-header"><span class="content-title">☑ 오늘 체크포인트</span><span class="content-date" id="checkpoint-date"></span></div>
     <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
+  <!-- 마감일지 -->
   <div class="section-label">마감일지</div>
   <div class="content-card">
     <div class="content-header"><span class="content-title">📋 마감일지</span><span class="content-date" id="closing-date"></span></div>
@@ -397,7 +492,17 @@ async function loadMarket(){
     renderM('sp500-val','sp500-chg',d.sp500?.value,d.sp500?.change);
     renderM('ewy-val','ewy-chg',d.ewy?.value,d.ewy?.change);
     renderM('wti-val','wti-chg',d.wti?.value,d.wti?.change);
+    renderM('brent-val','brent-chg',d.brent?.value,d.brent?.change);
     renderM('vix-val','vix-chg',d.vix?.value,d.vix?.change);
+    renderM('sox-val','sox-chg',d.sox?.value,d.sox?.change);
+    // 10년물은 소수점 2자리
+    const tnxEl=document.getElementById('tnx-val');
+    const tnxChgEl=document.getElementById('tnx-chg');
+    if(tnxEl&&d.tnx?.value!==null){
+      tnxEl.textContent=fmt(d.tnx?.value)+'%';
+      if(tnxChgEl&&d.tnx?.change!==null)
+        tnxChgEl.innerHTML='<span class="'+cls(d.tnx.change)+'">'+sgn(d.tnx.change)+fmt(d.tnx.change)+'%p</span>';
+    }
     renderM('usdkrw-val','usdkrw-chg',d.usdkrw?.value,d.usdkrw?.change);
     ['kospi','kosdaq'].forEach(m=>{
       const el=document.getElementById(m+'-sup');if(!el)return;
@@ -418,7 +523,7 @@ async function loadSector(){
       el.innerHTML=arr.map(e=>'<div class="etf-row"><span class="etf-name">'+e.name+'</span>'+
         '<span class="etf-chg '+cls(e.change)+'">'+sgn(e.change)+fmt(e.change)+'%</span></div>').join('');
     };
-    render('etf-top',d.top5);render('etf-bot',d.bot5);
+    render('sector-top',d.top5);render('sector-bot',d.bot5);
   }catch(e){}
 }
 
@@ -427,16 +532,92 @@ async function loadPost(type,bid,did){
     const d=await fetch('/api/post/'+type).then(r=>r.json());
     if(d.content){
       const b=document.getElementById(bid),dt=document.getElementById(did);
-      if(b)b.textContent=d.content;if(dt)dt.textContent=d.date||'';
+      if(b)b.textContent=d.content;if(dt&&dt)dt.textContent=d.date||'';
     }
   }catch(e){}
+}
+
+async function loadFutures(){
+  try{
+    const d=await fetch('/api/post/futures').then(r=>r.json());
+    if(d.content){
+      const el=document.getElementById('futures-display');
+      if(el)el.textContent=d.content;
+      const inp=document.getElementById('futures-input');
+      if(inp)inp.value=d.content;
+    }
+  }catch(e){}
+}
+
+async function saveFutures(){
+  const val=document.getElementById('futures-input').value.trim();
+  if(!val)return;
+  await fetch('/api/post/futures',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
+  });
+  document.getElementById('futures-display').textContent=val;
+  const badge=document.getElementById('futures-badge');
+  badge.style.display='inline';
+  setTimeout(()=>badge.style.display='none',2000);
+}
+
+async function saveReport(){
+  const val=document.getElementById('report-input').value.trim();
+  if(!val)return;
+  await fetch('/api/post/report',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
+  });
+  const saved=document.getElementById('report-saved');
+  saved.textContent=val;saved.style.display='block';
+  document.getElementById('report-input').value='';
+  const badge=document.getElementById('report-badge');
+  badge.style.display='inline';
+  setTimeout(()=>badge.style.display='none',2000);
+}
+
+async function loadReport(){
+  try{
+    const d=await fetch('/api/post/report').then(r=>r.json());
+    if(d.content){
+      const el=document.getElementById('report-saved');
+      el.textContent=d.content;el.style.display='block';
+    }
+  }catch(e){}
+}
+
+async function processAftermarket(){
+  const raw=document.getElementById('aftermarket-input').value.trim();
+  if(!raw)return;
+  const btn=document.getElementById('aftermarket-btn');
+  const result=document.getElementById('aftermarket-result');
+  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span> 가공 중...';
+  result.innerHTML='<span class="content-empty">Claude가 정리 중입니다...</span>';
+  try{
+    const d=await fetch('/api/aftermarket/process',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content:raw})
+    }).then(r=>r.json());
+    if(d.content){
+      result.innerHTML='<div class="content-body" style="display:block;">'+d.content.replace(/\n/g,'<br>')+'</div>';
+      const badge=document.getElementById('aftermarket-badge');
+      badge.style.display='inline';
+      setTimeout(()=>badge.style.display='none',2000);
+    }else{
+      result.innerHTML='<span class="content-empty">오류: '+(d.error||'알 수 없는 오류')+'</span>';
+    }
+  }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
+  btn.classList.remove('ls');btn.innerHTML='✦ 가공하기';
 }
 
 async function generateBriefing(){
   const btn=document.getElementById('briefing-btn');
   const body=document.getElementById('briefing-body');
-  btn.classList.add('ls');
-  btn.innerHTML='<span class="spinner"></span> 생성 중...';
+  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span> 생성 중...';
   body.innerHTML='<span class="content-empty">Claude가 CNBC·Bloomberg·WSJ를 검색 중입니다...</span>';
   try{
     const d=await fetch('/api/briefing/generate',{method:'POST'}).then(r=>r.json());
@@ -453,7 +634,10 @@ async function loadAll(){
   if(btn)btn.innerHTML='<span>↻</span> 새로고침';
 }
 
+// 초기 로드
 loadAll();
+loadFutures();
+loadReport();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
