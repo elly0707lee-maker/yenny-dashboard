@@ -261,6 +261,13 @@ def generate_briefing():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/aftermarket/clear", methods=["POST"])
+@requires_auth
+def clear_aftermarket():
+    save_post("aftermarket", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/aftermarket/process", methods=["POST"])
 @requires_auth
 def process_aftermarket():
@@ -465,6 +472,7 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
         <div style="display:flex;gap:6px;align-items:center;">
           <span class="saved-badge" id="aftermarket-badge">✓ 저장됨</span>
           <button class="btn btn-primary" onclick="processAftermarket()" id="aftermarket-btn">✦ 가공</button>
+          <button class="btn" onclick="clearAftermarket()" style="color:#f87171;border-color:#3a1a1a;">↺ 초기화</button>
         </div>
       </div>
       <textarea class="input-area" id="aftermarket-input" placeholder="시간외/에프터마켓 특징주 붙여넣기..." style="min-height:120px;"></textarea>
@@ -674,6 +682,13 @@ async function processAftermarket(){
   btn.classList.remove('ls');btn.innerHTML='✦ 가공하기';
 }
 
+async function clearAftermarket(){
+  if(!confirm('시간외 특징주 초기화할까요?')) return;
+  await fetch('/api/aftermarket/clear',{method:'POST'});
+  document.getElementById('aftermarket-input').value='';
+  document.getElementById('aftermarket-result').innerHTML='';
+}
+
 async function generateBriefing(){
   const btn=document.getElementById('briefing-btn');
   const body=document.getElementById('briefing-body');
@@ -757,6 +772,7 @@ loadReport();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
+loadPost('aftermarket','aftermarket-result','');
 setInterval(loadAll,5*60*1000);
 </script>
 </body>
