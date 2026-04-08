@@ -261,38 +261,7 @@ def generate_briefing():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/aftermarket/clear", methods=["POST"])
-@requires_auth
-def clear_aftermarket():
-    save_post("aftermarket", "", datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
 
-
-@app.route("/api/aftermarket/process", methods=["POST"])
-@requires_auth
-def process_aftermarket():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY 없음"}), 500
-    body = request.json or {}
-    raw = body.get("content", "")
-    if not raw:
-        return jsonify({"error": "내용 없음"}), 400
-    try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1500,
-            messages=[{"role": "user", "content":
-                f"아래는 시간외/에프터마켓 특징주 데이터입니다. "
-                f"종목별로 깔끔하게 정리해줘. 종목명, 등락률, 이유 한 줄 형식으로. "
-                f"테마 편승 종목은 제외하고 개별 이슈 있는 종목만 남겨줘.\n\n{raw}"}]
-        )
-        content = msg.content[0].text
-        date = datetime.now().strftime("%Y-%m-%d")
-        save_post("aftermarket", content, date)
-        return jsonify({"content": content, "date": date})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 def get_html():
@@ -464,20 +433,9 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
   </div>
 
   <!-- 시간외특징주 + 특징리포트 2분할 -->
-  <div class="section-label">시간외 특징주 / 특징 리포트</div>
+  <div class="section-label">특징 리포트</div>
   <div class="grid2">
-    <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">🕐 시간외 특징주</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span class="saved-badge" id="aftermarket-badge">✓ 저장됨</span>
-          <button class="btn btn-primary" onclick="processAftermarket()" id="aftermarket-btn">✦ 가공</button>
-          <button class="btn" onclick="clearAftermarket()" style="color:#f87171;border-color:#3a1a1a;">↺ 초기화</button>
-        </div>
-      </div>
-      <textarea class="input-area" id="aftermarket-input" placeholder="시간외/에프터마켓 특징주 붙여넣기..." style="min-height:120px;"></textarea>
-      <div id="aftermarket-result" style="margin-top:10px;"></div>
-    </div>
+
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">📝 특징 리포트</span>
@@ -657,37 +615,7 @@ async function loadReport(){
   }catch(e){}
 }
 
-async function processAftermarket(){
-  const raw=document.getElementById('aftermarket-input').value.trim();
-  if(!raw)return;
-  const btn=document.getElementById('aftermarket-btn');
-  const result=document.getElementById('aftermarket-result');
-  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span> 가공 중...';
-  result.innerHTML='<span class="content-empty">Claude가 정리 중입니다...</span>';
-  try{
-    const d=await fetch('/api/aftermarket/process',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({content:raw})
-    }).then(r=>r.json());
-    if(d.content){
-      result.innerHTML='<div class="content-body" style="display:block;">'+d.content.replace(/\n/g,'<br>')+'</div>';
-      const badge=document.getElementById('aftermarket-badge');
-      badge.style.display='inline';
-      setTimeout(()=>badge.style.display='none',2000);
-    }else{
-      result.innerHTML='<span class="content-empty">오류: '+(d.error||'알 수 없는 오류')+'</span>';
-    }
-  }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
-  btn.classList.remove('ls');btn.innerHTML='✦ 가공하기';
-}
 
-async function clearAftermarket(){
-  if(!confirm('시간외 특징주 초기화할까요?')) return;
-  await fetch('/api/aftermarket/clear',{method:'POST'});
-  document.getElementById('aftermarket-input').value='';
-  document.getElementById('aftermarket-result').innerHTML='';
-}
 
 async function generateBriefing(){
   const btn=document.getElementById('briefing-btn');
@@ -772,7 +700,6 @@ loadReport();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
-loadPost('aftermarket','aftermarket-result','');
 setInterval(loadAll,5*60*1000);
 </script>
 </body>
