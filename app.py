@@ -718,8 +718,7 @@ function parseSection(text, headers){
       result.push(l);
     }
   }
-  return result.length ? result.join('
-') : null;
+  return result.length ? result.join('\n') : null;
 }
 
 let _cpRaw = '', _clRaw = '';
