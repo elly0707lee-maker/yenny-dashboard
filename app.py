@@ -1,5 +1,4 @@
 from flask import Flask, jsonify, request, Response
-import yfinance as yf
 import requests
 import sqlite3
 import os
@@ -114,27 +113,33 @@ def get_korean_market():
     return result
 
 
-# ── 해외 지수 / 원자재 (yfinance) ─────────────────────────
+# ── 해외 지수 / 원자재 (Yahoo Finance 직접 호출) ──────────
+def get_yahoo_quote(symbol):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=8)
+        data = r.json()
+        meta = data["chart"]["result"][0]["meta"]
+        price = round(meta.get("regularMarketPrice", 0), 2)
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose", price)
+        chg = round((price - prev) / prev * 100, 2) if prev else 0
+        return {"value": price, "change": chg}
+    except:
+        return {"value": None, "change": None}
+
 def get_global_market():
     tickers = {
-        "nasdaq": "^IXIC",
-        "dow": "^DJI",
-        "sp500": "^GSPC",
-        "wti": "CL=F",
-        "usdkrw": "KRW=X",
-        "vix": "^VIX"
+        "nasdaq": "%5EIXIC",
+        "dow": "%5EDJI",
+        "sp500": "%5EGSPC",
+        "wti": "CL%3DF",
+        "usdkrw": "KRW%3DX",
+        "vix": "%5EVIX"
     }
     result = {}
     for key, symbol in tickers.items():
-        try:
-            t = yf.Ticker(symbol)
-            info = t.fast_info
-            price = round(info.last_price, 2)
-            prev = info.previous_close
-            chg = round((price - prev) / prev * 100, 2) if prev else 0
-            result[key] = {"value": price, "change": chg}
-        except:
-            result[key] = {"value": None, "change": None}
+        result[key] = get_yahoo_quote(symbol)
     return result
 
 
@@ -392,12 +397,13 @@ def generate_briefing():
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{
                 "role": "user",
-                "content": f"현지시각 {today} 미국 증시 브리핑 해줘. CNBC, Bloomberg, WSJ 참조해서 ① 시장 주도 재료 ② 글로벌 주요 뉴스 ③ 특징주 순서로 정리해줘."
+                "content": f"현지시각 {today} 미국 증시 브리핑 해줘. CNBC, Bloomberg, WSJ 반드시 웹서치해서 시장 주도 재료와 지수 수치, 주요 뉴스, 특징주를 한국어로 정리해줘."
             }]
         )
-        content = msg.content[0].text
+        content = " ".join([b.text for b in msg.content if hasattr(b, "text") and b.text])
         date = datetime.now().strftime("%Y-%m-%d")
         save_post("briefing", content, date)
         return jsonify({"content": content, "date": date})
