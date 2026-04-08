@@ -706,8 +706,7 @@ const CL_SECTIONS = {
 
 function parseSection(text, headers){
   if(!text) return null;
-  const lines = text.split('
-');
+  const lines = text.split('\n');
   let capturing = false, result = [];
   for(let i=0;i<lines.length;i++){
     const l = lines[i];
