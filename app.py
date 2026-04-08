@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from functools import wraps
 import anthropic
-import psycopg2
+import pg8000.native
 
 app = Flask(__name__)
 
@@ -19,15 +19,22 @@ _kis_token_cache = {"token": ""}
 
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    import urllib.parse as _up
+    r = _up.urlparse(DATABASE_URL)
+    return pg8000.native.Connection(
+        host=r.hostname, port=r.port or 5432,
+        database=r.path.lstrip('/'),
+        user=r.username, password=r.password,
+        ssl_context=True
+    )
 
 def init_db():
     conn = get_db()
-    conn.cursor().execute("""CREATE TABLE IF NOT EXISTS posts (
+    conn.run("""CREATE TABLE IF NOT EXISTS posts (
         id SERIAL PRIMARY KEY,
         type TEXT NOT NULL, content TEXT NOT NULL,
         date TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    conn.commit(); conn.close()
+    conn.close()
 
 init_db()
 
@@ -149,19 +156,17 @@ def get_global_market():
 
 def save_post(t, content, date):
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO posts (type,content,date,created_at) VALUES (%s,%s,%s,%s)",
-        (t, content, date, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit(); conn.close()
+    conn.run(
+        "INSERT INTO posts (type,content,date,created_at) VALUES (:t,:c,:d,:ca)",
+        t=t, c=content, d=date, ca=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    conn.close()
 
 
 def get_latest_post(t):
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT content,date FROM posts WHERE type=%s ORDER BY id DESC LIMIT 1", (t,))
-    row = cur.fetchone(); conn.close()
-    return {"content": row[0], "date": row[1]} if row else None
+    rows = conn.run("SELECT content,date FROM posts WHERE type=:t ORDER BY id DESC LIMIT 1", t=t)
+    conn.close()
+    return {"content": rows[0][0], "date": rows[0][1]} if rows else None
 
 
 @app.route("/")
