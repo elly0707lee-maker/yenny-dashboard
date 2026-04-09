@@ -148,6 +148,7 @@ def get_korean_market():
         if sup and isinstance(sup, list):
             result[mkt]["foreign"] = sup[0].get("frgn_ntby_qty", None)
             result[mkt]["institution"] = sup[0].get("orgn_ntby_qty", None)
+            result[mkt]["individual"] = sup[0].get("indv_ntby_qty", None)
     return result
 
 
@@ -182,7 +183,8 @@ def get_global_market():
         "wti": "CL%3DF", "brent": "BZ%3DF",
         "usdkrw": "USDKRW%3DX",
         "vix": "%5EVIX", "ewy": "EWY",
-        "tnx": "%5ETNX", "sox": "%5ESOX"
+        "tnx": "%5ETNX", "sox": "%5ESOX",
+        "dxy": "DX-Y.NYB", "gold": "GC%3DF", "dram": "SOXX"
     }
     return {k: get_yahoo_quote(v) for k, v in syms.items()}
 
@@ -225,7 +227,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -233,7 +235,7 @@ def api_get_post(pt):
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -363,10 +365,22 @@ def kstock_search():
         if not stock_hits and not theme_hits:
             lines.append(f"❓ '{query}' — 등록된 종목/테마가 없어요.")
 
-        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits)})
+        # Get first stock code for chart
+        first_code = None
+        if stock_hits:
+            from collections import OrderedDict
+            first_code = stock_hits[0].get("종목코드", "").strip() or None
+        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits), "code": first_code})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/todo/clear", methods=["POST"])
+@requires_auth
+def clear_todo():
+    save_post("todo", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
 
 
 @app.route("/api/note/clear", methods=["POST"])
@@ -508,16 +522,29 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- 야간선물 입력 -->
-  <div class="content-card" style="margin-top:8px;">
-    <div class="content-header">
-      <span class="content-title">🌙 야간선물</span>
-      <span class="saved-badge" id="futures-badge">✓ 저장됨</span>
+  <!-- 야간선물 + 오늘의 할일 -->
+  <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:8px;">
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">🌙 야간선물</span>
+        <span class="saved-badge" id="futures-badge">✓ 저장됨</span>
+      </div>
+      <div id="futures-display" class="futures-val">—</div>
+      <div class="input-row">
+        <input class="input-line" id="futures-input" placeholder="예) +1.2%" style="flex:1;" />
+        <button class="btn btn-green" onclick="saveFutures()">저장</button>
+      </div>
     </div>
-    <div id="futures-display" class="futures-val">—</div>
-    <div class="input-row">
-      <input class="input-line" id="futures-input" placeholder="예) 345.2 (+0.3pt)" style="flex:1;" />
-      <button class="btn btn-green" onclick="saveFutures()">저장</button>
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">✅ 오늘의 할일</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="saved-badge" id="todo-badge">✓ 저장됨</span>
+          <button class="btn btn-green" onclick="saveTodo()">저장</button>
+          <button class="btn" onclick="clearTodo()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+        </div>
+      </div>
+      <textarea class="input-area" id="todo-input" placeholder="오늘 할일, 리마인더, 메모..." style="min-height:90px;"></textarea>
     </div>
   </div>
 
@@ -532,14 +559,18 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <div class="grid4" style="margin-top:8px;">
     <div class="card"><div class="metric-label">WTI 유가</div><div class="metric-val" id="wti-val"><span class="loading">—</span></div><div class="metric-chg" id="wti-chg"></div></div>
     <div class="card"><div class="metric-label">브렌트유</div><div class="metric-val" id="brent-val"><span class="loading">—</span></div><div class="metric-chg" id="brent-chg"></div></div>
+    <div class="card"><div class="metric-label">금</div><div class="metric-val" id="gold-val"><span class="loading">—</span></div><div class="metric-chg" id="gold-chg"></div></div>
     <div class="card"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
-    <div class="card"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
   </div>
-  <div class="grid2" style="margin-top:8px;">
+  <div class="grid4" style="margin-top:8px;">
     <div class="card"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
-    <div class="card" style="display:flex;align-items:center;justify-content:center;">
-      <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
-    </div>
+    <div class="card"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
+    <div class="card"><div class="metric-label">달러인덱스 (DXY)</div><div class="metric-val" id="dxy-val"><span class="loading">—</span></div><div class="metric-chg" id="dxy-chg"></div></div>
+    <div class="card"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;align-items:center;">
+    <a href="https://www.cnbc.com/watchlist/" target="_blank" class="btn">📺 CNBC Watchlist</a>
+    <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
   </div>
 
   <!-- 업종 등락률 -->
@@ -577,7 +608,12 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <input class="input-line" id="kstock-input" placeholder="예) 삼성전자 / 방산 / 2차전지" style="flex:1;" onkeydown="if(event.key==='Enter')searchKstock()"/>
       <button class="btn btn-primary" onclick="searchKstock()" id="kstock-btn">검색</button>
     </div>
-    <div id="kstock-result" style="margin-top:14px;"></div>
+    <div class="grid2" style="margin-top:14px;">
+      <div id="kstock-result"></div>
+      <div id="kstock-chart" style="display:none;">
+        <iframe id="kstock-chart-frame" src="" style="width:100%;height:400px;border:none;border-radius:10px;"></iframe>
+      </div>
+    </div>
   </div>
 
   <!-- 체크포인트 -->
@@ -602,7 +638,15 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <div class="section-label">노트 / 특징 리포트</div>
   <div class="grid2" style="margin-bottom:10px;">
     <div class="content-card" style="margin-bottom:0;">
-
+      <div class="content-header">
+        <span class="content-title">📓 오늘의 노트</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span class="saved-badge" id="note-badge">✓ 저장됨</span>
+          <button class="btn btn-green" onclick="saveNote()">저장</button>
+          <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+        </div>
+      </div>
+      <textarea class="input-area" id="note-input" placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:140px;"></textarea>
     </div>
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
@@ -701,11 +745,16 @@ async function loadMarket(){
         tnxChgEl.innerHTML='<span class="'+cls(d.tnx.change)+'">'+sgn(d.tnx.change)+fmt(d.tnx.change)+'%p</span>';
     }
     renderM('usdkrw-val','usdkrw-chg',d.usdkrw?.value,d.usdkrw?.change);
+    renderM('gold-val','gold-chg',d.gold?.value,d.gold?.change);
+    renderM('dxy-val','dxy-chg',d.dxy?.value,d.dxy?.change);
+    renderM('dram-val','dram-chg',d.dram?.value,d.dram?.change);
     ['kospi','kosdaq'].forEach(m=>{
       const el=document.getElementById(m+'-sup');if(!el)return;
       const fv=d[m]?.foreign,iv=d[m]?.institution;
       const fvn=parseInt(fv),ivn=parseInt(iv);
-      el.innerHTML='<span>외인 <b class="'+(fvn>0?'up':fvn<0?'dn':'flat')+'">'+fmtSup(fv)+'</b></span>'+
+      const indv=d[m]?.individual,indvn=parseInt(indv);
+      el.innerHTML='<span>개인 <b class="'+(indvn>0?'up':indvn<0?'dn':'flat')+'">'+fmtSup(indv)+'</b></span>'+
+                   '<span>외인 <b class="'+(fvn>0?'up':fvn<0?'dn':'flat')+'">'+fmtSup(fv)+'</b></span>'+
                    '<span>기관 <b class="'+(ivn>0?'up':ivn<0?'dn':'flat')+'">'+fmtSup(iv)+'</b></span>';
     });
   }catch(e){console.error(e);}
@@ -836,6 +885,25 @@ async function searchKstock(){
   btn.classList.remove('ls');btn.innerHTML='검색';
 }
 
+async function saveTodo(){
+  const val=document.getElementById('todo-input').value.trim();
+  if(!val)return;
+  await fetch('/api/post/todo',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
+  const badge=document.getElementById('todo-badge');
+  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+}
+async function clearTodo(){
+  if(!confirm('할일 초기화할까요?'))return;
+  await fetch('/api/todo/clear',{method:'POST'});
+  document.getElementById('todo-input').value='';
+}
+async function loadTodo(){
+  try{
+    const d=await fetch('/api/post/todo').then(r=>r.json());
+    if(d.content) document.getElementById('todo-input').value=d.content;
+  }catch(e){}
+}
 async function saveNote(){
   const val=document.getElementById('note-input').value.trim();
   if(!val)return;
@@ -939,6 +1007,7 @@ loadAll();
 loadFutures();
 loadReportTabs();
 loadNote();
+loadTodo();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
