@@ -329,18 +329,34 @@ def kstock_search():
 
         if NAVER_ID and (stock_hits or theme_hits):
             try:
-                nr = requests.get(
+                import re as _re
+                def clean(t): return _re.sub(r"<[^>]+>","",t)
+                nr_date = requests.get(
                     "https://openapi.naver.com/v1/search/news.json",
                     headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
                     params={"query": query, "display": 3, "sort": "date"}, timeout=8)
-                news = nr.json().get("items", [])
-                if news:
-                    import re as _re
+                news_date = nr_date.json().get("items", [])
+                nr_sim = requests.get(
+                    "https://openapi.naver.com/v1/search/news.json",
+                    headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
+                    params={"query": query, "display": 5, "sort": "sim"}, timeout=8)
+                news_sim = nr_sim.json().get("items", [])
+                date_links = {item["link"] for item in news_date}
+                news_sim_unique = [n for n in news_sim if n["link"] not in date_links][:2]
+                if news_date or news_sim_unique:
                     lines.append(f"📰 뉴스 ({query})")
-                    for i, item in enumerate(news, 1):
-                        title = _re.sub(r"<[^>]+>", "", item["title"])
-                        lines.append(f"{i}. {title}")
-                        lines.append(f"   🔗 {item['link']}")
+                    lines.append("")
+                    if news_date:
+                        lines.append("🕐 최신순")
+                        for i, item in enumerate(news_date, 1):
+                            lines.append(f"{i}. {clean(item['title'])}")
+                            lines.append(f"   🔗 {item['link']}")
+                    if news_sim_unique:
+                        lines.append("")
+                        lines.append("🎯 관련도순")
+                        for i, item in enumerate(news_sim_unique, 1):
+                            lines.append(f"{i}. {clean(item['title'])}")
+                            lines.append(f"   🔗 {item['link']}")
             except:
                 pass
 
@@ -550,6 +566,20 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div class="content-body" id="briefing-body"><span class="content-empty">버튼을 누르면 Claude가 CNBC·Bloomberg·WSJ를 참조해서 브리핑을 생성합니다.</span></div>
   </div>
 
+  <!-- K-Stock 검색 -->
+  <div class="section-label">종목 · 테마 검색</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">🔍 K-Stock 검색</span>
+      <span style="font-size:11px;color:#b2bec3;">종목명 또는 테마명 입력</span>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="kstock-input" placeholder="예) 삼성전자 / 방산 / 2차전지" style="flex:1;" onkeydown="if(event.key==='Enter')searchKstock()"/>
+      <button class="btn btn-primary" onclick="searchKstock()" id="kstock-btn">검색</button>
+    </div>
+    <div id="kstock-result" style="margin-top:14px;"></div>
+  </div>
+
   <!-- 체크포인트 -->
   <div class="section-label">체크포인트</div>
   <div class="content-card">
@@ -568,37 +598,12 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
-  <!-- K-Stock 검색 -->
-  <div class="section-label">종목 · 테마 검색</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">🔍 K-Stock 검색</span>
-      <span style="font-size:11px;color:#b2bec3;">종목명 또는 테마명 입력</span>
-    </div>
-    <div class="input-row">
-      <input class="input-line" id="kstock-input" placeholder="예) 삼성전자 / 방산 / 2차전지" style="flex:1;" onkeydown="if(event.key==='Enter')searchKstock()"/>
-      <button class="btn btn-primary" onclick="searchKstock()" id="kstock-btn">검색</button>
-    </div>
-    <div id="kstock-result" style="margin-top:14px;"></div>
-  </div>
+  <!-- 노트 + 리포트 -->
+  <div class="section-label">노트 / 특징 리포트</div>
+  <div class="grid2" style="margin-bottom:10px;">
+    <div class="content-card" style="margin-bottom:0;">
 
-  <!-- 노트 -->
-  <div class="section-label">노트</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📓 오늘의 노트</span>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <span class="saved-badge" id="note-badge">✓ 저장됨</span>
-        <button class="btn btn-green" onclick="saveNote()">저장</button>
-        <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-      </div>
     </div>
-    <textarea class="input-area" id="note-input" placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:140px;"></textarea>
-  </div>
-
-  <!-- 시간외특징주 + 특징리포트 2분할 -->
-  <div class="section-label">특징 리포트</div>
-  <div>
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">📝 특징 리포트</span>
@@ -619,6 +624,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
+  </div>
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:16px;">마감일지</div>
   <div class="content-card">
@@ -824,7 +830,7 @@ async function searchKstock(){
     if(d.error){
       result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
     }else{
-      result.innerHTML='<div class="content-body" style="max-height:400px;">'+d.result.replace(/\n/g,'<br>').replace(/🔗 (https?:\/\/[^\s<]+)/g,'🔗 <a href="$1" target="_blank" style="color:#0984e3;">링크</a>')+'</div>';
+      result.innerHTML='<div class="content-body" style="max-height:400px;">'+d.result.replace(/\n/g,'<br>').replace(/🔗 (https?:\/\/[^\s<]+)/g,'🔗 <a href="$1" target="_blank" style="color:#0984e3;word-break:break-all;">$1</a>')+'</div>';
     }
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
   btn.classList.remove('ls');btn.innerHTML='검색';
