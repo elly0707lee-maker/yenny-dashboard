@@ -599,7 +599,15 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="tab active" onclick="mapTab(this,'kospi')" id="tab-map-kospi">코스피</button>
         <button class="tab" onclick="mapTab(this,'kosdaq')" id="tab-map-kosdaq">코스닥</button>
       </div>
-      <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi" style="width:100%;height:340px;border:none;margin-top:8px;" scrolling="no"></iframe>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <a id="map-link-kospi" href="https://markets.hankyung.com/marketmap/kospi" target="_blank" class="btn btn-primary" style="font-size:11px;padding:6px 10px;">🗺 코스피 새탭</a>
+        <a id="map-link-kosdaq" href="https://markets.hankyung.com/marketmap/kosdaq" target="_blank" class="btn" style="font-size:11px;padding:6px 10px;display:none;">🗺 코스닥 새탭</a>
+      </div>
+      <div style="width:100%;height:320px;overflow:hidden;border-radius:8px;position:relative;">
+        <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi"
+          style="width:180%;height:700px;border:none;position:absolute;top:-150px;left:-40%;transform-origin:top left;"
+          scrolling="no"></iframe>
+      </div>
     </div>
   </div>
 
