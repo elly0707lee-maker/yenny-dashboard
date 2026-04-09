@@ -605,7 +605,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       </div>
       <div style="width:100%;height:320px;overflow:hidden;border-radius:8px;position:relative;">
         <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi"
-          style="width:180%;height:700px;border:none;position:absolute;top:-150px;left:-40%;transform-origin:top left;"
+          style="width:200%;height:900px;border:none;position:absolute;top:-220px;left:-50%;transform-origin:top left;transform:scale(0.75);transform-origin:top center;"
           scrolling="no"></iframe>
       </div>
     </div>
@@ -1031,6 +1031,24 @@ function clTab(btn, key){
   if(key==='all'){ el.textContent=_clRaw; return; }
   const sec = parseSection(_clRaw, CL_SECTIONS[key]||[]);
   el.textContent = sec || '해당 섹션 없음';
+}
+
+function mapTab(btn, key){
+  document.querySelectorAll('#tab-map-kospi,#tab-map-kosdaq').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const isKospi = key==='kospi';
+  document.getElementById('map-frame').src = isKospi
+    ? 'https://markets.hankyung.com/marketmap/kospi'
+    : 'https://markets.hankyung.com/marketmap/kosdaq';
+  document.getElementById('map-link-kospi').style.display = isKospi ? 'inline-flex' : 'none';
+  document.getElementById('map-link-kosdaq').style.display = isKospi ? 'none' : 'inline-flex';
+}
+
+function sectorTab(btn, key){
+  document.querySelectorAll('#tab-sector-top,#tab-sector-bot').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sector-top').style.display = key==='top' ? 'block' : 'none';
+  document.getElementById('sector-bot').style.display = key==='bot' ? 'block' : 'none';
 }
 
 async function loadAll(){
