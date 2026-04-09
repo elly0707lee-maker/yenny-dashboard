@@ -586,13 +586,24 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <!-- 업종 등락률 -->
   <div class="section-label">업종 등락률 (코스피) / 마켓맵</div>
   <div class="grid2">
-    <div class="content-card" style="margin-bottom:0;">
+    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;gap:0;">
       <div class="tab-bar">
         <button class="tab active" onclick="sectorTab(this,'top')" id="tab-sector-top">📈 상승</button>
         <button class="tab" onclick="sectorTab(this,'bot')" id="tab-sector-bot">📉 하락</button>
       </div>
       <div id="sector-top"><span class="content-empty">로딩 중...</span></div>
       <div id="sector-bot" style="display:none;"><span class="content-empty">로딩 중...</span></div>
+      <div style="border-top:1px solid #f0f2f5;margin-top:12px;padding-top:10px;">
+        <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:8px;letter-spacing:.08em;">📰 네이버 증권 뉴스</div>
+        <div style="width:100%;height:320px;overflow:hidden;border-radius:8px;border:1px solid #f0f2f5;">
+          <iframe src="https://t.me/s/news_kor"
+            style="width:100%;height:320px;border:none;"
+            scrolling="yes"></iframe>
+        </div>
+        <div style="margin-top:6px;">
+          <a href="https://t.me/news_kor" target="_blank" class="btn" style="font-size:11px;padding:5px 10px;">🔗 텔레그램에서 보기</a>
+        </div>
+      </div>
     </div>
     <div class="content-card" style="margin-bottom:0;padding:12px 16px 0;overflow:hidden;">
       <div class="tab-bar">
