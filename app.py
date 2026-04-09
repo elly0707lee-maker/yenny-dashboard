@@ -605,7 +605,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       </div>
       <div style="width:100%;height:320px;overflow:hidden;border-radius:8px;position:relative;">
         <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi"
-          style="width:250%;height:900px;border:none;position:absolute;top:-200px;left:-75%;transform:scale(0.44);transform-origin:top center;"
+          style="width:250%;height:900px;border:none;position:absolute;top:-160px;left:-75%;transform:scale(0.42);transform-origin:top center;"
           scrolling="no"></iframe>
       </div>
     </div>
