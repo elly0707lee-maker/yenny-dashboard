@@ -312,7 +312,7 @@ def kstock_search():
                             lines.append(f"📊 {int(str(price).replace(',','')):,}원 {arrow} {pct}%")
                     except:
                         pass
-                    lines.append(f"🔗 https://finance.naver.com/item/main.naver?code={code}")
+                    lines.append(f"🔗 https://m.stock.naver.com/domestic/stock/{code}/total")
                 lines.append("")
 
         if theme_hits:
@@ -372,7 +372,13 @@ def kstock_search():
             raw_code = stock_hits[0].get("종목코드", "").strip()
             if raw_code:
                 first_code = "KRX:" + raw_code
-        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits), "code": first_code})
+        # Extract price line for display
+        price_display = None
+        for line in lines:
+            if "원" in line and ("▲" in line or "▼" in line):
+                price_display = line.replace("📊 ", "")
+                break
+        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits), "code": first_code, "price": price_display})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -887,8 +893,14 @@ async function searchKstock(){
       if(d.code && chartDiv){
         chartDiv.style.display='block';
         const rawCode = d.code.replace('KRX:','');
-        chartDiv.innerHTML='<a href=\"https://finance.naver.com/item/fchart.naver?code='+rawCode+'\" target=\"_blank\" class=\"btn btn-primary\" style=\"width:100%;justify-content:center;font-size:14px;padding:16px;margin-bottom:8px;display:flex;\">📈 네이버 차트 보기 →</a>'+
-          '<a href=\"https://finance.naver.com/item/main.naver?code='+rawCode+'\" target=\"_blank\" class=\"btn\" style=\"width:100%;justify-content:center;font-size:13px;padding:12px;display:flex;\">📊 네이버 종목 페이지</a>';
+        chartDiv.style.display='block';
+        const priceHtml = d.price ? '<div style=\"padding:14px 16px;background:#f8f9fa;border-radius:10px;margin-bottom:10px;\">'+
+          '<div style=\"font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;margin-bottom:4px;\">현재가</div>'+
+          '<div style=\"font-size:24px;font-weight:700;color:#1a1d23;\">'+d.price+'</div>'+
+          '</div>' : '';
+        chartDiv.innerHTML=priceHtml+
+          '<a href=\"https://m.stock.naver.com/domestic/stock/'+rawCode+'/chart\" target=\"_blank\" class=\"btn btn-primary\" style=\"width:100%;justify-content:center;font-size:14px;padding:16px;margin-bottom:8px;display:flex;\">📈 네이버 증권 차트 →</a>'+
+          '<a href=\"https://m.stock.naver.com/domestic/stock/'+rawCode+'/total\" target=\"_blank\" class=\"btn\" style=\"width:100%;justify-content:center;font-size:13px;padding:12px;display:flex;\">📊 네이버 종목 페이지</a>';
       } else if(chartDiv){ chartDiv.style.display='none'; }
     }
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
