@@ -252,6 +252,33 @@ def api_save_post(pt):
     return jsonify({"ok": True})
 
 
+@app.route("/api/news")
+@requires_auth
+def api_news():
+    import xml.etree.ElementTree as ET
+    feeds = [
+        ("한국경제", "https://www.hankyung.com/feed/finance"),
+        ("연합뉴스", "https://www.yonhapnewstv.co.kr/category/news/economy/feed/"),
+    ]
+    items = []
+    for source, url in feeds:
+        try:
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+            root = ET.fromstring(r.content)
+            ns = {"dc": "http://purl.org/dc/elements/1.1/"}
+            for item in root.findall(".//item")[:5]:
+                title = item.findtext("title", "").strip()
+                link = item.findtext("link", "").strip()
+                pub = item.findtext("pubDate", "").strip()
+                if title and link:
+                    items.append({"title": title, "link": link, "pub": pub, "source": source})
+        except Exception as e:
+            pass
+    # Sort by pub date roughly (string sort works for RFC 2822)
+    items.sort(key=lambda x: x["pub"], reverse=True)
+    return jsonify({"items": items[:15]})
+
+
 @app.route("/api/kstock/search")
 @requires_auth
 def kstock_search():
@@ -594,14 +621,12 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div id="sector-top"><span class="content-empty">로딩 중...</span></div>
       <div id="sector-bot" style="display:none;"><span class="content-empty">로딩 중...</span></div>
       <div style="border-top:1px solid #f0f2f5;margin-top:12px;padding-top:10px;">
-        <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:8px;letter-spacing:.08em;">📰 네이버 증권 뉴스</div>
-        <div style="width:100%;height:320px;overflow:hidden;border-radius:8px;border:1px solid #f0f2f5;">
-          <iframe src="https://t.me/s/news_kor"
-            style="width:100%;height:320px;border:none;"
-            scrolling="yes"></iframe>
+        <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:8px;letter-spacing:.08em;">📰 증권 뉴스 (한국경제 · 연합뉴스)</div>
+        <div id="news-list" style="max-height:300px;overflow-y:auto;">
+          <span class="content-empty">뉴스 로딩 중...</span>
         </div>
         <div style="margin-top:6px;">
-          <a href="https://t.me/news_kor" target="_blank" class="btn" style="font-size:11px;padding:5px 10px;">🔗 텔레그램에서 보기</a>
+          <button class="btn" onclick="loadNews()" style="font-size:11px;padding:5px 10px;">↻ 새로고침</button>
         </div>
       </div>
     </div>
@@ -1062,6 +1087,26 @@ function sectorTab(btn, key){
   document.getElementById('sector-bot').style.display = key==='bot' ? 'block' : 'none';
 }
 
+async function loadNews(){
+  const el = document.getElementById('news-list');
+  if(!el) return;
+  el.innerHTML = '<span class="content-empty">로딩 중...</span>';
+  try{
+    const d = await fetch('/api/news').then(r=>r.json());
+    if(!d.items || !d.items.length){
+      el.innerHTML='<span class="content-empty">뉴스를 불러오지 못했어요.</span>';
+      return;
+    }
+    el.innerHTML = d.items.map(item=>`
+      <div style="padding:8px 0;border-bottom:1px solid #f0f2f5;">
+        <div style="font-size:10px;color:#b2bec3;margin-bottom:3px;">${item.source}</div>
+        <a href="${item.link}" target="_blank" style="font-size:12px;color:#2d3436;line-height:1.5;text-decoration:none;font-weight:500;">${item.title}</a>
+      </div>`).join('');
+  }catch(e){
+    el.innerHTML='<span class="content-empty">오류가 발생했어요.</span>';
+  }
+}
+
 async function loadAll(){
   const btn=document.getElementById('refresh-btn');
   if(btn)btn.innerHTML='<span class="spinner"></span>';
@@ -1075,6 +1120,7 @@ loadFutures();
 loadReportTabs();
 loadNote();
 loadTodo();
+loadNews();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
