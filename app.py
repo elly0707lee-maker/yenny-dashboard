@@ -15,7 +15,7 @@ KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "")
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "yenny2026")
 API_SECRET = os.environ.get("API_SECRET", "moneyplus")
 
-_kis_token_cache = {"token": ""}
+_kis_token_cache = {"token": "", "expires": 0}
 
 
 def get_db():
@@ -51,7 +51,8 @@ def requires_auth(f):
 
 
 def get_kis_token():
-    if _kis_token_cache["token"]:
+    import time
+    if _kis_token_cache["token"] and time.time() < _kis_token_cache["expires"]:
         return _kis_token_cache["token"]
     try:
         r = requests.post(
@@ -59,8 +60,10 @@ def get_kis_token():
             json={"grant_type": "client_credentials",
                   "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET},
             timeout=6)
-        token = r.json().get("access_token", "")
+        data = r.json()
+        token = data.get("access_token", "")
         _kis_token_cache["token"] = token
+        _kis_token_cache["expires"] = time.time() + 3600 * 20  # 20시간
         return token
     except:
         return ""
@@ -123,9 +126,19 @@ def get_korean_market():
         d = kis_get("/uapi/domestic-stock/v1/quotations/inquire-index-price",
                     "FHPUP02100000",
                     {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": code}).get("output", {})
+        raw_chg = d.get("bstp_nmix_prdy_ctrt", None)
+        try:
+            chg_val = float(raw_chg) if raw_chg not in (None, "", "0") else None
+        except:
+            chg_val = None
+        raw_val = d.get("bstp_nmix_prpr", None)
+        try:
+            idx_val = float(raw_val) if raw_val not in (None, "") else None
+        except:
+            idx_val = None
         result[mkt] = {
-            "value": d.get("bstp_nmix_prpr", None),
-            "change": d.get("bstp_nmix_prdy_ctrt", None),
+            "value": idx_val,
+            "change": chg_val,
             "foreign": None, "institution": None
         }
         sup = kis_get("/uapi/domestic-stock/v1/quotations/inquire-index-investor",
@@ -280,60 +293,65 @@ def get_html():
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yenny Dashboard</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;background:#0f0f13;color:#e8e8ec;min-height:100vh}
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #1e1e28;background:#0f0f13;position:sticky;top:0;z-index:10}
-.topbar-title{font-size:15px;font-weight:600;color:#fff}
-.container{padding:16px;max-width:960px;margin:0 auto}
-.section-label{font-size:11px;color:#555;letter-spacing:.06em;text-transform:uppercase;margin:20px 0 10px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
-@media(max-width:640px){.grid3{grid-template-columns:1fr 1fr}.grid4{grid-template-columns:1fr 1fr}.grid5{grid-template-columns:1fr 1fr}}
-.card{background:#17171f;border:1px solid #1e1e28;border-radius:12px;padding:14px}
-.metric-label{font-size:11px;color:#555;margin-bottom:6px}
-.metric-val{font-size:20px;font-weight:600;color:#f0f0f4;letter-spacing:-.5px}
-.metric-chg{font-size:12px;margin-top:4px}
-.metric-sup{font-size:11px;color:#666;margin-top:6px;display:flex;gap:10px}
-.up{color:#e84c4c}.dn{color:#4c7ee8}.flat{color:#888}
-.loading{color:#444}
-.content-card{background:#17171f;border:1px solid #1e1e28;border-radius:12px;padding:16px;margin-bottom:10px}
-.content-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
-.content-title{font-size:13px;font-weight:600;color:#ccc}
-.content-date{font-size:11px;color:#555}
-.content-body{font-size:13px;color:#999;line-height:1.7;white-space:pre-wrap;max-height:260px;overflow-y:auto}
-.content-empty{font-size:13px;color:#444;font-style:italic}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid #2a2a38;background:#1e1e2a;color:#aaa;font-size:12px;cursor:pointer;transition:all .15s}
-.btn:hover{background:#252535;color:#fff}
-.btn-primary{background:#2d2d6b;border-color:#3d3d8b;color:#aaaaff}
-.btn-primary:hover{background:#35358a;color:#ccccff}
-.btn-green{background:#1a3a1a;border-color:#2a5a2a;color:#6adf6a}
-.btn-green:hover{background:#1f4a1f;color:#8aef8a}
+body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-height:100vh}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:#1a1d23;position:sticky;top:0;z-index:10;border-bottom:3px solid #e8b84b}
+.topbar-title{font-size:16px;font-weight:700;color:#fff;letter-spacing:-.3px}
+.topbar-title span{color:#e8b84b;font-weight:400;font-size:13px;margin-left:6px}
+#clock{font-family:'DM Mono',monospace;font-size:13px;color:#e8b84b;letter-spacing:.05em}
+.container{padding:20px;max-width:1100px;margin:0 auto}
+.section-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.12em;text-transform:uppercase;margin:24px 0 10px;padding-left:2px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:680px){.grid3{grid-template-columns:1fr 1fr}.grid4{grid-template-columns:1fr 1fr}}
+.card{background:#fff;border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.04)}
+.metric-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
+.metric-val{font-size:26px;font-weight:700;color:#1a1d23;letter-spacing:-.5px;font-family:'DM Mono',monospace}
+.metric-chg{font-size:13px;font-weight:600;margin-top:5px}
+.metric-sup{font-size:12px;color:#7a8099;margin-top:8px;display:flex;gap:12px}
+.up{color:#d63031}
+.dn{color:#0984e3}
+.flat{color:#b2bec3}
+.loading{color:#b2bec3;font-size:20px}
+.content-card{background:#fff;border-radius:14px;padding:18px 20px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.04)}
+.content-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+.content-title{font-size:14px;font-weight:700;color:#1a1d23}
+.content-date{font-size:11px;color:#b2bec3;font-family:'DM Mono',monospace}
+.content-body{font-size:14px;color:#2d3436;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto}
+.content-empty{font-size:13px;color:#b2bec3;font-style:italic}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:1.5px solid #dfe6e9;background:#fff;color:#636e72;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn:hover{background:#f0f2f5;color:#1a1d23;border-color:#b2bec3}
+.btn-primary{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
+.btn-primary:hover{background:#2d3436;border-color:#2d3436}
+.btn-green{background:#00b894;border-color:#00b894;color:#fff}
+.btn-green:hover{background:#00a381}
 .btn.ls{opacity:.5;pointer-events:none}
-.refresh-dot{width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;animation:pulse 2s infinite}
+.refresh-dot{width:7px;height:7px;border-radius:50%;background:#e8b84b;display:inline-block;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.spinner{display:inline-block;width:13px;height:13px;border:2px solid #333;border-top-color:#aaaaff;border-radius:50%;animation:spin .8s linear infinite}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid #dfe6e9;border-top-color:#e8b84b;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.etf-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e1e28;font-size:12px}
+.etf-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #f0f2f5;font-size:13px}
 .etf-row:last-child{border-bottom:none}
-.etf-name{color:#aaa}
-.etf-chg{font-weight:600}
-textarea.input-area{width:100%;background:#0f0f13;border:1px solid #2a2a38;border-radius:8px;color:#ccc;font-size:13px;padding:10px 12px;resize:vertical;min-height:80px;font-family:inherit;line-height:1.6}
-textarea.input-area:focus{outline:none;border-color:#3d3d8b}
-input.input-line{width:100%;background:#0f0f13;border:1px solid #2a2a38;border-radius:8px;color:#ccc;font-size:14px;padding:10px 12px;font-family:inherit}
-input.input-line:focus{outline:none;border-color:#3d3d8b}
-.input-row{display:flex;gap:8px;align-items:flex-start;margin-top:8px}
-.saved-badge{font-size:11px;color:#6adf6a;margin-left:8px;display:none}
-.tab-bar{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
-.tab{padding:4px 10px;border-radius:6px;border:1px solid #2a2a38;background:#1a1a24;color:#666;font-size:11px;cursor:pointer;transition:all .15s}
-.tab.active{background:#2d2d6b;border-color:#3d3d8b;color:#aaaaff}
-.tab:hover{color:#ccc}
+.etf-name{color:#2d3436;font-weight:500}
+.etf-chg{font-weight:700;font-family:'DM Mono',monospace}
+textarea.input-area{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;resize:vertical;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7}
+textarea.input-area:focus{outline:none;border-color:#e8b84b;background:#fff}
+input.input-line{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:15px;font-weight:600;padding:10px 14px;font-family:'DM Mono',monospace}
+input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
+.input-row{display:flex;gap:8px;align-items:flex-start;margin-top:10px}
+.saved-badge{font-size:11px;color:#00b894;font-weight:700;margin-left:8px;display:none}
+.tab-bar{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
+.tab{padding:5px 13px;border-radius:20px;border:1.5px solid #dfe6e9;background:#f0f2f5;color:#636e72;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.tab.active{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
+.tab:hover:not(.active){background:#fff;color:#1a1d23}
+.futures-val{font-size:28px;font-weight:700;color:#1a1d23;font-family:'DM Mono',monospace;margin-bottom:12px}
 </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="topbar-title">Yenny Dashboard <span style="color:#444;font-weight:400">· 머니플러스</span></div>
+  <div class="topbar-title">Yenny Dashboard <span>· 머니플러스</span></div>
   <div style="display:flex;align-items:center;gap:10px;">
     <span class="refresh-dot"></span>
     <span id="clock" style="font-size:12px;color:#666;"></span>
@@ -370,7 +388,7 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
       <span class="content-title">🌙 야간선물</span>
       <span class="saved-badge" id="futures-badge">✓ 저장됨</span>
     </div>
-    <div id="futures-display" style="font-size:20px;font-weight:600;color:#f0f0f4;margin-bottom:10px;" id="futures-val">—</div>
+    <div id="futures-display" class="futures-val">—</div>
     <div class="input-row">
       <input class="input-line" id="futures-input" placeholder="예) 345.2 (+0.3pt)" style="flex:1;" />
       <button class="btn btn-green" onclick="saveFutures()">저장</button>
@@ -442,8 +460,7 @@ input.input-line:focus{outline:none;border-color:#3d3d8b}
 
   <!-- 시간외특징주 + 특징리포트 2분할 -->
   <div class="section-label">특징 리포트</div>
-  <div class="grid2">
-
+  <div>
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">📝 특징 리포트</span>
