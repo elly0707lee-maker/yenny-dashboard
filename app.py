@@ -887,7 +887,7 @@ async function searchKstock(){
         chartDiv.style.display='block';
         chartDiv.innerHTML='<div style=\"padding:10px 0 6px;font-size:12px;font-weight:700;color:#7a8099;\">📈 TradingView 차트</div>'+
           '<div class=\"tradingview-widget-container\" style=\"height:380px;\">'+
-          '<iframe scrolling=\"no\" allowtransparency=\"true\" frameborder=\"0\" src=\"https://www.tradingview.com/widgetembed/?symbol='+d.code+'&interval=D&hidesidetoolbar=0&hidetoptoolbar=0&theme=light&style=1&timezone=Asia%2FSeoul&withdateranges=1&locale=kr\" style=\"width:100%;height:380px;border:none;border-radius:10px;\" allowfullscreen=\"\"></iframe>'+
+          '<iframe scrolling=\"no\" allowtransparency=\"true\" frameborder=\"0\" src=\"https://www.tradingview.com/widgetembed/?symbol='+d.code.replace(':','%3A')+'&interval=D&hidesidetoolbar=0&hidetoptoolbar=0&theme=light&style=1&timezone=Asia%2FSeoul&withdateranges=1&locale=kr\" style=\"width:100%;height:380px;border:none;border-radius:10px;\" allowfullscreen=\"\"></iframe>'+
           '</div>';
       } else if(chartDiv){ chartDiv.style.display='none'; }
     }
