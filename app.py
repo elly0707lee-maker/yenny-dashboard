@@ -600,12 +600,12 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="tab" onclick="mapTab(this,'kosdaq')" id="tab-map-kosdaq">코스닥</button>
       </div>
       <div style="display:flex;gap:6px;margin-bottom:8px;">
-        <a id="map-link-kospi" href="https://markets.hankyung.com/marketmap/kospi" target="_blank" class="btn btn-primary" style="font-size:11px;padding:6px 10px;">🗺 코스피 새탭</a>
-        <a id="map-link-kosdaq" href="https://markets.hankyung.com/marketmap/kosdaq" target="_blank" class="btn" style="font-size:11px;padding:6px 10px;display:none;">🗺 코스닥 새탭</a>
+        <a id="map-link-kospi" href="https://markets.hankyung.com/marketmap/kospi" target="_blank" class="btn btn-primary" style="font-size:11px;padding:6px 10px;">🗺 바로가기</a>
+        <a id="map-link-kosdaq" href="https://markets.hankyung.com/marketmap/kosdaq" target="_blank" class="btn" style="font-size:11px;padding:6px 10px;display:none;">🗺 바로가기</a>
       </div>
       <div style="width:100%;height:320px;overflow:hidden;border-radius:8px;position:relative;">
         <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi"
-          style="width:200%;height:900px;border:none;position:absolute;top:-220px;left:-50%;transform-origin:top left;transform:scale(0.75);transform-origin:top center;"
+          style="width:100%;height:1200px;border:none;position:absolute;top:-280px;left:0;transform:scale(0.38);transform-origin:top left;"
           scrolling="no"></iframe>
       </div>
     </div>
