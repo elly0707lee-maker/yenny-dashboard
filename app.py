@@ -551,21 +551,21 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <!-- 미국·글로벌 -->
   <div class="section-label">미국·글로벌</div>
   <div class="grid4">
-    <div class="card"><div class="metric-label">나스닥</div><div class="metric-val" id="nasdaq-val"><span class="loading">—</span></div><div class="metric-chg" id="nasdaq-chg"></div></div>
     <div class="card"><div class="metric-label">다우존스</div><div class="metric-val" id="dow-val"><span class="loading">—</span></div><div class="metric-chg" id="dow-chg"></div></div>
     <div class="card"><div class="metric-label">S&amp;P 500</div><div class="metric-val" id="sp500-val"><span class="loading">—</span></div><div class="metric-chg" id="sp500-chg"></div></div>
+    <div class="card"><div class="metric-label">나스닥</div><div class="metric-val" id="nasdaq-val"><span class="loading">—</span></div><div class="metric-chg" id="nasdaq-chg"></div></div>
     <div class="card"><div class="metric-label">EWY</div><div class="metric-val" id="ewy-val"><span class="loading">—</span></div><div class="metric-chg" id="ewy-chg"></div></div>
+  </div>
+  <div class="grid4" style="margin-top:8px;">
+    <div class="card"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
+    <div class="card"><div class="metric-label">달러인덱스 (DXY)</div><div class="metric-val" id="dxy-val"><span class="loading">—</span></div><div class="metric-chg" id="dxy-chg"></div></div>
+    <div class="card"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
+    <div class="card"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
   </div>
   <div class="grid4" style="margin-top:8px;">
     <div class="card"><div class="metric-label">WTI 유가</div><div class="metric-val" id="wti-val"><span class="loading">—</span></div><div class="metric-chg" id="wti-chg"></div></div>
     <div class="card"><div class="metric-label">브렌트유</div><div class="metric-val" id="brent-val"><span class="loading">—</span></div><div class="metric-chg" id="brent-chg"></div></div>
     <div class="card"><div class="metric-label">금</div><div class="metric-val" id="gold-val"><span class="loading">—</span></div><div class="metric-chg" id="gold-chg"></div></div>
-    <div class="card"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
-  </div>
-  <div class="grid4" style="margin-top:8px;">
-    <div class="card"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
-    <div class="card"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
-    <div class="card"><div class="metric-label">달러인덱스 (DXY)</div><div class="metric-val" id="dxy-val"><span class="loading">—</span></div><div class="metric-chg" id="dxy-chg"></div></div>
     <div class="card"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
   </div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;align-items:center;">
@@ -670,8 +670,8 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   </div>
   <!-- 마감일지 -->
-  <div class="section-label" style="margin-top:16px;">마감일지</div>
-  <div class="content-card">
+  <div class="section-label" style="margin-top:24px;">마감일지</div>
+  <div class="content-card" style="width:100%;">
     <div class="content-header">
       <span class="content-title">📋 마감일지</span>
       <span class="content-date" id="closing-date"></span>
@@ -880,6 +880,12 @@ async function searchKstock(){
       result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
     }else{
       result.innerHTML='<div class="content-body" style="max-height:400px;">'+d.result.replace(/\n/g,'<br>').replace(/🔗 (https?:\/\/[^\s<]+)/g,'🔗 <a href="$1" target="_blank" style="color:#0984e3;word-break:break-all;">$1</a>')+'</div>';
+      const chartDiv=document.getElementById('kstock-chart');
+      if(d.code && chartDiv){
+        chartDiv.style.display='block';
+        chartDiv.innerHTML='<div style=\"padding:10px 0 6px;font-size:12px;font-weight:700;color:#7a8099;\">📈 차트</div>'+
+          '<iframe src=\"https://m.stock.naver.com/item/chart.naver?code='+d.code+'\" style=\"width:100%;height:360px;border:none;border-radius:10px;\" scrolling=\"no\"></iframe>';
+      } else if(chartDiv){ chartDiv.style.display='none'; }
     }
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
   btn.classList.remove('ls');btn.innerHTML='검색';
