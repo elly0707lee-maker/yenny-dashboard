@@ -571,6 +571,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div class="card"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
   </div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;align-items:center;">
+    <a href="https://finviz.com/" target="_blank" class="btn">📊 Finviz</a>
     <a href="https://www.cnbc.com/watchlist/" target="_blank" class="btn">📺 CNBC Watchlist</a>
     <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
   </div>
@@ -885,10 +886,9 @@ async function searchKstock(){
       const chartDiv=document.getElementById('kstock-chart');
       if(d.code && chartDiv){
         chartDiv.style.display='block';
-        chartDiv.innerHTML='<div style=\"padding:10px 0 6px;font-size:12px;font-weight:700;color:#7a8099;\">📈 TradingView 차트</div>'+
-          '<div class=\"tradingview-widget-container\" style=\"height:380px;\">'+
-          '<iframe src=\"https://www.tradingview.com/chart/?symbol='+d.code+'&interval=D&theme=light&style=1&timezone=Asia%2FSeoul&locale=kr\" style=\"width:100%;height:380px;border:none;border-radius:10px;\" allowfullscreen=\"\"></iframe>'+
-          '</div>';
+        const rawCode = d.code.replace('KRX:','');
+        chartDiv.innerHTML='<a href=\"https://finance.naver.com/item/fchart.naver?code='+rawCode+'\" target=\"_blank\" class=\"btn btn-primary\" style=\"width:100%;justify-content:center;font-size:14px;padding:16px;margin-bottom:8px;display:flex;\">📈 네이버 차트 보기 →</a>'+
+          '<a href=\"https://finance.naver.com/item/main.naver?code='+rawCode+'\" target=\"_blank\" class=\"btn\" style=\"width:100%;justify-content:center;font-size:13px;padding:12px;display:flex;\">📊 네이버 종목 페이지</a>';
       } else if(chartDiv){ chartDiv.style.display='none'; }
     }
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
