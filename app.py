@@ -577,6 +577,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div class="card"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
   </div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;align-items:center;">
+    <a href="https://www.bloomberg.com/asia" target="_blank" class="btn">📰 Bloomberg</a>
     <a href="https://finviz.com/" target="_blank" class="btn">📊 Finviz</a>
     <a href="https://www.cnbc.com/watchlist/" target="_blank" class="btn">📺 CNBC Watchlist</a>
     <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
@@ -900,7 +901,7 @@ async function searchKstock(){
           '</div>' : '';
         chartDiv.innerHTML=priceHtml+
           '<a href=\"https://m.stock.naver.com/domestic/stock/'+rawCode+'/chart\" target=\"_blank\" class=\"btn btn-primary\" style=\"width:100%;justify-content:center;font-size:14px;padding:16px;margin-bottom:8px;display:flex;\">📈 네이버 증권 차트 →</a>'+
-          '<a href=\"https://m.stock.naver.com/domestic/stock/'+rawCode+'/total\" target=\"_blank\" class=\"btn\" style=\"width:100%;justify-content:center;font-size:13px;padding:12px;display:flex;\">📊 네이버 종목 페이지</a>';
+          '';
       } else if(chartDiv){ chartDiv.style.display='none'; }
     }
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
