@@ -225,7 +225,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -233,7 +233,7 @@ def api_get_post(pt):
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -247,6 +247,116 @@ def api_save_post(pt):
     if not content:
         return jsonify({"error": "content required"}), 400
     save_post(pt, content, date)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/kstock/search")
+@requires_auth
+def kstock_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "검색어 없음"}), 400
+
+    SHEET_ID = os.environ.get("SHEET_ID", "")
+    NAVER_ID = os.environ.get("NAVER_CLIENT_ID", "")
+    NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
+
+    if not SHEET_ID:
+        return jsonify({"error": "SHEET_ID 환경변수 없음"}), 500
+
+    try:
+        import csv, io as _io
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+        res = requests.get(sheet_url, timeout=10)
+        res.encoding = "utf-8"
+        data = list(csv.DictReader(_io.StringIO(res.text)))
+
+        stock_hits = [r for r in data if query in r.get("종목명", "")]
+        theme_hits = [r for r in data if query in r.get("테마", "")]
+
+        lines = []
+
+        if stock_hits:
+            from collections import OrderedDict
+            grouped = OrderedDict()
+            for r in stock_hits:
+                name = r.get("종목명", "")
+                if name not in grouped:
+                    grouped[name] = []
+                grouped[name].append(r)
+
+            for name, rows in grouped.items():
+                lines.append(f"📌 [{name}]")
+                for r in rows:
+                    theme = r.get("테마", "")
+                    desc = r.get("특징", "").strip()
+                    lines.append(f"☑️ {theme}")
+                    if desc:
+                        lines.append(f"➡️ {desc}")
+                    lines.append("")
+
+                code = rows[0].get("종목코드", "").strip()
+                if code:
+                    try:
+                        pr = requests.get(
+                            f"https://m.stock.naver.com/api/stock/{code}/basic",
+                            headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                        pd = pr.json()
+                        price = pd.get("closePrice") or pd.get("currentPrice", "")
+                        change = pd.get("compareToPreviousClosePrice", "")
+                        pct = pd.get("fluctuationsRatio", "")
+                        if price:
+                            arrow = "▲" if float(str(change).replace(",","") or 0) >= 0 else "▼"
+                            lines.append(f"📊 {int(str(price).replace(',','')):,}원 {arrow} {pct}%")
+                    except:
+                        pass
+                    lines.append(f"🔗 https://finance.naver.com/item/main.naver?code={code}")
+                lines.append("")
+
+        if theme_hits:
+            if stock_hits:
+                lines.append("─" * 20)
+            lines.append(f"🗂 [{query}] 관련 종목")
+            for i, r in enumerate(theme_hits, 1):
+                name = r.get("종목명", "")
+                theme = r.get("테마", "")
+                desc = r.get("특징", "").strip()
+                line = f"{i}. {name}  ({theme})"
+                if desc:
+                    line += f"\n   ➡️ {desc}"
+                lines.append(line)
+            lines.append("")
+
+        if NAVER_ID and (stock_hits or theme_hits):
+            try:
+                nr = requests.get(
+                    "https://openapi.naver.com/v1/search/news.json",
+                    headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
+                    params={"query": query, "display": 3, "sort": "date"}, timeout=8)
+                news = nr.json().get("items", [])
+                if news:
+                    import re as _re
+                    lines.append(f"📰 뉴스 ({query})")
+                    for i, item in enumerate(news, 1):
+                        title = _re.sub(r"<[^>]+>", "", item["title"])
+                        lines.append(f"{i}. {title}")
+                        lines.append(f"   🔗 {item['link']}")
+            except:
+                pass
+
+        if not stock_hits and not theme_hits:
+            lines.append(f"❓ '{query}' — 등록된 종목/테마가 없어요.")
+
+        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/note/clear", methods=["POST"])
+@requires_auth
+def clear_note():
+    save_post("note", "", datetime.now().strftime("%Y-%m-%d"))
     return jsonify({"ok": True})
 
 
@@ -351,7 +461,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 </head>
 <body>
 <div class="topbar">
-  <div class="topbar-title">Yenny Dashboard <span>· 머니플러스</span></div>
+  <div class="topbar-title">Yenny Dashboard</div>
   <div style="display:flex;align-items:center;gap:10px;">
     <span class="refresh-dot"></span>
     <span id="clock" style="font-size:12px;color:#666;"></span>
@@ -456,6 +566,34 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <button class="tab" onclick="cpTab(this,'after')">📌시간외</button>
     </div>
     <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
+  </div>
+
+  <!-- K-Stock 검색 -->
+  <div class="section-label">종목 · 테마 검색</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">🔍 K-Stock 검색</span>
+      <span style="font-size:11px;color:#b2bec3;">종목명 또는 테마명 입력</span>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="kstock-input" placeholder="예) 삼성전자 / 방산 / 2차전지" style="flex:1;" onkeydown="if(event.key==='Enter')searchKstock()"/>
+      <button class="btn btn-primary" onclick="searchKstock()" id="kstock-btn">검색</button>
+    </div>
+    <div id="kstock-result" style="margin-top:14px;"></div>
+  </div>
+
+  <!-- 노트 -->
+  <div class="section-label">노트</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📓 오늘의 노트</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="saved-badge" id="note-badge">✓ 저장됨</span>
+        <button class="btn btn-green" onclick="saveNote()">저장</button>
+        <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+      </div>
+    </div>
+    <textarea class="input-area" id="note-input" placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:140px;"></textarea>
   </div>
 
   <!-- 시간외특징주 + 특징리포트 2분할 -->
@@ -674,6 +812,46 @@ async function loadReportTabs(){
   }
 }
 
+async function searchKstock(){
+  const q=document.getElementById('kstock-input').value.trim();
+  if(!q)return;
+  const btn=document.getElementById('kstock-btn');
+  const result=document.getElementById('kstock-result');
+  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d=await fetch('/api/kstock/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+    }else{
+      result.innerHTML='<div class="content-body" style="max-height:400px;">'+d.result.replace(/\n/g,'<br>').replace(/🔗 (https?:\/\/[^\s<]+)/g,'🔗 <a href="$1" target="_blank" style="color:#0984e3;">링크</a>')+'</div>';
+    }
+  }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
+  btn.classList.remove('ls');btn.innerHTML='검색';
+}
+
+async function saveNote(){
+  const val=document.getElementById('note-input').value.trim();
+  if(!val)return;
+  await fetch('/api/post/note',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
+  const badge=document.getElementById('note-badge');
+  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+}
+
+async function clearNote(){
+  if(!confirm('노트 초기화할까요?'))return;
+  await fetch('/api/note/clear',{method:'POST'});
+  document.getElementById('note-input').value='';
+}
+
+async function loadNote(){
+  try{
+    const d=await fetch('/api/post/note').then(r=>r.json());
+    if(d.content){document.getElementById('note-input').value=d.content;}
+  }catch(e){}
+}
+
 async function generateBriefing(){
   const btn=document.getElementById('briefing-btn');
   const body=document.getElementById('briefing-body');
@@ -754,6 +932,7 @@ async function loadAll(){
 loadAll();
 loadFutures();
 loadReportTabs();
+loadNote();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
