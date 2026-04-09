@@ -257,8 +257,11 @@ def api_save_post(pt):
 def api_news():
     import xml.etree.ElementTree as ET
     feeds = [
-        ("한국경제", "https://www.hankyung.com/feed/finance"),
-        ("연합뉴스", "https://www.yonhapnewstv.co.kr/category/news/economy/feed/"),
+        ("한경 속보", "https://www.hankyung.com/feed/breaking-news"),
+        ("한경 경제", "https://www.hankyung.com/feed/economy"),
+        ("한경 증권", "https://www.hankyung.com/feed/stock"),
+        ("한경 금융", "https://www.hankyung.com/feed/finance"),
+        ("한경 국제", "https://www.hankyung.com/feed/international"),
     ]
     items = []
     for source, url in feeds:
@@ -276,7 +279,7 @@ def api_news():
             pass
     # Sort by pub date roughly (string sort works for RFC 2822)
     items.sort(key=lambda x: x["pub"], reverse=True)
-    return jsonify({"items": items[:15]})
+    return jsonify({"items": items[:20]})
 
 
 @app.route("/api/kstock/search")
@@ -621,7 +624,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div id="sector-top"><span class="content-empty">로딩 중...</span></div>
       <div id="sector-bot" style="display:none;"><span class="content-empty">로딩 중...</span></div>
       <div style="border-top:1px solid #f0f2f5;margin-top:12px;padding-top:10px;">
-        <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:8px;letter-spacing:.08em;">📰 증권 뉴스 (한국경제 · 연합뉴스)</div>
+        <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:8px;letter-spacing:.08em;">📰 증권 뉴스 (한국경제 · 연합뉴스 경제 · 세계)</div>
         <div id="news-list" style="max-height:300px;overflow-y:auto;">
           <span class="content-empty">뉴스 로딩 중...</span>
         </div>
