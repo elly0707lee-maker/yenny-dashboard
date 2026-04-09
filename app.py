@@ -365,11 +365,13 @@ def kstock_search():
         if not stock_hits and not theme_hits:
             lines.append(f"❓ '{query}' — 등록된 종목/테마가 없어요.")
 
-        # Get first stock code for chart
+        # Get first stock code for chart (TradingView KRX format)
         first_code = None
         if stock_hits:
             from collections import OrderedDict
-            first_code = stock_hits[0].get("종목코드", "").strip() or None
+            raw_code = stock_hits[0].get("종목코드", "").strip()
+            if raw_code:
+                first_code = "KRX:" + raw_code
         return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits), "code": first_code})
 
     except Exception as e:
@@ -671,7 +673,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   </div>
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지</div>
-  <div class="content-card" style="width:100%;">
+  <div class="content-card">
     <div class="content-header">
       <span class="content-title">📋 마감일지</span>
       <span class="content-date" id="closing-date"></span>
@@ -883,8 +885,10 @@ async function searchKstock(){
       const chartDiv=document.getElementById('kstock-chart');
       if(d.code && chartDiv){
         chartDiv.style.display='block';
-        chartDiv.innerHTML='<div style=\"padding:10px 0 6px;font-size:12px;font-weight:700;color:#7a8099;\">📈 차트</div>'+
-          '<iframe src=\"https://m.stock.naver.com/item/chart.naver?code='+d.code+'\" style=\"width:100%;height:360px;border:none;border-radius:10px;\" scrolling=\"no\"></iframe>';
+        chartDiv.innerHTML='<div style=\"padding:10px 0 6px;font-size:12px;font-weight:700;color:#7a8099;\">📈 TradingView 차트</div>'+
+          '<div class=\"tradingview-widget-container\" style=\"height:380px;\">'+
+          '<iframe scrolling=\"no\" allowtransparency=\"true\" frameborder=\"0\" src=\"https://www.tradingview.com/widgetembed/?frameElementId=tv&symbol='+encodeURIComponent(d.code)+'&interval=D&hidesidetoolbar=1&hidetoptoolbar=0&symboledit=1&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Asia%2FSeoul&withdateranges=1&showpopupbutton=1&locale=kr\" style=\"width:100%;height:380px;border:none;border-radius:10px;\" allowfullscreen=\"\"></iframe>'+
+          '</div>';
       } else if(chartDiv){ chartDiv.style.display='none'; }
     }
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
