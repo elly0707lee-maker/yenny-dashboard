@@ -584,15 +584,22 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   </div>
 
   <!-- 업종 등락률 -->
-  <div class="section-label">업종 등락률 (코스피)</div>
+  <div class="section-label">업종 등락률 (코스피) / 마켓맵</div>
   <div class="grid2">
-    <div class="content-card">
-      <div class="content-header"><span class="content-title">📈 상위 5</span></div>
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="tab-bar">
+        <button class="tab active" onclick="sectorTab(this,'top')" id="tab-sector-top">📈 상승</button>
+        <button class="tab" onclick="sectorTab(this,'bot')" id="tab-sector-bot">📉 하락</button>
+      </div>
       <div id="sector-top"><span class="content-empty">로딩 중...</span></div>
+      <div id="sector-bot" style="display:none;"><span class="content-empty">로딩 중...</span></div>
     </div>
-    <div class="content-card">
-      <div class="content-header"><span class="content-title">📉 하위 5</span></div>
-      <div id="sector-bot"><span class="content-empty">로딩 중...</span></div>
+    <div class="content-card" style="margin-bottom:0;padding:12px 16px 0;overflow:hidden;">
+      <div class="tab-bar">
+        <button class="tab active" onclick="mapTab(this,'kospi')" id="tab-map-kospi">코스피</button>
+        <button class="tab" onclick="mapTab(this,'kosdaq')" id="tab-map-kosdaq">코스닥</button>
+      </div>
+      <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi" style="width:100%;height:340px;border:none;margin-top:8px;" scrolling="no"></iframe>
     </div>
   </div>
 
