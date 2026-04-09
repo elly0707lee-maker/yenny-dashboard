@@ -603,9 +603,9 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <a id="map-link-kospi" href="https://markets.hankyung.com/marketmap/kospi" target="_blank" class="btn btn-primary" style="font-size:11px;padding:6px 10px;">🗺 바로가기</a>
         <a id="map-link-kosdaq" href="https://markets.hankyung.com/marketmap/kosdaq" target="_blank" class="btn" style="font-size:11px;padding:6px 10px;display:none;">🗺 바로가기</a>
       </div>
-      <div style="width:100%;height:500px;overflow:hidden;border-radius:8px;position:relative;">
+      <div style="width:100%;height:700px;overflow:hidden;border-radius:8px;position:relative;">
         <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi"
-          style="width:250%;height:1100px;border:none;position:absolute;top:-220px;left:-75%;transform:scale(0.47);transform-origin:top center;"
+          style="width:250%;height:1100px;border:none;position:absolute;top:-210px;left:-75%;transform:scale(0.43);transform-origin:top center;"
           scrolling="no"></iframe>
       </div>
     </div>
