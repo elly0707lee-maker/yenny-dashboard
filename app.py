@@ -447,7 +447,7 @@ def calendar_parse():
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": f"""아래는 주간 증시 일정 텍스트입니다.
 날짜별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
@@ -524,7 +524,7 @@ def generate_briefing():
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         today = datetime.now().strftime("%m월 %d일")
         msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content":
