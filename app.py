@@ -152,18 +152,18 @@ def get_korean_market():
 
     # 야간선물 (코스피200 선물)
     try:
-        fut = kis_get("/uapi/domestic-stock/v1/quotations/inquire-price",
-                      "FHKST01010100",
-                      {"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": "101W9000"}).get("output", {})
-        price = fut.get("stck_prpr", "")
-        chg = fut.get("prdy_ctrt", "")
-        chg_amt = fut.get("prdy_vrss", "")
-        if price and float(price) > 0:
-            sign = "▲" if float(chg or 0) >= 0 else "▼"
-            result["futures_auto"] = f"{float(price):,.2f}pt {sign} {abs(float(chg_amt or 0)):.2f} ({chg}%)"
+        fut = kis_get("/uapi/domestic-futureoption/v1/quotations/inquire-price",
+                      "FHKIF03010100",
+                      {"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": "101W9"}).get("output", {})
+        price = fut.get("stck_prpr", "") or fut.get("last", "")
+        chg = fut.get("prdy_ctrt", "") or fut.get("rate", "")
+        chg_amt = fut.get("prdy_vrss", "") or fut.get("diff", "")
+        if price and float(str(price).replace(",","") or 0) > 0:
+            sign = "▲" if float(str(chg).replace(",","") or 0) >= 0 else "▼"
+            result["futures_auto"] = f"{float(str(price).replace(',','')):,.2f}pt {sign} {abs(float(str(chg_amt).replace(',','') or 0)):.2f} ({chg}%)"
         else:
             result["futures_auto"] = None
-    except:
+    except Exception as e:
         result["futures_auto"] = None
 
     return result
@@ -287,6 +287,11 @@ def api_news():
         ("한경 증권", "https://www.hankyung.com/feed/stock"),
         ("한경 금융", "https://www.hankyung.com/feed/finance"),
         ("한경 국제", "https://www.hankyung.com/feed/international"),
+        ("매일경제", "https://www.mk.co.kr/rss/30000001/"),
+        ("매일경제 증권", "https://www.mk.co.kr/rss/30100041/"),
+        ("파이낸셜뉴스", "https://www.fnnews.com/rss/fn_economy_rss.xml"),
+        ("머니투데이", "https://rss.mt.co.kr/mt_finance.xml"),
+        ("구글 경제뉴스", "https://news.google.com/rss/search?q=%EA%B2%BD%EC%A0%9C+%EC%A6%9D%EA%B6%8C&hl=ko&gl=KR&ceid=KR:ko"),
     ]
     items = []
     for source, url in feeds:
@@ -304,7 +309,7 @@ def api_news():
             pass
     # Sort by pub date roughly (string sort works for RFC 2822)
     items.sort(key=lambda x: x["pub"], reverse=True)
-    return jsonify({"items": items[:20]})
+    return jsonify({"items": items[:25]})
 
 
 @app.route("/api/kstock/search")
