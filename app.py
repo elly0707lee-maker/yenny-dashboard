@@ -204,6 +204,14 @@ def get_latest_post(t):
     return {"content": rows[0][0], "date": rows[0][1]} if rows else None
 
 
+@app.route("/manifest.json")
+def manifest():
+    return Response(open("manifest.json").read(), mimetype="application/manifest+json")
+
+@app.route("/service-worker.js")
+def sw():
+    return Response(open("service-worker.js").read(), mimetype="application/javascript")
+
 @app.route("/")
 @requires_auth
 def index():
@@ -468,7 +476,12 @@ def get_html():
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Yenny">
+<meta name="theme-color" content="#1a1d23">
+<link rel="manifest" href="/manifest.json">
 <title>Yenny Dashboard</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap');
@@ -1128,6 +1141,11 @@ loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
 setInterval(loadAll,5*60*1000);
+</script>
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/service-worker.js');
+}
 </script>
 </body>
 </html>"""
