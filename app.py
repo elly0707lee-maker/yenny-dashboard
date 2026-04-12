@@ -238,7 +238,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -246,7 +246,7 @@ def api_get_post(pt):
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -434,6 +434,55 @@ def kstock_search():
 @requires_auth
 def clear_todo():
     save_post("todo", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/calendar/parse", methods=["POST"])
+@requires_auth
+def calendar_parse():
+    body = request.json or {}
+    raw = body.get("content", "")
+    if not raw:
+        return jsonify({"error": "내용 없음"}), 400
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": f"""아래는 주간 증시 일정 텍스트입니다. 
+날짜별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
+
+{{
+  "week_label": "4월 11일~17일",
+  "days": [
+    {{
+      "date": "4월 11일 토요일",
+      "day_key": "sat",
+      "items": ["美-이란, 파키스탄서 협상 개시", "푸틴, 우크라 전쟁 부활절 휴전 선언"]
+    }}
+  ]
+}}
+
+day_key는 mon/tue/wed/thu/fri/sat/sun 중 하나.
+각 items는 핵심만 한 줄로 요약. 세부내용은 생략.
+
+텍스트:
+{raw}"""}]
+        )
+        import json
+        text = msg.content[0].text.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        save_post("calendar", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/calendar/clear", methods=["POST"])
+@requires_auth
+def calendar_clear():
+    save_post("calendar", "", datetime.now().strftime("%Y-%m-%d"))
     return jsonify({"ok": True})
 
 
@@ -775,6 +824,21 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
+  <!-- 주간 캘린더 -->
+  <div class="section-label">📅 주간 일정 캘린더</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📅 이번 주 주요 일정</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="saved-badge" id="cal-badge">✓ 저장됨</span>
+        <button class="btn btn-primary" onclick="parseCalendar()" id="cal-btn">✦ AI 정리</button>
+        <button class="btn" onclick="clearCalendar()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+      </div>
+    </div>
+    <textarea class="input-area" id="cal-input" placeholder="주간 일정 텍스트 붙여넣기..." style="min-height:100px;"></textarea>
+    <div id="cal-result" style="margin-top:14px;"></div>
+  </div>
+
   <div style="height:32px;"></div>
 </div>
 
@@ -1048,6 +1112,109 @@ async function loadNote(){
   }catch(e){}
 }
 
+const DAY_LABELS = {mon:'월',tue:'화',wed:'수',thu:'목',fri:'금',sat:'토',sun:'일'};
+
+function renderCalendar(data){
+  const result = document.getElementById('cal-result');
+  if(!data || !data.days || !data.days.length){
+    result.innerHTML='<span class="content-empty">일정이 없어요.</span>';
+    return;
+  }
+  const weekLabel = data.week_label || '';
+  let html = `<div style="font-size:12px;font-weight:700;color:#7a8099;margin-bottom:10px;">${weekLabel}</div>`;
+  
+  // Tabs
+  html += '<div class="tab-bar" id="cal-tabs">';
+  data.days.forEach((day, i) => {
+    const active = i===0 ? 'active' : '';
+    html += `<button class="tab ${active}" onclick="calTab(this,'cal-day-${i}')">${day.date.replace(/.*?(\d+일)\s*(\S+요일).*/, '$1 $2')}</button>`;
+  });
+  html += '</div>';
+
+  // Day panels
+  data.days.forEach((day, i) => {
+    const display = i===0 ? 'block' : 'none';
+    html += `<div id="cal-day-${i}" style="display:${display};">`;
+    html += `<div style="font-size:13px;font-weight:700;color:#2d3436;margin-bottom:8px;">${day.date}</div>`;
+    if(day.items && day.items.length){
+      day.items.forEach((item,j) => {
+        html += `<div style="padding:6px 0;border-bottom:1px solid #f0f2f5;font-size:13px;color:#2d3436;">
+          <span style="color:#e8b84b;font-weight:700;margin-right:6px;">${j+1}.</span>${item}
+        </div>`;
+      });
+    }
+    // 출연자 입력칸
+    html += `<div style="margin-top:12px;">
+      <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:6px;">👤 출연자</div>
+      <textarea class="input-area" id="cal-guest-${i}" placeholder="출연자 이름, 소속 등..." style="min-height:60px;font-size:13px;" onchange="saveGuest(${i})">${day.guest||''}</textarea>
+    </div>`;
+    html += '</div>';
+  });
+
+  result.innerHTML = html;
+}
+
+function calTab(btn, panelId){
+  document.querySelectorAll('#cal-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#cal-result [id^="cal-day-"]').forEach(el=>el.style.display='none');
+  const el=document.getElementById(panelId);
+  if(el)el.style.display='block';
+}
+
+function saveGuest(idx){
+  const val=document.getElementById('cal-guest-'+idx)?.value||'';
+  let data=JSON.parse(localStorage.getItem('cal-guests')||'{}');
+  data[idx]=val;
+  localStorage.setItem('cal-guests',JSON.stringify(data));
+}
+
+async function parseCalendar(){
+  const raw=document.getElementById('cal-input').value.trim();
+  if(!raw)return;
+  const btn=document.getElementById('cal-btn');
+  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span> AI 정리 중...';
+  try{
+    const d=await fetch('/api/calendar/parse',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content:raw})
+    }).then(r=>r.json());
+    if(d.error){
+      document.getElementById('cal-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+    } else {
+      renderCalendar(d);
+      document.getElementById('cal-input').value='';
+      const badge=document.getElementById('cal-badge');
+      badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+    }
+  }catch(e){document.getElementById('cal-result').innerHTML='<span class="content-empty">오류 발생</span>';}
+  btn.classList.remove('ls');btn.innerHTML='✦ AI 정리';
+}
+
+async function clearCalendar(){
+  if(!confirm('캘린더 초기화할까요?'))return;
+  await fetch('/api/calendar/clear',{method:'POST'});
+  document.getElementById('cal-input').value='';
+  document.getElementById('cal-result').innerHTML='';
+  localStorage.removeItem('cal-guests');
+}
+
+async function loadCalendar(){
+  try{
+    const d=await fetch('/api/post/calendar').then(r=>r.json());
+    if(d.content){
+      const data=JSON.parse(d.content);
+      renderCalendar(data);
+      // restore guests
+      const guests=JSON.parse(localStorage.getItem('cal-guests')||'{}');
+      Object.entries(guests).forEach(([i,v])=>{
+        const el=document.getElementById('cal-guest-'+i);
+        if(el)el.value=v;
+      });
+    }
+  }catch(e){}
+}
+
 async function generateBriefing(){
   const btn=document.getElementById('briefing-btn');
   const body=document.getElementById('briefing-body');
@@ -1170,6 +1337,7 @@ loadReportTabs();
 loadNote();
 loadTodo();
 loadNews();
+loadCalendar();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
