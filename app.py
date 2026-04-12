@@ -155,20 +155,20 @@ def get_korean_market():
         raw = kis_get("/uapi/domestic-futureoption/v1/quotations/inquire-price",
                       "FHKIF03010100",
                       {"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": "101W9"})
-        logger.info(f"[FUTURES DEBUG] raw={raw}")
+        print(f"[FUTURES DEBUG] raw={raw}", flush=True)
         fut = raw.get("output", {})
-        logger.info(f"[FUTURES DEBUG] output keys={list(fut.keys())[:10]}")
+        print(f"[FUTURES DEBUG] keys={list(fut.keys())[:10]}", flush=True)
         price = fut.get("stck_prpr", "") or fut.get("last", "")
         chg = fut.get("prdy_ctrt", "") or fut.get("rate", "")
         chg_amt = fut.get("prdy_vrss", "") or fut.get("diff", "")
-        logger.info(f"[FUTURES DEBUG] price={price} chg={chg}")
+        print(f"[FUTURES DEBUG] price={price} chg={chg}", flush=True)
         if price and float(str(price).replace(",","") or 0) > 0:
             sign = "▲" if float(str(chg).replace(",","") or 0) >= 0 else "▼"
             result["futures_auto"] = f"{float(str(price).replace(',','')):,.2f}pt {sign} {abs(float(str(chg_amt).replace(',','') or 0)):.2f} ({chg}%)"
         else:
             result["futures_auto"] = None
     except Exception as e:
-        logger.info(f"[FUTURES ERROR] {e}")
+        print(f"[FUTURES ERROR] {e}", flush=True)
         result["futures_auto"] = None
 
     return result
