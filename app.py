@@ -449,7 +449,7 @@ def calendar_parse():
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
-            messages=[{"role": "user", "content": f"""아래는 주간 증시 일정 텍스트입니다. 
+            messages=[{"role": "user", "content": f"""아래는 주간 증시 일정 텍스트입니다.
 날짜별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
 
 {{
@@ -458,13 +458,17 @@ def calendar_parse():
     {{
       "date": "4월 11일 토요일",
       "day_key": "sat",
-      "items": ["美-이란, 파키스탄서 협상 개시", "푸틴, 우크라 전쟁 부활절 휴전 선언"]
+      "items": ["美-이란, 파키스탄서 협상 개시", "푸틴, 우크라 전쟁 부활절 휴전 선언"],
+      "guests": ["반종민 소장 - 주도주를 만드는 이슈", "박종현 대표 - 가는 종목이 더 간다"]
     }}
   ]
 }}
 
-day_key는 mon/tue/wed/thu/fri/sat/sun 중 하나.
-각 items는 핵심만 한 줄로 요약. 세부내용은 생략.
+규칙:
+- day_key는 mon/tue/wed/thu/fri/sat/sun 중 하나
+- items: 경제·증권 일정만. 핵심 한 줄 요약. 세부내용 생략.
+- guests: 출연자 이름과 주제가 있으면 guests 배열에. "이름 - 주제" 형식. 출연자가 없으면 빈 배열 [].
+- 출연자처럼 보이는 항목(사람 이름 + 주제/소속)은 반드시 guests로 분류.
 
 텍스트:
 {raw}"""}]
@@ -1178,12 +1182,25 @@ function renderCalendar(data){
       <button class="btn" onclick="addCalItem(${i})" style="margin-top:4px;font-size:12px;padding:5px 10px;">+ 추가</button>
     </div>`;
 
-    // Guest
+    // Guests (editable list)
     html += `<div style="margin-top:12px;border-top:1px solid #f0f2f5;padding-top:10px;">
       <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:6px;">👤 출연자</div>
-      <textarea class="input-area" id="cal-guest-${i}" placeholder="출연자 이름, 소속 등..." style="min-height:60px;font-size:13px;"
-        onchange="_calData.days[${i}].guest=this.value;saveCalendarDB()">${day.guest||''}</textarea>
-    </div>`;
+      <div id="cal-guests-${i}">`;
+    (day.guests||[]).forEach((guest,j) => {
+      html += `<div style="padding:5px 0;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:6px;">
+        <span style="color:#0984e3;font-weight:700;font-size:12px;min-width:18px;">${j+1}.</span>
+        <input value="${guest.replace(/"/g,'&quot;')}" style="flex:1;border:none;background:transparent;font-size:13px;color:#2d3436;padding:0;"
+          onchange="_calData.days[${i}].guests[${j}]=this.value;saveCalendarDB()"/>
+        <button onclick="deleteCalGuest(${i},${j})" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
+      </div>`;
+    });
+    html += `</div>
+      <div style="margin-top:6px;display:flex;gap:6px;">
+        <input id="cal-new-guest-${i}" class="input-area" placeholder="+ 출연자 추가... (이름 - 주제)" style="min-height:auto;padding:6px 10px;font-size:13px;flex:1;"
+          onkeydown="if(event.key==='Enter'){addCalGuest(${i});event.preventDefault();}"/>
+        <button class="btn" onclick="addCalGuest(${i})" style="font-size:12px;padding:5px 10px;">+ 추가</button>
+      </div>
+    </div>\`;
     html += '</div>';
   });
 
@@ -1206,6 +1223,28 @@ function addCalItem(dayIdx){
   if(!val || !_calData) return;
   _calData.days[dayIdx].items = _calData.days[dayIdx].items || [];
   _calData.days[dayIdx].items.push(val);
+  saveCalendarDB();
+  renderCalendar(_calData);
+  const tabs = document.querySelectorAll('#cal-tabs .tab');
+  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
+}
+
+function deleteCalGuest(dayIdx, guestIdx){
+  if(!_calData) return;
+  _calData.days[dayIdx].guests = _calData.days[dayIdx].guests || [];
+  _calData.days[dayIdx].guests.splice(guestIdx, 1);
+  saveCalendarDB();
+  renderCalendar(_calData);
+  const tabs = document.querySelectorAll('#cal-tabs .tab');
+  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
+}
+
+function addCalGuest(dayIdx){
+  const inp = document.getElementById('cal-new-guest-'+dayIdx);
+  const val = inp?.value.trim();
+  if(!val || !_calData) return;
+  _calData.days[dayIdx].guests = _calData.days[dayIdx].guests || [];
+  _calData.days[dayIdx].guests.push(val);
   saveCalendarDB();
   renderCalendar(_calData);
   const tabs = document.querySelectorAll('#cal-tabs .tab');
