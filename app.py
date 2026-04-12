@@ -479,6 +479,16 @@ day_key는 mon/tue/wed/thu/fri/sat/sun 중 하나.
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/calendar/update", methods=["POST"])
+@requires_auth
+def calendar_update():
+    import json
+    body = request.json or {}
+    data = body.get("data", {})
+    save_post("calendar", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/calendar/clear", methods=["POST"])
 @requires_auth
 def calendar_clear():
@@ -1112,46 +1122,94 @@ async function loadNote(){
   }catch(e){}
 }
 
-const DAY_LABELS = {mon:'월',tue:'화',wed:'수',thu:'목',fri:'금',sat:'토',sun:'일'};
+let _calData = null;
+
+async function saveCalendarDB(){
+  if(!_calData) return;
+  await fetch('/api/calendar/update',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({data: _calData})
+  });
+}
 
 function renderCalendar(data){
+  _calData = data;
   const result = document.getElementById('cal-result');
   if(!data || !data.days || !data.days.length){
     result.innerHTML='<span class="content-empty">일정이 없어요.</span>';
     return;
   }
   const weekLabel = data.week_label || '';
-  let html = `<div style="font-size:12px;font-weight:700;color:#7a8099;margin-bottom:10px;">${weekLabel}</div>`;
-  
-  // Tabs
+  let html = '';
+  if(weekLabel) html += `<div style="font-size:12px;font-weight:700;color:#7a8099;margin-bottom:10px;">${weekLabel}
+    <input id="cal-week-label" value="${weekLabel}" style="margin-left:8px;font-size:11px;padding:2px 6px;border:1px solid #dfe6e9;border-radius:4px;color:#2d3436;" onchange="_calData.week_label=this.value;saveCalendarDB()"/>
+  </div>`;
+
   html += '<div class="tab-bar" id="cal-tabs">';
   data.days.forEach((day, i) => {
     const active = i===0 ? 'active' : '';
-    html += `<button class="tab ${active}" onclick="calTab(this,'cal-day-${i}')">${day.date.replace(/.*?(\d+일)\s*(\S+요일).*/, '$1 $2')}</button>`;
+    const shortDate = day.date.match(/\d+일/) ? day.date.match(/\d+일/)[0] : day.date.slice(0,6);
+    const dayName = day.date.match(/[월화수목금토일]요일/) ? day.date.match(/[월화수목금토일]요일/)[0] : '';
+    html += `<button class="tab ${active}" onclick="calTab(this,'cal-day-${i}')">${shortDate} ${dayName}</button>`;
   });
   html += '</div>';
 
-  // Day panels
   data.days.forEach((day, i) => {
     const display = i===0 ? 'block' : 'none';
     html += `<div id="cal-day-${i}" style="display:${display};">`;
     html += `<div style="font-size:13px;font-weight:700;color:#2d3436;margin-bottom:8px;">${day.date}</div>`;
-    if(day.items && day.items.length){
-      day.items.forEach((item,j) => {
-        html += `<div style="padding:6px 0;border-bottom:1px solid #f0f2f5;font-size:13px;color:#2d3436;">
-          <span style="color:#e8b84b;font-weight:700;margin-right:6px;">${j+1}.</span>${item}
-        </div>`;
-      });
-    }
-    // 출연자 입력칸
-    html += `<div style="margin-top:12px;">
+    
+    // Items
+    html += `<div id="cal-items-${i}">`;
+    (day.items||[]).forEach((item,j) => {
+      html += `<div id="cal-item-${i}-${j}" style="padding:6px 0;border-bottom:1px solid #f0f2f5;display:flex;align-items:flex-start;gap:6px;">
+        <span style="color:#e8b84b;font-weight:700;font-size:13px;min-width:18px;">${j+1}.</span>
+        <input value="${item.replace(/"/g,'&quot;')}" style="flex:1;border:none;background:transparent;font-size:13px;color:#2d3436;padding:0;"
+          onchange="_calData.days[${i}].items[${j}]=this.value;saveCalendarDB()"/>
+        <button onclick="deleteCalItem(${i},${j})" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
+      </div>`;
+    });
+    html += '</div>';
+
+    // Add item button
+    html += `<div style="margin-top:8px;">
+      <input id="cal-new-${i}" class="input-area" placeholder="+ 일정 추가..." style="min-height:auto;padding:6px 10px;font-size:13px;" 
+        onkeydown="if(event.key==='Enter'){addCalItem(${i});event.preventDefault();}"/>
+      <button class="btn" onclick="addCalItem(${i})" style="margin-top:4px;font-size:12px;padding:5px 10px;">+ 추가</button>
+    </div>`;
+
+    // Guest
+    html += `<div style="margin-top:12px;border-top:1px solid #f0f2f5;padding-top:10px;">
       <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:6px;">👤 출연자</div>
-      <textarea class="input-area" id="cal-guest-${i}" placeholder="출연자 이름, 소속 등..." style="min-height:60px;font-size:13px;" onchange="saveGuest(${i})">${day.guest||''}</textarea>
+      <textarea class="input-area" id="cal-guest-${i}" placeholder="출연자 이름, 소속 등..." style="min-height:60px;font-size:13px;"
+        onchange="_calData.days[${i}].guest=this.value;saveCalendarDB()">${day.guest||''}</textarea>
     </div>`;
     html += '</div>';
   });
 
   result.innerHTML = html;
+}
+
+function deleteCalItem(dayIdx, itemIdx){
+  if(!_calData) return;
+  _calData.days[dayIdx].items.splice(itemIdx, 1);
+  saveCalendarDB();
+  renderCalendar(_calData);
+  // Re-activate same tab
+  const tabs = document.querySelectorAll('#cal-tabs .tab');
+  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
+}
+
+function addCalItem(dayIdx){
+  const inp = document.getElementById('cal-new-'+dayIdx);
+  const val = inp?.value.trim();
+  if(!val || !_calData) return;
+  _calData.days[dayIdx].items = _calData.days[dayIdx].items || [];
+  _calData.days[dayIdx].items.push(val);
+  saveCalendarDB();
+  renderCalendar(_calData);
+  const tabs = document.querySelectorAll('#cal-tabs .tab');
+  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
 }
 
 function calTab(btn, panelId){
@@ -1160,13 +1218,6 @@ function calTab(btn, panelId){
   document.querySelectorAll('#cal-result [id^="cal-day-"]').forEach(el=>el.style.display='none');
   const el=document.getElementById(panelId);
   if(el)el.style.display='block';
-}
-
-function saveGuest(idx){
-  const val=document.getElementById('cal-guest-'+idx)?.value||'';
-  let data=JSON.parse(localStorage.getItem('cal-guests')||'{}');
-  data[idx]=val;
-  localStorage.setItem('cal-guests',JSON.stringify(data));
 }
 
 async function parseCalendar(){
@@ -1182,7 +1233,18 @@ async function parseCalendar(){
     if(d.error){
       document.getElementById('cal-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
     } else {
-      renderCalendar(d);
+      // Merge with existing data if exists
+      if(_calData && _calData.days){
+        d.days.forEach(newDay => {
+          const existing = _calData.days.find(d2 => d2.day_key === newDay.day_key);
+          if(existing){
+            existing.items = [...(existing.items||[]), ...(newDay.items||[])];
+          }
+        });
+        renderCalendar(_calData);
+      } else {
+        renderCalendar(d);
+      }
       document.getElementById('cal-input').value='';
       const badge=document.getElementById('cal-badge');
       badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
@@ -1194,9 +1256,9 @@ async function parseCalendar(){
 async function clearCalendar(){
   if(!confirm('캘린더 초기화할까요?'))return;
   await fetch('/api/calendar/clear',{method:'POST'});
+  _calData = null;
   document.getElementById('cal-input').value='';
   document.getElementById('cal-result').innerHTML='';
-  localStorage.removeItem('cal-guests');
 }
 
 async function loadCalendar(){
@@ -1205,12 +1267,6 @@ async function loadCalendar(){
     if(d.content){
       const data=JSON.parse(d.content);
       renderCalendar(data);
-      // restore guests
-      const guests=JSON.parse(localStorage.getItem('cal-guests')||'{}');
-      Object.entries(guests).forEach(([i,v])=>{
-        const el=document.getElementById('cal-guest-'+i);
-        if(el)el.value=v;
-      });
     }
   }catch(e){}
 }
