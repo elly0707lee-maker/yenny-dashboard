@@ -150,26 +150,7 @@ def get_korean_market():
             result[mkt]["institution"] = sup[0].get("orgn_ntby_qty", None)
             result[mkt]["individual"] = sup[0].get("indv_ntby_qty", None)
 
-    # 야간선물 (코스피200 선물)
-    try:
-        raw = kis_get("/uapi/domestic-futureoption/v1/quotations/inquire-price",
-                      "FHKIF03010100",
-                      {"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": "101W9"})
-        print(f"[FUTURES DEBUG] raw={raw}", flush=True)
-        fut = raw.get("output", {})
-        print(f"[FUTURES DEBUG] keys={list(fut.keys())[:10]}", flush=True)
-        price = fut.get("stck_prpr", "") or fut.get("last", "")
-        chg = fut.get("prdy_ctrt", "") or fut.get("rate", "")
-        chg_amt = fut.get("prdy_vrss", "") or fut.get("diff", "")
-        print(f"[FUTURES DEBUG] price={price} chg={chg}", flush=True)
-        if price and float(str(price).replace(",","") or 0) > 0:
-            sign = "▲" if float(str(chg).replace(",","") or 0) >= 0 else "▼"
-            result["futures_auto"] = f"{float(str(price).replace(',','')):,.2f}pt {sign} {abs(float(str(chg_amt).replace(',','') or 0)):.2f} ({chg}%)"
-        else:
-            result["futures_auto"] = None
-    except Exception as e:
-        print(f"[FUTURES ERROR] {e}", flush=True)
-        result["futures_auto"] = None
+    result["futures_auto"] = None
 
     return result
 
@@ -612,6 +593,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div class="input-row">
         <input class="input-line" id="futures-input" placeholder="예) +1.2%" style="flex:1;" />
         <button class="btn btn-green" onclick="saveFutures()">저장</button>
+        <button class="btn" onclick="clearFutures()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
       </div>
     </div>
     <div class="content-card" style="margin-bottom:0;">
@@ -918,6 +900,13 @@ async function loadAutoFutures(){
       if(autoEl) autoEl.textContent='KIS: '+d.futures_auto;
     }
   }catch(e){}
+}
+
+async function clearFutures(){
+  await fetch('/api/post/futures',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:'',date:new Date().toISOString().slice(0,10)})});
+  document.getElementById('futures-display').textContent='—';
+  document.getElementById('futures-input').value='';
 }
 
 async function saveFutures(){
