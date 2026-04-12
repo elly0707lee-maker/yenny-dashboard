@@ -149,6 +149,23 @@ def get_korean_market():
             result[mkt]["foreign"] = sup[0].get("frgn_ntby_qty", None)
             result[mkt]["institution"] = sup[0].get("orgn_ntby_qty", None)
             result[mkt]["individual"] = sup[0].get("indv_ntby_qty", None)
+
+    # 야간선물 (코스피200 선물)
+    try:
+        fut = kis_get("/uapi/domestic-stock/v1/quotations/inquire-price",
+                      "FHKST01010100",
+                      {"FID_COND_MRKT_DIV_CODE": "F", "FID_INPUT_ISCD": "101W9000"}).get("output", {})
+        price = fut.get("stck_prpr", "")
+        chg = fut.get("prdy_ctrt", "")
+        chg_amt = fut.get("prdy_vrss", "")
+        if price and float(price) > 0:
+            sign = "▲" if float(chg or 0) >= 0 else "▼"
+            result["futures_auto"] = f"{float(price):,.2f}pt {sign} {abs(float(chg_amt or 0)):.2f} ({chg}%)"
+        else:
+            result["futures_auto"] = None
+    except:
+        result["futures_auto"] = None
+
     return result
 
 
@@ -581,6 +598,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <span class="saved-badge" id="futures-badge">✓ 저장됨</span>
       </div>
       <div id="futures-display" class="futures-val">—</div>
+      <div id="futures-auto-val" style="font-size:11px;color:#b2bec3;margin-bottom:6px;"></div>
       <div class="input-row">
         <input class="input-line" id="futures-input" placeholder="예) +1.2%" style="flex:1;" />
         <button class="btn btn-green" onclick="saveFutures()">저장</button>
@@ -877,6 +895,21 @@ async function loadFutures(){
   }catch(e){}
 }
 
+async function loadAutoFutures(){
+  try{
+    const d=await fetch('/api/market').then(r=>r.json());
+    if(d.futures_auto){
+      const el=document.getElementById('futures-display');
+      const inp=document.getElementById('futures-input');
+      if(el && (!el.textContent || el.textContent==='—')) {
+        el.textContent=d.futures_auto;
+      }
+      const autoEl=document.getElementById('futures-auto-val');
+      if(autoEl) autoEl.textContent='KIS: '+d.futures_auto;
+    }
+  }catch(e){}
+}
+
 async function saveFutures(){
   const val=document.getElementById('futures-input').value.trim();
   if(!val)return;
@@ -1133,6 +1166,7 @@ async function loadAll(){
 // 초기 로드
 loadAll();
 loadFutures();
+loadAutoFutures();
 loadReportTabs();
 loadNote();
 loadTodo();
