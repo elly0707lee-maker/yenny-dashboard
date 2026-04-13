@@ -903,7 +903,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <div class="content-card">
     <div class="content-header">
       <span class="content-title">👤 출연자 / 발언 검색</span>
-      <span style="font-size:11px;color:#b2bec3;">이름, 종목, 테마 입력</span>
+      <a href="https://docs.google.com/spreadsheets/d/1PENAycUyJS0WDhvC8aXHesHxmaXTq724261aWDnsMHc/edit?gid=437534302" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 DB 바로가기</a>
     </div>
     <div class="input-row">
       <input class="input-line" id="guest-input" placeholder="예) 반종민 / LIG넥스원 / 방산" style="flex:1;"
