@@ -437,6 +437,43 @@ def clear_todo():
     return jsonify({"ok": True})
 
 
+@app.route("/api/guest/search")
+@requires_auth
+def guest_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "검색어 없음"}), 400
+
+    GUEST_SHEET_ID = os.environ.get("GUEST_SHEET_ID", "")
+    if not GUEST_SHEET_ID:
+        return jsonify({"error": "GUEST_SHEET_ID 없음"}), 500
+
+    import csv, io as _io
+    base_url = f"https://docs.google.com/spreadsheets/d/{GUEST_SHEET_ID}/export?format=csv&gid="
+
+    # Sheet GIDs - 탭 순서대로
+    sheets = [
+        ("Master", "437534302"),
+        ("History", "1633570539"),
+        ("골든픽", "1460063403"),
+        ("오늘장전략", "1283113183"),
+    ]
+
+    results = {}
+    for sheet_name, gid in sheets:
+        try:
+            r = requests.get(base_url + gid, timeout=10)
+            r.encoding = "utf-8"
+            rows = list(csv.DictReader(_io.StringIO(r.text)))
+            matched = [row for row in rows if any(query in str(v) for v in row.values())]
+            if matched:
+                results[sheet_name] = matched
+        except:
+            pass
+
+    return jsonify({"results": results, "query": query})
+
+
 @app.route("/api/calendar/parse", methods=["POST"])
 @requires_auth
 def calendar_parse():
@@ -851,6 +888,21 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
     <textarea class="input-area" id="cal-input" placeholder="주간 일정 텍스트 붙여넣기..." style="min-height:100px;"></textarea>
     <div id="cal-result" style="margin-top:14px;"></div>
+  </div>
+
+  <!-- 출연자 DB 검색 -->
+  <div class="section-label">👤 출연자 DB 검색</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">👤 출연자 / 발언 검색</span>
+      <span style="font-size:11px;color:#b2bec3;">이름, 종목, 테마 입력</span>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="guest-input" placeholder="예) 반종민 / LIG넥스원 / 방산" style="flex:1;"
+        onkeydown="if(event.key==='Enter')searchGuest()"/>
+      <button class="btn btn-primary" onclick="searchGuest()" id="guest-btn">검색</button>
+    </div>
+    <div id="guest-result" style="margin-top:14px;"></div>
   </div>
 
   <div style="height:32px;"></div>
@@ -1285,6 +1337,48 @@ async function loadCalendar(){
       renderCalendar(data);
     }
   }catch(e){}
+}
+
+async function searchGuest(){
+  const q = document.getElementById('guest-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('guest-btn');
+  const result = document.getElementById('guest-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/guest/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    const sheets = Object.keys(d.results||{});
+    if(!sheets.length){
+      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
+      return;
+    }
+    let html = '';
+    sheets.forEach(sheet=>{
+      const rows = d.results[sheet];
+      html += '<div style="margin-bottom:16px;">';
+      html += '<div style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.08em;margin-bottom:8px;">📋 '+sheet+' ('+rows.length+'건)</div>';
+      rows.forEach(row=>{
+        html += '<div style="padding:8px 12px;background:#f8f9fa;border-radius:8px;margin-bottom:6px;font-size:13px;line-height:1.8;">';
+        Object.entries(row).forEach(([k,v])=>{
+          if(v && v.trim()){
+            html += '<span style="color:#7a8099;font-size:11px;font-weight:700;">'+k+'</span> ';
+            html += '<span style="color:#2d3436;">'+v+'</span>　';
+          }
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='검색';
 }
 
 async function generateBriefing(){
