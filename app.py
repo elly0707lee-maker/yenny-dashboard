@@ -459,19 +459,27 @@ def guest_search():
         ("오늘장전략", "1283113183"),
     ]
 
+    # 공백이나 /로 구분된 복수 검색어 → AND 조건
+    import re
+    terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
+
     results = {}
     for sheet_name, gid in sheets:
         try:
             r = requests.get(base_url + gid, timeout=10)
             r.encoding = "utf-8"
             rows = list(csv.DictReader(_io.StringIO(r.text)))
-            matched = [row for row in rows if any(query in str(v) for v in row.values())]
+            matched = []
+            for row in rows:
+                row_text = " ".join(str(v) for v in row.values())
+                if all(term in row_text for term in terms):
+                    matched.append(row)
             if matched:
                 results[sheet_name] = matched
         except:
             pass
 
-    return jsonify({"results": results, "query": query})
+    return jsonify({"results": results, "query": query, "terms": terms})
 
 
 @app.route("/api/calendar/parse", methods=["POST"])
@@ -1360,15 +1368,29 @@ async function searchGuest(){
     let html = '';
     sheets.forEach(sheet=>{
       const rows = d.results[sheet];
-      html += '<div style="margin-bottom:16px;">';
-      html += '<div style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.08em;margin-bottom:8px;">📋 '+sheet+' ('+rows.length+'건)</div>';
+      html += '<div style="margin-bottom:20px;">';
+      html += '<div style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.08em;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #e8b84b;">📋 '+sheet+' · '+rows.length+'건</div>';
       rows.forEach(row=>{
-        html += '<div style="padding:8px 12px;background:#f8f9fa;border-radius:8px;margin-bottom:6px;font-size:13px;line-height:1.8;">';
-        Object.entries(row).forEach(([k,v])=>{
-          if(v && v.trim()){
-            html += '<span style="color:#7a8099;font-size:11px;font-weight:700;">'+k+'</span> ';
-            html += '<span style="color:#2d3436;">'+v+'</span>　';
+        html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #e8b84b;">';
+        const entries = Object.entries(row).filter(([k,v])=>v&&v.trim());
+        // 날짜, 이름, 코너 먼저
+        const priority = ['날짜','이름','코너'];
+        const header = priority.map(k=>{
+          const e = entries.find(([ek])=>ek===k);
+          return e ? '<span style="font-size:12px;font-weight:700;color:#1a1d23;">'+e[1]+'</span>' : '';
+        }).filter(Boolean).join(' · ');
+        if(header) html += '<div style="margin-bottom:6px;">'+header+'</div>';
+        // 나머지 내용
+        entries.forEach(([k,v])=>{
+          if(priority.includes(k)) return;
+          html += '<div style="margin-bottom:3px;">';
+          html += '<span style="font-size:11px;color:#7a8099;font-weight:700;margin-right:6px;">'+k+'</span>';
+          if(v.startsWith('http')){
+            html += '<a href="'+v+'" target="_blank" style="font-size:12px;color:#0984e3;">🔗 링크</a>';
+          } else {
+            html += '<span style="font-size:13px;color:#2d3436;">'+v+'</span>';
           }
+          html += '</div>';
         });
         html += '</div>';
       });
