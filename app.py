@@ -319,7 +319,7 @@ def kstock_search():
         res.encoding = "utf-8"
         data = list(csv.DictReader(_io.StringIO(res.text)))
 
-        stock_hits = [r for r in data if query in r.get("종목명", "")]
+        stock_hits = [r for r in data if r.get("종목명", "").strip() == query.strip()]
         theme_hits = [r for r in data if query in r.get("테마", "")]
 
         lines = []
@@ -953,26 +953,26 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="cal-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- 표현 사전 -->
-  <div class="section-label">📖 표현 사전</div>
+  <!-- 출연자 DB 검색 -->
+  <div class="section-label">👤 출연자 DB 검색</div>
   <div class="content-card">
     <div class="content-header">
-      <span class="content-title">📖 나의 표현 사전</span>
-      <a href="https://docs.google.com/spreadsheets/d/1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 사전 편집</a>
+      <span class="content-title">👤 출연자 / 발언 검색</span>
+      <a href="https://docs.google.com/spreadsheets/d/1PENAycUyJS0WDhvC8aXHesHxmaXTq724261aWDnsMHc/edit?gid=437534302" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 DB 바로가기</a>
     </div>
     <div class="input-row">
-      <input class="input-line" id="enc-input" placeholder="예) 급락 / 반도체 / 금리 인상" style="flex:1;"
-        onkeydown="if(event.key==='Enter')searchEncyclopedia()"/>
-      <button class="btn btn-primary" onclick="searchEncyclopedia()" id="enc-btn">검색</button>
+      <input class="input-line" id="guest-input" placeholder="예) ㅇㅇㅇ / 삼성전자 / 반도체" style="flex:1;"
+        onkeydown="if(event.key==='Enter')searchGuest()"/>
+      <button class="btn btn-primary" onclick="searchGuest()" id="guest-btn">검색</button>
     </div>
-    <div id="enc-result" style="margin-top:14px;"></div>
+    <div id="guest-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- 표현 사전 -->
-  <div class="section-label">📖 표현 사전</div>
+<!-- 표현 사전 -->
+  <div class="section-label">📖 Encyclopedia</div>
   <div class="content-card">
     <div class="content-header">
-      <span class="content-title">📖 표현 검색</span>
+      <span class="content-title">📖 Encyclopedia</span>
       <a href="https://docs.google.com/spreadsheets/d/1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 사전 바로가기</a>
     </div>
     <div class="input-row">
@@ -983,22 +983,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="encyc-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- 출연자 DB 검색 -->
-  <div class="section-label">👤 출연자 DB 검색</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">👤 출연자 / 발언 검색</span>
-      <a href="https://docs.google.com/spreadsheets/d/1PENAycUyJS0WDhvC8aXHesHxmaXTq724261aWDnsMHc/edit?gid=437534302" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 DB 바로가기</a>
-    </div>
-    <div class="input-row">
-      <input class="input-line" id="guest-input" placeholder="예) 반종민 / LIG넥스원 / 방산" style="flex:1;"
-        onkeydown="if(event.key==='Enter')searchGuest()"/>
-      <button class="btn btn-primary" onclick="searchGuest()" id="guest-btn">검색</button>
-    </div>
-    <div id="guest-result" style="margin-top:14px;"></div>
-  </div>
-
-  <div style="height:32px;"></div>
+    <div style="height:32px;"></div>
 </div>
 
 <script>
