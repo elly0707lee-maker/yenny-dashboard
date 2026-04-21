@@ -437,6 +437,61 @@ def clear_todo():
     return jsonify({"ok": True})
 
 
+@app.route("/api/encyclopedia/search")
+@requires_auth
+def encyclopedia_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "검색어 없음"}), 400
+
+    ENC_SHEET_ID = "1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs"
+    import csv, io as _io, re
+    terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
+
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{ENC_SHEET_ID}/export?format=csv"
+        r = requests.get(url, timeout=10)
+        r.encoding = "utf-8"
+        rows = list(csv.DictReader(_io.StringIO(r.text)))
+        matched = []
+        for row in rows:
+            row_text = " ".join(str(v) for v in row.values())
+            if all(term in row_text for term in terms):
+                matched.append(row)
+        return jsonify({"results": matched, "query": query})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/encyc/search")
+@requires_auth
+def encyc_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "검색어 없음"}), 400
+
+    ENCYC_SHEET_ID = os.environ.get("ENCYC_SHEET_ID", "")
+    if not ENCYC_SHEET_ID:
+        return jsonify({"error": "ENCYC_SHEET_ID 없음"}), 500
+
+    import csv, io as _io, re
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{ENCYC_SHEET_ID}/export?format=csv"
+    terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
+
+    try:
+        r = requests.get(sheet_url, timeout=10)
+        r.encoding = "utf-8"
+        rows = list(csv.DictReader(_io.StringIO(r.text)))
+        matched = []
+        for row in rows:
+            row_text = " ".join(str(v) for v in row.values())
+            if all(term in row_text for term in terms):
+                matched.append(row)
+        return jsonify({"results": matched, "query": query})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/guest/search")
 @requires_auth
 def guest_search():
@@ -898,6 +953,36 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="cal-result" style="margin-top:14px;"></div>
   </div>
 
+  <!-- 표현 사전 -->
+  <div class="section-label">📖 표현 사전</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📖 나의 표현 사전</span>
+      <a href="https://docs.google.com/spreadsheets/d/1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 사전 편집</a>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="enc-input" placeholder="예) 급락 / 반도체 / 금리 인상" style="flex:1;"
+        onkeydown="if(event.key==='Enter')searchEncyclopedia()"/>
+      <button class="btn btn-primary" onclick="searchEncyclopedia()" id="enc-btn">검색</button>
+    </div>
+    <div id="enc-result" style="margin-top:14px;"></div>
+  </div>
+
+  <!-- 표현 사전 -->
+  <div class="section-label">📖 표현 사전</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📖 표현 검색</span>
+      <a href="https://docs.google.com/spreadsheets/d/1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 사전 바로가기</a>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="encyc-input" placeholder="예) 급락 / 금리인상 / 반도체" style="flex:1;"
+        onkeydown="if(event.key==='Enter')searchEncyc()"/>
+      <button class="btn btn-primary" onclick="searchEncyc()" id="encyc-btn">검색</button>
+    </div>
+    <div id="encyc-result" style="margin-top:14px;"></div>
+  </div>
+
   <!-- 출연자 DB 검색 -->
   <div class="section-label">👤 출연자 DB 검색</div>
   <div class="content-card">
@@ -1345,6 +1430,75 @@ async function loadCalendar(){
       renderCalendar(data);
     }
   }catch(e){}
+}
+
+async function searchEncyclopedia(){
+  const q = document.getElementById('enc-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('enc-btn');
+  const result = document.getElementById('enc-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/encyclopedia/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    if(!d.results || !d.results.length){
+      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.results.length+'건 검색됨</div>';
+    d.results.forEach(row=>{
+      html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #0984e3;">';
+      const 상황 = row['상황'] || '';
+      const 주제 = row['주제(시장/섹터/종목)'] || row['주제'] || '';
+      const 표현 = row['표현'] || '';
+      if(상황) html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:4px;">📌 '+상황+(주제?' · '+주제:'')+'</div>';
+      if(표현) html += '<div style="font-size:14px;color:#1a1d23;line-height:1.7;">'+표현+'</div>';
+      html += '</div>';
+    });
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='검색';
+}
+
+async function searchEncyc(){
+  const q = document.getElementById('encyc-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('encyc-btn');
+  const result = document.getElementById('encyc-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/encyc/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    if(!d.results||!d.results.length){
+      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.results.length+'건</div>';
+    d.results.forEach(row=>{
+      html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #0984e3;">';
+      const situation = row['상황'] || '';
+      const topic = row['주제(시장/섹터/종목)'] || row['주제'] || '';
+      const expr = row['표현'] || '';
+      if(situation) html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:4px;">📌 '+situation+'</div>';
+      if(topic) html += '<div style="font-size:12px;color:#0984e3;font-weight:600;margin-bottom:6px;">'+topic+'</div>';
+      if(expr) html += '<div style="font-size:14px;color:#1a1d23;line-height:1.7;">'+expr+'</div>';
+      html += '</div>';
+    });
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='검색';
 }
 
 async function searchGuest(){
