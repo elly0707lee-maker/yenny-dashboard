@@ -320,7 +320,11 @@ def kstock_search():
         data = list(csv.DictReader(_io.StringIO(res.text)))
 
         stock_hits = [r for r in data if r.get("종목명", "").strip() == query.strip()]
-        theme_hits = [r for r in data if query in r.get("테마", "")]
+        # 종목 검색 결과 있으면 테마 검색 생략 (삼성전자 검색 시 삼성전자향 등 안 나오게)
+        if stock_hits:
+            theme_hits = []
+        else:
+            theme_hits = [r for r in data if query in r.get("테마", "")]
 
         lines = []
 
