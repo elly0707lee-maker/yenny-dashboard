@@ -7,6 +7,7 @@ import anthropic
 import pg8000.native
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -34,11 +35,14 @@ def init_db():
         id SERIAL PRIMARY KEY,
         type TEXT NOT NULL, content TEXT NOT NULL,
         date TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    conn.run("""CREATE TABLE IF NOT EXISTS pdfs (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        data TEXT NOT NULL,
-        created_at TEXT NOT NULL)""")
+    try:
+        conn.run("""CREATE TABLE IF NOT EXISTS pdfs (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at TEXT NOT NULL)""")
+    except Exception:
+        pass
     conn.close()
 
 init_db()
@@ -560,7 +564,7 @@ def pdf_upload():
         conn.run("DELETE FROM pdfs WHERE id=%s", (rows[0][0],))
     from datetime import datetime as dt
     conn.run("INSERT INTO pdfs (name, data, created_at) VALUES ($1,$2,$3)",
-                 (name, data, dt.now().isoformat()))
+                 name, data, dt.now().isoformat())
     conn.close()
     return jsonify({"ok": True})
 
@@ -1069,24 +1073,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
   <div class="grid2" style="align-items:start;">
-    <!-- 왼쪽: PDF 뷰어 -->
-    <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">📄 리서치 리포트</span>
-        <div style="display:flex;gap:6px;">
-          <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
-            + 업로드
-            <input type="file" id="pdf-upload-input" accept=".pdf" multiple style="display:none;" onchange="uploadPDFs(this)"/>
-          </label>
-          <button class="btn" onclick="clearAllPDFs()" style="color:#d63031;border-color:#fab1a0;font-size:12px;padding:6px 12px;">↺ 전체삭제</button>
-        </div>
-      </div>
-      <div class="tab-bar" id="pdf-tabs" style="flex-wrap:wrap;"></div>
-      <div id="pdf-viewer" style="width:100%;height:500px;border-radius:8px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;">
-        <span class="content-empty">PDF를 업로드해주세요</span>
-      </div>
-    </div>
-    <!-- 오른쪽: 마감일지 -->
+    <!-- 왼쪽: 마감일지 -->
     <div class="content-card" style="margin-bottom:0;">
     <div class="content-header">
       <span class="content-title">📋 마감일지</span>
@@ -1102,6 +1089,23 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <button class="tab" onclick="clTab(this,'schedule')">내일일정</button>
     </div>
     <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
+    </div>
+    <!-- 오른쪽: PDF 뷰어 -->
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">📄 리서치 리포트</span>
+        <div style="display:flex;gap:6px;">
+          <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
+            + 업로드
+            <input type="file" id="pdf-upload-input" accept=".pdf" multiple style="display:none;" onchange="uploadPDFs(this)"/>
+          </label>
+          <button class="btn" onclick="clearAllPDFs()" style="color:#d63031;border-color:#fab1a0;font-size:12px;padding:6px 12px;">↺ 전체삭제</button>
+        </div>
+      </div>
+      <div class="tab-bar" id="pdf-tabs" style="flex-wrap:wrap;"></div>
+      <div id="pdf-viewer" style="width:100%;height:500px;border-radius:8px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;">
+        <span class="content-empty">PDF를 업로드해주세요</span>
+      </div>
     </div>
   </div>
 
