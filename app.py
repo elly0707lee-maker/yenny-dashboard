@@ -561,10 +561,10 @@ def pdf_upload():
     # Max 3 PDFs - delete oldest if over
     rows = conn.run("SELECT id FROM pdfs ORDER BY created_at ASC")
     if len(rows) >= 3:
-        conn.run("DELETE FROM pdfs WHERE id=%s", (rows[0][0],))
+        conn.run("DELETE FROM pdfs WHERE id=:i", i=rows[0][0])
     from datetime import datetime as dt
-    conn.run("INSERT INTO pdfs (name, data, created_at) VALUES ($1,$2,$3)",
-                 name, data, dt.now().isoformat())
+    conn.run("INSERT INTO pdfs (name, data, created_at) VALUES (:n,:d,:c)",
+                 n=name, d=data, c=dt.now().isoformat())
     conn.close()
     return jsonify({"ok": True})
 
@@ -582,7 +582,7 @@ def pdf_list():
 @requires_auth
 def pdf_get(pdf_id):
     conn = get_db()
-    rows = conn.run("SELECT name, data FROM pdfs WHERE id=%s", (pdf_id,))
+    rows = conn.run("SELECT name, data FROM pdfs WHERE id=:i", i=pdf_id)
     conn.close()
     if not rows:
         return jsonify({"error": "없음"}), 404
@@ -594,7 +594,7 @@ def pdf_get(pdf_id):
 @requires_auth
 def pdf_delete(pdf_id):
     conn = get_db()
-    conn.run("DELETE FROM pdfs WHERE id=%s", (pdf_id,))
+    conn.run("DELETE FROM pdfs WHERE id=:i", i=pdf_id)
     conn.close()
     return jsonify({"ok": True})
 
