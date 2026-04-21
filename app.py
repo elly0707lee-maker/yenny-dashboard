@@ -298,6 +298,78 @@ def api_news():
     return jsonify({"items": items[:25]})
 
 
+@app.route("/api/theme/prices")
+@requires_auth
+def theme_prices():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "테마명 없음"}), 400
+
+    SHEET_ID = os.environ.get("SHEET_ID", "")
+    if not SHEET_ID:
+        return jsonify({"error": "SHEET_ID 없음"}), 500
+
+    import csv, io as _io
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+    try:
+        res = requests.get(sheet_url, timeout=10)
+        res.encoding = "utf-8"
+        data = list(csv.DictReader(_io.StringIO(res.text)))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    # 테마 포함 종목 (중복 제거)
+    seen = set()
+    stocks = []
+    for r in data:
+        if query in r.get("테마", ""):
+            code = r.get("종목코드", "").strip()
+            name = r.get("종목명", "").strip()
+            theme = r.get("테마", "").strip()
+            if code and name and code not in seen:
+                seen.add(code)
+                stocks.append({"code": code, "name": name, "theme": theme})
+
+    if not stocks:
+        return jsonify({"stocks": [], "query": query})
+
+    # 시세 일괄 조회
+    results = []
+    for s in stocks:
+        try:
+            r = requests.get(
+                f"https://m.stock.naver.com/api/stock/{s['code']}/basic",
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=4)
+            if r.status_code == 200:
+                d = r.json()
+                price = d.get("closePrice") or d.get("currentPrice", "")
+                pct = d.get("fluctuationsRatio", "")
+                change = d.get("compareToPreviousClosePrice", "")
+                try:
+                    pct_f = float(str(pct).replace(",",""))
+                    price_i = int(str(price).replace(",",""))
+                    change_i = int(str(change).replace(",",""))
+                    arrow = "▲" if pct_f >= 0 else "▼"
+                    sign = "+" if pct_f >= 0 else ""
+                    results.append({
+                        "code": s["code"],
+                        "name": s["name"],
+                        "theme": s["theme"],
+                        "price": f"{price_i:,}",
+                        "change": f"{arrow} {abs(change_i):,}",
+                        "pct": f"{sign}{pct_f:.2f}%",
+                        "up": pct_f >= 0
+                    })
+                except:
+                    results.append({"code": s["code"], "name": s["name"], "theme": s["theme"], "price": str(price), "change": "", "pct": "", "up": None})
+        except:
+            results.append({"code": s["code"], "name": s["name"], "theme": s["theme"], "price": "—", "change": "", "pct": "", "up": None})
+
+    # 등락률 내림차순 정렬
+    results.sort(key=lambda x: float(x["pct"].replace("%","").replace("+","") or 0), reverse=True)
+    return jsonify({"stocks": results, "query": query, "count": len(results)})
+
+
 @app.route("/api/kstock/search")
 @requires_auth
 def kstock_search():
@@ -868,6 +940,21 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <iframe id="kstock-chart-frame" src="" style="width:100%;height:400px;border:none;border-radius:10px;"></iframe>
       </div>
     </div>
+  </div>
+
+  <!-- 테마 시세 -->
+  <div class="section-label">📈 테마 시세</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📈 테마별 종목 시세</span>
+      <span style="font-size:11px;color:#b2bec3;">DB 기반 일괄 조회</span>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="theme-input" placeholder="예) 방산 / 2차전지 / 반도체" style="flex:1;"
+        onkeydown="if(event.key==='Enter')searchThemePrices()"/>
+      <button class="btn btn-primary" onclick="searchThemePrices()" id="theme-price-btn">조회</button>
+    </div>
+    <div id="theme-price-result" style="margin-top:14px;"></div>
   </div>
 
   <!-- 체크포인트 -->
@@ -1453,6 +1540,42 @@ async function searchEncyclopedia(){
     result.innerHTML='<span class="content-empty">네트워크 오류</span>';
   }
   btn.classList.remove('ls'); btn.innerHTML='검색';
+}
+
+async function searchThemePrices(){
+  const q = document.getElementById('theme-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('theme-price-btn');
+  const result = document.getElementById('theme-price-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span> 조회 중...';
+  result.innerHTML='<span class="content-empty">시세 불러오는 중... (종목 수에 따라 10~20초 소요)</span>';
+  try{
+    const d = await fetch('/api/theme/prices?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    if(!d.stocks||!d.stocks.length){
+      result.innerHTML='<span class="content-empty">"'+q+'" 테마 종목이 없어요.</span>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.query+' · '+d.count+'종목</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">';
+    d.stocks.forEach(s=>{
+      const color = s.up === true ? '#d63031' : s.up === false ? '#0984e3' : '#636e72';
+      html += '<div style="padding:10px 12px;background:#f8f9fa;border-radius:10px;border-top:3px solid '+color+';">';
+      html += '<div style="font-size:13px;font-weight:700;color:#1a1d23;margin-bottom:4px;">'+s.name+'</div>';
+      html += '<div style="font-size:16px;font-weight:700;color:#1a1d23;font-family:DM Mono,monospace;">'+s.price+'</div>';
+      html += '<div style="font-size:12px;color:'+color+';font-weight:600;">'+s.change+' ('+s.pct+')</div>';
+      html += '<a href="https://m.stock.naver.com/domestic/stock/'+s.code+'/chart" target="_blank" style="font-size:10px;color:#b2bec3;">차트 →</a>';
+      html += '</div>';
+    });
+    html += '</div>';
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='조회';
 }
 
 async function searchEncyc(){
