@@ -539,6 +539,56 @@ def encyclopedia_search():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/pdf/upload", methods=["POST"])
+@requires_auth
+def pdf_upload():
+    import base64
+    body = request.json or {}
+    name = body.get("name", "report.pdf")
+    data = body.get("data", "")
+    if not data:
+        return jsonify({"error": "파일 없음"}), 400
+    conn = get_db()
+    # Max 3 PDFs - delete oldest if over
+    rows = conn.execute("SELECT id FROM pdfs ORDER BY created_at ASC").fetchall()
+    if len(rows) >= 3:
+        conn.execute("DELETE FROM pdfs WHERE id=$1", (rows[0][0],))
+    from datetime import datetime as dt
+    conn.execute("INSERT INTO pdfs (name, data, created_at) VALUES ($1,$2,$3)",
+                 (name, data, dt.now().isoformat()))
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pdf/list")
+@requires_auth
+def pdf_list():
+    conn = get_db()
+    rows = conn.execute("SELECT id, name, created_at FROM pdfs ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return jsonify({"pdfs": [{"id": r[0], "name": r[1], "date": r[2][:10]} for r in rows]})
+
+
+@app.route("/api/pdf/<int:pdf_id>")
+@requires_auth
+def pdf_get(pdf_id):
+    conn = get_db()
+    row = conn.execute("SELECT name, data FROM pdfs WHERE id=$1", (pdf_id,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "없음"}), 404
+    return jsonify({"name": row[0], "data": row[1]})
+
+
+@app.route("/api/pdf/<int:pdf_id>/delete", methods=["POST"])
+@requires_auth
+def pdf_delete(pdf_id):
+    conn = get_db()
+    conn.execute("DELETE FROM pdfs WHERE id=$1", (pdf_id,))
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/encyc/search")
 @requires_auth
 def encyc_search():
@@ -1011,8 +1061,27 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
 
   <!-- 마감일지 -->
-  <div class="section-label" style="margin-top:24px;">마감일지</div>
-  <div class="content-card">
+  <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
+  <div class="grid2" style="align-items:start;">
+    <!-- 왼쪽: PDF 뷰어 -->
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">📄 리서치 리포트</span>
+        <div style="display:flex;gap:6px;">
+          <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
+            + 업로드
+            <input type="file" id="pdf-upload-input" accept=".pdf" multiple style="display:none;" onchange="uploadPDFs(this)"/>
+          </label>
+          <button class="btn" onclick="clearAllPDFs()" style="color:#d63031;border-color:#fab1a0;font-size:12px;padding:6px 12px;">↺ 전체삭제</button>
+        </div>
+      </div>
+      <div class="tab-bar" id="pdf-tabs" style="flex-wrap:wrap;"></div>
+      <div id="pdf-viewer" style="width:100%;height:500px;border-radius:8px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;">
+        <span class="content-empty">PDF를 업로드해주세요</span>
+      </div>
+    </div>
+    <!-- 오른쪽: 마감일지 -->
+    <div class="content-card" style="margin-bottom:0;">
     <div class="content-header">
       <span class="content-title">📋 마감일지</span>
       <span class="content-date" id="closing-date"></span>
@@ -1027,6 +1096,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <button class="tab" onclick="clTab(this,'schedule')">내일일정</button>
     </div>
     <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
+    </div>
   </div>
 
   <!-- 주간 캘린더 -->
@@ -1542,6 +1612,67 @@ async function searchEncyclopedia(){
   btn.classList.remove('ls'); btn.innerHTML='검색';
 }
 
+// PDF functions
+async function uploadPDFs(input){
+  const files = Array.from(input.files);
+  for(const file of files){
+    const reader = new FileReader();
+    reader.onload = async(e)=>{
+      const base64 = e.target.result.split(',')[1];
+      await fetch('/api/pdf/upload',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name: file.name, data: base64})
+      });
+      loadPDFList();
+    };
+    reader.readAsDataURL(file);
+  }
+  input.value='';
+}
+
+async function loadPDFList(){
+  const d = await fetch('/api/pdf/list').then(r=>r.json());
+  const tabs = document.getElementById('pdf-tabs');
+  if(!d.pdfs||!d.pdfs.length){
+    tabs.innerHTML='';
+    document.getElementById('pdf-viewer').innerHTML='<span class="content-empty">PDF를 업로드해주세요</span>';
+    return;
+  }
+  tabs.innerHTML = d.pdfs.map((p,i)=>
+    '<div style="display:flex;align-items:center;gap:2px;">'+
+    '<button class="tab'+(i===0?' active':'')+'" onclick="showPDF('+p.id+',this)" id="pdf-tab-'+p.id+'">'+p.name.replace('.pdf','').slice(0,15)+'</button>'+
+    '<button onclick="deletePDF('+p.id+')" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:12px;padding:0 2px;">✕</button>'+
+    '</div>'
+  ).join('');
+  if(d.pdfs.length) showPDF(d.pdfs[0].id, document.querySelector('#pdf-tabs .tab'));
+}
+
+async function showPDF(id, btn){
+  document.querySelectorAll('#pdf-tabs .tab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  const viewer = document.getElementById('pdf-viewer');
+  viewer.innerHTML='<span class="content-empty">로딩 중...</span>';
+  const d = await fetch('/api/pdf/'+id).then(r=>r.json());
+  if(d.data){
+    viewer.innerHTML='<iframe src="data:application/pdf;base64,'+d.data+'" style="width:100%;height:500px;border:none;"></iframe>';
+  }
+}
+
+async function clearAllPDFs(){
+  if(!confirm('리포트 전체 삭제할까요?')) return;
+  const d = await fetch('/api/pdf/list').then(r=>r.json());
+  for(const p of (d.pdfs||[])){
+    await fetch('/api/pdf/'+p.id+'/delete',{method:'POST'});
+  }
+  loadPDFList();
+}
+
+async function deletePDF(id){
+  await fetch('/api/pdf/'+id+'/delete',{method:'POST'});
+  loadPDFList();
+}
+
 async function searchThemePrices(){
   const q = document.getElementById('theme-input').value.trim();
   if(!q) return;
@@ -1792,6 +1923,7 @@ loadNote();
 loadTodo();
 loadNews();
 loadCalendar();
+loadPDFList();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
