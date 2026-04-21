@@ -551,20 +551,18 @@ def encyclopedia_search():
 @app.route("/api/pdf/upload", methods=["POST"])
 @requires_auth
 def pdf_upload():
-    import base64
+    from datetime import datetime as dt
     body = request.json or {}
     name = body.get("name", "report.pdf")
     data = body.get("data", "")
     if not data:
         return jsonify({"error": "파일 없음"}), 400
     conn = get_db()
-    # Max 3 PDFs - delete oldest if over
     rows = conn.run("SELECT id FROM pdfs ORDER BY created_at ASC")
-    if len(rows) >= 3:
+    if rows and len(rows) >= 3:
         conn.run("DELETE FROM pdfs WHERE id=:i", i=rows[0][0])
-    from datetime import datetime as dt
     conn.run("INSERT INTO pdfs (name, data, created_at) VALUES (:n,:d,:c)",
-                 n=name, d=data, c=dt.now().isoformat())
+             n=name, d=data, c=dt.now().isoformat())
     conn.close()
     return jsonify({"ok": True})
 
@@ -575,7 +573,9 @@ def pdf_list():
     conn = get_db()
     rows = conn.run("SELECT id, name, created_at FROM pdfs ORDER BY created_at DESC")
     conn.close()
-    return jsonify({"pdfs": [{"id": r[0], "name": r[1], "date": r[2][:10]} for r in rows]})
+    if not rows:
+        return jsonify({"pdfs": []})
+    return jsonify({"pdfs": [{"id": r[0], "name": r[1], "date": r[2][:10] if r[2] else ""} for r in rows]})
 
 
 @app.route("/api/pdf/<int:pdf_id>")
@@ -586,8 +586,7 @@ def pdf_get(pdf_id):
     conn.close()
     if not rows:
         return jsonify({"error": "없음"}), 404
-    row = rows[0]
-    return jsonify({"name": row[0], "data": row[1]})
+    return jsonify({"name": rows[0][0], "data": rows[0][1]})
 
 
 @app.route("/api/pdf/<int:pdf_id>/delete", methods=["POST"])
