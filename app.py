@@ -34,6 +34,11 @@ def init_db():
         id SERIAL PRIMARY KEY,
         type TEXT NOT NULL, content TEXT NOT NULL,
         date TEXT NOT NULL, created_at TEXT NOT NULL)""")
+    conn.run("""CREATE TABLE IF NOT EXISTS pdfs (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        data TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
     conn.close()
 
 init_db()
@@ -550,11 +555,11 @@ def pdf_upload():
         return jsonify({"error": "파일 없음"}), 400
     conn = get_db()
     # Max 3 PDFs - delete oldest if over
-    rows = conn.execute("SELECT id FROM pdfs ORDER BY created_at ASC").fetchall()
+    rows = conn.run("SELECT id FROM pdfs ORDER BY created_at ASC")
     if len(rows) >= 3:
-        conn.execute("DELETE FROM pdfs WHERE id=$1", (rows[0][0],))
+        conn.run("DELETE FROM pdfs WHERE id=%s", (rows[0][0],))
     from datetime import datetime as dt
-    conn.execute("INSERT INTO pdfs (name, data, created_at) VALUES ($1,$2,$3)",
+    conn.run("INSERT INTO pdfs (name, data, created_at) VALUES ($1,$2,$3)",
                  (name, data, dt.now().isoformat()))
     conn.close()
     return jsonify({"ok": True})
@@ -564,7 +569,7 @@ def pdf_upload():
 @requires_auth
 def pdf_list():
     conn = get_db()
-    rows = conn.execute("SELECT id, name, created_at FROM pdfs ORDER BY created_at DESC").fetchall()
+    rows = conn.run("SELECT id, name, created_at FROM pdfs ORDER BY created_at DESC")
     conn.close()
     return jsonify({"pdfs": [{"id": r[0], "name": r[1], "date": r[2][:10]} for r in rows]})
 
@@ -573,10 +578,11 @@ def pdf_list():
 @requires_auth
 def pdf_get(pdf_id):
     conn = get_db()
-    row = conn.execute("SELECT name, data FROM pdfs WHERE id=$1", (pdf_id,)).fetchone()
+    rows = conn.run("SELECT name, data FROM pdfs WHERE id=%s", (pdf_id,))
     conn.close()
-    if not row:
+    if not rows:
         return jsonify({"error": "없음"}), 404
+    row = rows[0]
     return jsonify({"name": row[0], "data": row[1]})
 
 
@@ -584,7 +590,7 @@ def pdf_get(pdf_id):
 @requires_auth
 def pdf_delete(pdf_id):
     conn = get_db()
-    conn.execute("DELETE FROM pdfs WHERE id=$1", (pdf_id,))
+    conn.run("DELETE FROM pdfs WHERE id=%s", (pdf_id,))
     conn.close()
     return jsonify({"ok": True})
 
