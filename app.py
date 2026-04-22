@@ -2016,6 +2016,12 @@ loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
 setInterval(loadAll,5*60*1000);
+// 체크포인트/마감일지/특징리포트 자동 새로고침 (30초)
+setInterval(()=>{
+  loadPost('checkpoint','checkpoint-body','checkpoint-date');
+  loadPost('closing','closing-body','closing-date');
+  loadPost('briefing','briefing-body','briefing-date');
+},30*1000);
 </script>
 <script>
 if('serviceWorker' in navigator){
