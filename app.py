@@ -708,26 +708,30 @@ def wdaebon_parse():
         return jsonify({"error": "내용 없음"}), 400
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        # 대본이 길면 잘라서 처리
+        if len(raw) > 15000:
+            raw = raw[:15000]
         msg = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=3000,
-            messages=[{"role": "user", "content": f"""아래는 방송 완성 대본입니다.
-코너별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요.
+            max_tokens=4096,
+            messages=[{"role": "user", "content": f"""아래 방송 대본을 JSON으로 파싱하세요.
 
+중요 규칙:
+1. JSON만 출력하세요. 설명이나 코드블록(```) 없이 순수 JSON만.
+2. 문자열 내부의 따옴표는 반드시 백슬래시로 이스케이프하세요 (예: \"텍스트\")
+3. 문자열 내부에 줄바꿈 문자는 넣지 마세요.
+4. 작은따옴표(')는 이스케이프 없이 그대로 사용하세요.
+
+형식:
 {{
   "broadcast_date": "2026-04-22",
   "corners": [
     {{
       "number": 1,
       "title": "오프닝",
-      "anchor": "이예은",
       "guests": ["이완수 | 그레너리투자자문 대표"],
       "questions": [
-        {{
-          "q_num": "Q0",
-          "question": "트럼프 대통령이...",
-          "supers": ["트럼프 '이란이 통일된 제안 낼 때까지 휴전 연장'"]
-        }}
+        {{"q_num": "Q0", "question": "질문 요약", "supers": ["수퍼 텍스트"]}}
       ],
       "memo": ""
     }}
@@ -735,23 +739,38 @@ def wdaebon_parse():
 }}
 
 규칙:
-- corners: #1, #2 등 코너 번호 기준으로 분리
-- guests: 네임수퍼에 있는 출연자 이름+소속 추출
-- questions: Q0, Q1, Q2 등 질문 추출 (이예은 발화 기준)
-- supers: 수퍼> 로 시작하는 CG 텍스트 (각 질문 아래 있는 것들)
-- question 텍스트는 핵심만 2-3줄로 요약
-- memo는 빈 문자열로
+- corners: #1, #2 등 코너 번호 기준 분리
+- guests: 네임수퍼에 있는 출연자 이름+소속
+- questions: 이예은이 하는 Q0, Q1 등 (question은 2줄 이내로 요약)
+- supers: '수퍼>'로 시작하는 CG 텍스트만
+- 모든 값에서 큰따옴표(\")는 작은따옴표(')로 치환하세요.
 
 대본:
 {raw}"""}]
         )
-        import json
-        text = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
-        data = json.loads(text)
+        import json, re
+        text = msg.content[0].text.strip()
+        # 코드블록 제거
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        text = text.strip()
+        # JSON 시작/끝 찾기
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as je:
+            # 재시도: 문제되는 문자 정리
+            text_clean = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+            data = json.loads(text_clean)
         save_post("wdaebon", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
         return jsonify(data)
+    except json.JSONDecodeError as e:
+        return jsonify({"error": f"JSON 파싱 실패: {str(e)[:100]}"}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)[:200]}), 500
 
 
 @app.route("/api/wdaebon/clear", methods=["POST"])
