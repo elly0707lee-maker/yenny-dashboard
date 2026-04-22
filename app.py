@@ -672,114 +672,6 @@ def guest_search():
     return jsonify({"results": results, "query": query, "terms": terms})
 
 
-@app.route("/api/wdaebon/parse", methods=["POST"])
-@requires_auth
-def wdaebon_parse():
-    import base64, io as _io
-    body = request.json or {}
-    raw = body.get("content", "")
-    files_b64 = body.get("files", [])
-    
-    # docx 파일이 있으면 텍스트 추출
-    if files_b64:
-        try:
-            from docx import Document
-        except ImportError:
-            return jsonify({"error": "python-docx 미설치"}), 500
-        extracted = []
-        for f in files_b64:
-            fname = f.get("name", "")
-            fdata = f.get("data", "")
-            if fname.endswith(".docx") and fdata:
-                try:
-                    doc = Document(_io.BytesIO(base64.b64decode(fdata)))
-                    text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-                    extracted.append(text)
-                except Exception as e:
-                    return jsonify({"error": f"docx 파싱 실패: {e}"}), 500
-            elif fdata:  # txt
-                try:
-                    extracted.append(base64.b64decode(fdata).decode("utf-8"))
-                except:
-                    pass
-        raw = "\n\n".join(extracted) if extracted else raw
-    
-    if not raw:
-        return jsonify({"error": "내용 없음"}), 400
-    try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        # 대본이 길면 잘라서 처리
-        if len(raw) > 15000:
-            raw = raw[:15000]
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": f"""아래 방송 대본을 JSON으로 파싱하세요.
-
-중요 규칙:
-1. JSON만 출력하세요. 설명이나 코드블록(```) 없이 순수 JSON만.
-2. 문자열 내부의 따옴표는 반드시 백슬래시로 이스케이프하세요 (예: \"텍스트\")
-3. 문자열 내부에 줄바꿈 문자는 넣지 마세요.
-4. 작은따옴표(')는 이스케이프 없이 그대로 사용하세요.
-
-형식:
-{{
-  "broadcast_date": "2026-04-22",
-  "corners": [
-    {{
-      "number": 1,
-      "title": "오프닝",
-      "guests": ["이완수 | 그레너리투자자문 대표"],
-      "questions": [
-        {{"q_num": "Q0", "question": "질문 요약", "supers": ["수퍼 텍스트"]}}
-      ],
-      "memo": ""
-    }}
-  ]
-}}
-
-규칙:
-- corners: #1, #2 등 코너 번호 기준 분리
-- guests: 네임수퍼에 있는 출연자 이름+소속
-- questions: 이예은이 하는 Q0, Q1 등 (question은 2줄 이내로 요약)
-- supers: '수퍼>'로 시작하는 CG 텍스트만
-- 모든 값에서 큰따옴표(\")는 작은따옴표(')로 치환하세요.
-
-대본:
-{raw}"""}]
-        )
-        import json, re
-        text = msg.content[0].text.strip()
-        # 코드블록 제거
-        text = re.sub(r'^```(?:json)?\s*', '', text)
-        text = re.sub(r'\s*```$', '', text)
-        text = text.strip()
-        # JSON 시작/끝 찾기
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1:
-            text = text[start:end+1]
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as je:
-            # 재시도: 문제되는 문자 정리
-            text_clean = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-            data = json.loads(text_clean)
-        save_post("wdaebon", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
-        return jsonify(data)
-    except json.JSONDecodeError as e:
-        return jsonify({"error": f"JSON 파싱 실패: {str(e)[:100]}"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)[:200]}), 500
-
-
-@app.route("/api/wdaebon/clear", methods=["POST"])
-@requires_auth
-def wdaebon_clear():
-    save_post("wdaebon", "", datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
-
-
 @app.route("/api/calendar/parse", methods=["POST"])
 @requires_auth
 def calendar_parse():
@@ -1183,23 +1075,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-
-  <!-- 완대본 플로우 -->
-  <div class="section-label">📋 오늘 방송 플로우</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📋 완대본 플로우</span>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
-        <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
-          📄 완대본 업로드
-          <input type="file" id="wdb-file" accept=".docx,.txt" multiple style="display:none;" onchange="uploadWdaebon(this)"/>
-        </label>
-        <button class="btn" onclick="clearWdaebon()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-      </div>
-    </div>
-    <div id="wdb-result"></div>
-  </div>
 
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
@@ -1761,119 +1636,6 @@ async function parseCalendar(){
   btn.classList.remove('ls');btn.innerHTML='✦ AI 정리';
 }
 
-// 완대본
-let _wdbData = null;
-
-async function uploadWdaebon(input){
-  const files = Array.from(input.files);
-  if(!files.length) return;
-  document.getElementById('wdb-result').innerHTML='<span class="content-empty"><span class="spinner"></span> AI가 분석 중... (10~20초)</span>';
-  const fileData = [];
-  for(const file of files){
-    const base64 = await new Promise((resolve)=>{
-      const reader = new FileReader();
-      reader.onload = (e)=>resolve(e.target.result.split(',')[1]);
-      reader.readAsDataURL(file);
-    });
-    fileData.push({name:file.name, data:base64});
-  }
-  input.value='';
-  try{
-    const d = await fetch('/api/wdaebon/parse',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({files:fileData})
-    }).then(r=>r.json());
-    if(d.error){
-      document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-    } else {
-      _wdbData = d;
-      renderWdaebon(d);
-      const badge=document.getElementById('wdb-badge');
-      badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
-    }
-  }catch(e){
-    document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류 발생</span>';
-  }
-}
-
-function renderWdaebon(data){
-  if(!data||!data.corners||!data.corners.length){
-    document.getElementById('wdb-result').innerHTML='<span class="content-empty">완대본을 업로드해주세요</span>';
-    return;
-  }
-  let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+data.broadcast_date+' · '+data.corners.length+'개 코너</div>';
-  html += '<div class="tab-bar" id="wdb-tabs">';
-  data.corners.forEach((c,i)=>{
-    html += '<button class="tab'+(i===0?' active':'')+'" onclick="wdbTab(this,'+i+')">'+
-      '#'+c.number+' '+c.title+'</button>';
-  });
-  html += '</div>';
-  data.corners.forEach((c,i)=>{
-    html += '<div id="wdb-corner-'+i+'" style="display:'+(i===0?'block':'none')+';">';
-    // 출연자
-    if(c.guests&&c.guests.length){
-      html += '<div style="margin-bottom:10px;padding:8px 12px;background:#f0f7ff;border-radius:8px;">';
-      html += '<span style="font-size:11px;font-weight:700;color:#0984e3;">👤 출연자</span> ';
-      html += c.guests.map(g=>'<span style="font-size:13px;color:#2d3436;margin-left:6px;">'+g+'</span>').join('');
-      html += '</div>';
-    }
-    // 질문들
-    if(c.questions&&c.questions.length){
-      c.questions.forEach((q,qi)=>{
-        html += '<div style="margin-bottom:12px;padding:10px 14px;background:#f8f9fa;border-radius:10px;border-left:3px solid #e8b84b;">';
-        html += '<div style="font-size:12px;font-weight:700;color:#e8b84b;margin-bottom:6px;">'+q.q_num+'</div>';
-        html += '<div style="font-size:13px;color:#2d3436;line-height:1.7;margin-bottom:8px;" contenteditable="true" '+
-          'onblur="_wdbData.corners['+i+'].questions['+qi+'].question=this.innerText;saveWdaebonDB()">'+q.question+'</div>';
-        if(q.supers&&q.supers.length){
-          html += '<div style="font-size:11px;color:#7a8099;">';
-          q.supers.forEach(s=>{
-            html += '<div>📺 '+s+'</div>';
-          });
-          html += '</div>';
-        }
-        html += '</div>';
-      });
-    }
-    // 메모
-    html += '<div style="margin-top:8px;">';
-    html += '<textarea class="input-area" style="min-height:60px;font-size:13px;" placeholder="코너 메모..." '+
-      'onchange="_wdbData.corners['+i+'].memo=this.value;saveWdaebonDB()">'+(c.memo||'')+'</textarea>';
-    html += '</div>';
-    html += '</div>';
-  });
-  document.getElementById('wdb-result').innerHTML = html;
-}
-
-function wdbTab(btn, idx){
-  document.querySelectorAll('#wdb-tabs .tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  document.querySelectorAll('[id^="wdb-corner-"]').forEach(el=>el.style.display='none');
-  document.getElementById('wdb-corner-'+idx).style.display='block';
-}
-
-async function saveWdaebonDB(){
-  if(!_wdbData) return;
-  await fetch('/api/post/wdaebon',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:JSON.stringify(_wdbData),date:new Date().toISOString().slice(0,10)})});
-}
-
-async function clearWdaebon(){
-  if(!confirm('완대본 플로우 초기화할까요?'))return;
-  await fetch('/api/wdaebon/clear',{method:'POST'});
-  _wdbData=null;
-  document.getElementById('wdb-result').innerHTML='<span class="content-empty">완대본을 업로드해주세요</span>';
-}
-
-async function loadWdaebon(){
-  try{
-    const d=await fetch('/api/post/wdaebon').then(r=>r.json());
-    if(d.content){
-      _wdbData=JSON.parse(d.content);
-      renderWdaebon(_wdbData);
-    }
-  }catch(e){}
-}
-
 async function clearCalendar(){
   if(!confirm('캘린더 초기화할까요?'))return;
   await fetch('/api/calendar/clear',{method:'POST'});
@@ -2250,7 +2012,6 @@ loadMemo();
 loadNews();
 loadCalendar();
 loadPDFList();
-loadWdaebon();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
