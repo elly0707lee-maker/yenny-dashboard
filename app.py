@@ -675,8 +675,35 @@ def guest_search():
 @app.route("/api/wdaebon/parse", methods=["POST"])
 @requires_auth
 def wdaebon_parse():
+    import base64, io as _io
     body = request.json or {}
     raw = body.get("content", "")
+    files_b64 = body.get("files", [])
+    
+    # docx 파일이 있으면 텍스트 추출
+    if files_b64:
+        try:
+            from docx import Document
+        except ImportError:
+            return jsonify({"error": "python-docx 미설치"}), 500
+        extracted = []
+        for f in files_b64:
+            fname = f.get("name", "")
+            fdata = f.get("data", "")
+            if fname.endswith(".docx") and fdata:
+                try:
+                    doc = Document(_io.BytesIO(base64.b64decode(fdata)))
+                    text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+                    extracted.append(text)
+                except Exception as e:
+                    return jsonify({"error": f"docx 파싱 실패: {e}"}), 500
+            elif fdata:  # txt
+                try:
+                    extracted.append(base64.b64decode(fdata).decode("utf-8"))
+                except:
+                    pass
+        raw = "\n\n".join(extracted) if extracted else raw
+    
     if not raw:
         return jsonify({"error": "내용 없음"}), 400
     try:
@@ -1720,19 +1747,22 @@ let _wdbData = null;
 
 async function uploadWdaebon(input){
   const files = Array.from(input.files);
-  let allText = '';
+  if(!files.length) return;
+  document.getElementById('wdb-result').innerHTML='<span class="content-empty"><span class="spinner"></span> AI가 분석 중... (10~20초)</span>';
+  const fileData = [];
   for(const file of files){
-    const text = await file.text();
-    allText += text + '\n\n';
+    const base64 = await new Promise((resolve)=>{
+      const reader = new FileReader();
+      reader.onload = (e)=>resolve(e.target.result.split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+    fileData.push({name:file.name, data:base64});
   }
   input.value='';
-  if(!allText.trim()) return;
-  const btn = document.querySelector('#wdb-file');
-  document.getElementById('wdb-result').innerHTML='<span class="content-empty"><span class="spinner"></span> AI가 분석 중...</span>';
   try{
     const d = await fetch('/api/wdaebon/parse',{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({content:allText})
+      body:JSON.stringify({files:fileData})
     }).then(r=>r.json());
     if(d.error){
       document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
