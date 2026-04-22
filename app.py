@@ -247,7 +247,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -255,7 +255,7 @@ def api_get_post(pt):
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -672,6 +672,208 @@ def guest_search():
     return jsonify({"results": results, "query": query, "terms": terms})
 
 
+@app.route("/api/wdaebon/parse", methods=["POST"])
+@requires_auth
+def wdaebon_parse():
+    body = request.json or {}
+    raw = body.get("content", "")
+    if not raw:
+        return jsonify({"error": "내용 없음"}), 400
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=3000,
+            messages=[{"role": "user", "content": f"""아래는 방송 완성 대본입니다.
+코너별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요.
+
+{{
+  "broadcast_date": "2026-04-22",
+  "corners": [
+    {{
+      "number": 1,
+      "title": "오프닝",
+      "anchor": "이예은",
+      "guests": ["이완수 | 그레너리투자자문 대표"],
+      "questions": [
+        {{
+          "q_num": "Q0",
+          "question": "트럼프 대통령이...",
+          "supers": ["트럼프 '이란이 통일된 제안 낼 때까지 휴전 연장'"]
+        }}
+      ],
+      "memo": ""
+    }}
+  ]
+}}
+
+규칙:
+- corners: #1, #2 등 코너 번호 기준으로 분리
+- guests: 네임수퍼에 있는 출연자 이름+소속 추출
+- questions: Q0, Q1, Q2 등 질문 추출 (이예은 발화 기준)
+- supers: 수퍼> 로 시작하는 CG 텍스트 (각 질문 아래 있는 것들)
+- question 텍스트는 핵심만 2-3줄로 요약
+- memo는 빈 문자열로
+
+대본:
+{raw}"""}]
+        )
+        import json
+        text = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
+        data = json.loads(text)
+        save_post("wdaebon", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/wdaebon/clear", methods=["POST"])
+@requires_auth
+def wdaebon_clear():
+    save_post("wdaebon", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/calendar/parse", methods=["POST"])
+@requires_auth
+def calendar_parse():
+    body = request.json or {}
+    raw = body.get("content", "")
+    if not raw:
+        return jsonify({"error": "내용 없음"}), 400
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": f"""아래는 주간 증시 일정 텍스트입니다.
+날짜별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
+
+{{
+  "week_label": "4월 11일~17일",
+  "days": [
+    {{
+      "date": "4월 11일 토요일",
+      "day_key": "sat",
+      "items": ["美-이란, 파키스탄서 협상 개시", "푸틴, 우크라 전쟁 부활절 휴전 선언"],
+      "guests": ["반종민 소장 - 주도주를 만드는 이슈", "박종현 대표 - 가는 종목이 더 간다"]
+    }}
+  ]
+}}
+
+규칙:
+- day_key는 mon/tue/wed/thu/fri/sat/sun 중 하나
+- items: 경제·증권 일정만. 핵심 한 줄 요약. 세부내용 생략.
+- guests: 출연자 이름과 주제가 있으면 guests 배열에. "이름 - 주제" 형식. 출연자가 없으면 빈 배열 [].
+- 출연자처럼 보이는 항목(사람 이름 + 주제/소속)은 반드시 guests로 분류.
+
+텍스트:
+{raw}"""}]
+        )
+        import json
+        text = msg.content[0].text.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
+        save_post("calendar", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/calendar/update", methods=["POST"])
+@requires_auth
+def calendar_update():
+    import json
+    body = request.json or {}
+    data = body.get("data", {})
+    save_post("calendar", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/calendar/clear", methods=["POST"])
+@requires_auth
+def calendar_clear():
+    save_post("calendar", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/note/clear", methods=["POST"])
+@requires_auth
+def clear_note():
+    save_post("note", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/report/clear", methods=["POST"])
+@requires_auth
+def clear_report():
+    for t in ("report_up","report_dn","report_feature"):
+        save_post(t, "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/wdaebon/parse", methods=["POST"])
+@requires_auth
+def wdaebon_parse():
+    body = request.json or {}
+    raw = body.get("content", "")
+    if not raw:
+        return jsonify({"error": "내용 없음"}), 400
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=3000,
+            messages=[{"role": "user", "content": f"""아래는 방송 완성 대본입니다.
+코너별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요.
+
+{{
+  "broadcast_date": "2026-04-22",
+  "corners": [
+    {{
+      "number": 1,
+      "title": "오프닝",
+      "anchor": "이예은",
+      "guests": ["이완수 | 그레너리투자자문 대표"],
+      "questions": [
+        {{
+          "q_num": "Q0",
+          "question": "트럼프 대통령이...",
+          "supers": ["트럼프 '이란이 통일된 제안 낼 때까지 휴전 연장'"]
+        }}
+      ],
+      "memo": ""
+    }}
+  ]
+}}
+
+규칙:
+- corners: #1, #2 등 코너 번호 기준으로 분리
+- guests: 네임수퍼에 있는 출연자 이름+소속 추출
+- questions: Q0, Q1, Q2 등 질문 추출 (이예은 발화 기준)
+- supers: 수퍼> 로 시작하는 CG 텍스트 (각 질문 아래 있는 것들)
+- question 텍스트는 핵심만 2-3줄로 요약
+- memo는 빈 문자열로
+
+대본:
+{raw}"""}]
+        )
+        import json
+        text = msg.content[0].text.strip().replace("```json","").replace("```","").strip()
+        data = json.loads(text)
+        save_post("wdaebon", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/wdaebon/clear", methods=["POST"])
+@requires_auth
+def wdaebon_clear():
+    save_post("wdaebon", "", datetime.now().strftime("%Y-%m-%d"))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/calendar/parse", methods=["POST"])
 @requires_auth
 def calendar_parse():
@@ -894,16 +1096,32 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="btn" onclick="clearFutures()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
       </div>
     </div>
-    <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">✅ 오늘의 할일</span>
-        <div style="display:flex;gap:6px;align-items:center;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:0;">
+      <!-- 투두리스트 -->
+      <div class="content-card" style="margin-bottom:0;">
+        <div class="content-header">
+          <span class="content-title">✅ 투두리스트</span>
           <span class="saved-badge" id="todo-badge">✓ 저장됨</span>
-          <button class="btn btn-green" onclick="saveTodo()">저장</button>
-          <button class="btn" onclick="clearTodo()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+        </div>
+        <div id="todo-list" style="margin-bottom:8px;"></div>
+        <div style="display:flex;gap:6px;">
+          <input id="todo-new-input" class="input-line" placeholder="할일 추가..." style="flex:1;font-size:13px;"
+            onkeydown="if(event.key==='Enter')addTodoItem()"/>
+          <button class="btn btn-green" onclick="addTodoItem()" style="padding:8px 12px;">+</button>
         </div>
       </div>
-      <textarea class="input-area" id="todo-input" placeholder="오늘 할일, 리마인더, 메모..." style="min-height:90px;"></textarea>
+      <!-- 메모 -->
+      <div class="content-card" style="margin-bottom:0;">
+        <div class="content-header">
+          <span class="content-title">📝 메모</span>
+          <div style="display:flex;gap:6px;">
+            <span class="saved-badge" id="memo-badge">✓ 저장됨</span>
+            <button class="btn btn-green" onclick="saveMemo()">저장</button>
+            <button class="btn" onclick="clearMemo()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+          </div>
+        </div>
+        <textarea class="input-area" id="memo-input" placeholder="메모..." style="min-height:120px;"></textarea>
+      </div>
     </div>
   </div>
 
@@ -969,17 +1187,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
           scrolling="no"></iframe>
       </div>
     </div>
-  </div>
-
-  <!-- 미증시 브리핑 -->
-  <div class="section-label">미증시 브리핑</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📅 시황 브리핑</span>
-      <button class="btn btn-primary" onclick="generateBriefing()" id="briefing-btn">✦ 브리핑 생성</button>
-    </div>
-    <div id="briefing-date" class="content-date" style="margin-bottom:8px;"></div>
-    <div class="content-body" id="briefing-body"><span class="content-empty">버튼을 누르면 Claude가 CNBC·Bloomberg·WSJ를 참조해서 브리핑을 생성합니다.</span></div>
   </div>
 
   <!-- K-Stock 검색 -->
@@ -1053,7 +1260,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <span class="content-title">📝 특징 리포트</span>
         <div style="display:flex;gap:6px;align-items:center;">
           <span class="saved-badge" id="report-badge">✓ 저장됨</span>
-          <button class="btn btn-green" onclick="saveReportTab()">저장</button>
+          <button class="btn btn-green" onclick="saveReport()">저장</button>
           <button class="btn" onclick="clearReport()" style="color:#f87171;border-color:#3a1a1a;">↺ 초기화</button>
         </div>
       </div>
@@ -1068,6 +1275,23 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
+
+  <!-- 완대본 플로우 -->
+  <div class="section-label">📋 오늘 방송 플로우</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📋 완대본 플로우</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
+        <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
+          📄 완대본 업로드
+          <input type="file" id="wdb-file" accept=".docx,.txt" multiple style="display:none;" onchange="uploadWdaebon(this)"/>
+        </label>
+        <button class="btn" onclick="clearWdaebon()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+      </div>
+    </div>
+    <div id="wdb-result"></div>
+  </div>
 
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
@@ -1319,18 +1543,13 @@ function reportTab(btn, key){
   });
 }
 
-async function saveReportTab(){
-  const key = _reportTab;
-  const val = document.getElementById('report-'+key+'-input').value.trim();
-  if(!val) return;
-  await fetch('/api/post/report_'+key,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
-  });
+async function saveReport(){
+  const val=document.getElementById('report-input')?.value.trim();
+  if(val===undefined) return;
+  await fetch('/api/post/report',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
   const badge=document.getElementById('report-badge');
-  badge.style.display='inline';
-  setTimeout(()=>badge.style.display='none',2000);
+  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
 }
 
 async function clearReport(){
@@ -1342,16 +1561,14 @@ async function clearReport(){
   });
 }
 
-async function loadReportTabs(){
-  for(const k of ['up','dn','feature']){
-    try{
-      const d=await fetch('/api/post/report_'+k).then(r=>r.json());
-      if(d.content){
-        const el=document.getElementById('report-'+k+'-input');
-        if(el) el.value=d.content;
-      }
-    }catch(e){}
-  }
+async function loadReport(){
+  try{
+    const d=await fetch('/api/post/report').then(r=>r.json());
+    if(d.content){
+      const el=document.getElementById('report-input');
+      if(el) el.value=d.content;
+    }
+  }catch(e){}
 }
 
 async function searchKstock(){
@@ -1385,23 +1602,90 @@ async function searchKstock(){
   btn.classList.remove('ls');btn.innerHTML='검색';
 }
 
-async function saveTodo(){
-  const val=document.getElementById('todo-input').value.trim();
-  if(!val)return;
+// 투두리스트
+let _todos = [];
+
+function renderTodos(){
+  const list = document.getElementById('todo-list');
+  if(!list) return;
+  if(!_todos.length){
+    list.innerHTML='<div style="color:#b2bec3;font-size:13px;padding:4px 0;">할일이 없어요 😊</div>';
+    return;
+  }
+  list.innerHTML = _todos.map((t,i)=>
+    '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f2f5;">'+
+    '<input type="checkbox" '+(t.done?'checked':'')+' onchange="toggleTodo('+i+')" style="width:16px;height:16px;cursor:pointer;accent-color:#00b894;"/>'+
+    '<span style="flex:1;font-size:13px;'+(t.done?'text-decoration:line-through;color:#b2bec3;':'')+'" onclick="editTodo('+i+')" >'+t.text+'</span>'+
+    '<button onclick="deleteTodo('+i+')" style="border:none;background:none;color:#dfe6e9;cursor:pointer;font-size:14px;">✕</button>'+
+    '</div>'
+  ).join('');
+}
+
+function toggleTodo(i){
+  _todos[i].done = !_todos[i].done;
+  saveTodoDB();
+  renderTodos();
+}
+
+function deleteTodo(i){
+  _todos.splice(i,1);
+  saveTodoDB();
+  renderTodos();
+}
+
+function editTodo(i){
+  const newText = prompt('수정:', _todos[i].text);
+  if(newText && newText.trim()){
+    _todos[i].text = newText.trim();
+    saveTodoDB();
+    renderTodos();
+  }
+}
+
+function addTodoItem(){
+  const inp = document.getElementById('todo-new-input');
+  const val = inp?.value.trim();
+  if(!val) return;
+  _todos.push({text:val, done:false});
+  inp.value='';
+  saveTodoDB();
+  renderTodos();
+}
+
+async function saveTodoDB(){
   await fetch('/api/post/todo',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
+    body:JSON.stringify({content:JSON.stringify(_todos),date:new Date().toISOString().slice(0,10)})});
   const badge=document.getElementById('todo-badge');
-  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+  if(badge){badge.style.display='inline';setTimeout(()=>badge.style.display='none',1500);}
 }
-async function clearTodo(){
-  if(!confirm('할일 초기화할까요?'))return;
-  await fetch('/api/todo/clear',{method:'POST'});
-  document.getElementById('todo-input').value='';
-}
+
 async function loadTodo(){
   try{
     const d=await fetch('/api/post/todo').then(r=>r.json());
-    if(d.content) document.getElementById('todo-input').value=d.content;
+    if(d.content){
+      try{ _todos=JSON.parse(d.content); }catch(e){ _todos=[]; }
+    }
+    renderTodos();
+  }catch(e){ renderTodos(); }
+}
+
+// 메모
+async function saveMemo(){
+  const val=document.getElementById('memo-input').value.trim();
+  await fetch('/api/post/memo',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
+  const badge=document.getElementById('memo-badge');
+  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+}
+async function clearMemo(){
+  if(!confirm('메모 초기화할까요?'))return;
+  await fetch('/api/memo/clear',{method:'POST'});
+  document.getElementById('memo-input').value='';
+}
+async function loadMemo(){
+  try{
+    const d=await fetch('/api/post/memo').then(r=>r.json());
+    if(d.content) document.getElementById('memo-input').value=d.content;
   }catch(e){}
 }
 async function saveNote(){
@@ -1567,6 +1851,466 @@ async function parseCalendar(){
     }
   }catch(e){document.getElementById('cal-result').innerHTML='<span class="content-empty">오류 발생</span>';}
   btn.classList.remove('ls');btn.innerHTML='✦ AI 정리';
+}
+
+// 완대본
+let _wdbData = null;
+
+async function uploadWdaebon(input){
+  const files = Array.from(input.files);
+  let allText = '';
+  for(const file of files){
+    const text = await file.text();
+    allText += text + '\n\n';
+  }
+  input.value='';
+  if(!allText.trim()) return;
+  const btn = document.querySelector('#wdb-file');
+  document.getElementById('wdb-result').innerHTML='<span class="content-empty"><span class="spinner"></span> AI가 분석 중...</span>';
+  try{
+    const d = await fetch('/api/wdaebon/parse',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content:allText})
+    }).then(r=>r.json());
+    if(d.error){
+      document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+    } else {
+      _wdbData = d;
+      renderWdaebon(d);
+      const badge=document.getElementById('wdb-badge');
+      badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+    }
+  }catch(e){
+    document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류 발생</span>';
+  }
+}
+
+function renderWdaebon(data){
+  if(!data||!data.corners||!data.corners.length){
+    document.getElementById('wdb-result').innerHTML='<span class="content-empty">완대본을 업로드해주세요</span>';
+    return;
+  }
+  let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+data.broadcast_date+' · '+data.corners.length+'개 코너</div>';
+  html += '<div class="tab-bar" id="wdb-tabs">';
+  data.corners.forEach((c,i)=>{
+    html += '<button class="tab'+(i===0?' active':'')+'" onclick="wdbTab(this,'+i+')">'+
+      '#'+c.number+' '+c.title+'</button>';
+  });
+  html += '</div>';
+  data.corners.forEach((c,i)=>{
+    html += '<div id="wdb-corner-'+i+'" style="display:'+(i===0?'block':'none')+';">';
+    // 출연자
+    if(c.guests&&c.guests.length){
+      html += '<div style="margin-bottom:10px;padding:8px 12px;background:#f0f7ff;border-radius:8px;">';
+      html += '<span style="font-size:11px;font-weight:700;color:#0984e3;">👤 출연자</span> ';
+      html += c.guests.map(g=>'<span style="font-size:13px;color:#2d3436;margin-left:6px;">'+g+'</span>').join('');
+      html += '</div>';
+    }
+    // 질문들
+    if(c.questions&&c.questions.length){
+      c.questions.forEach((q,qi)=>{
+        html += '<div style="margin-bottom:12px;padding:10px 14px;background:#f8f9fa;border-radius:10px;border-left:3px solid #e8b84b;">';
+        html += '<div style="font-size:12px;font-weight:700;color:#e8b84b;margin-bottom:6px;">'+q.q_num+'</div>';
+        html += '<div style="font-size:13px;color:#2d3436;line-height:1.7;margin-bottom:8px;" contenteditable="true" '+
+          'onblur="_wdbData.corners['+i+'].questions['+qi+'].question=this.innerText;saveWdaebonDB()">'+q.question+'</div>';
+        if(q.supers&&q.supers.length){
+          html += '<div style="font-size:11px;color:#7a8099;">';
+          q.supers.forEach(s=>{
+            html += '<div>📺 '+s+'</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+    }
+    // 메모
+    html += '<div style="margin-top:8px;">';
+    html += '<textarea class="input-area" style="min-height:60px;font-size:13px;" placeholder="코너 메모..." '+
+      'onchange="_wdbData.corners['+i+'].memo=this.value;saveWdaebonDB()">'+(c.memo||'')+'</textarea>';
+    html += '</div>';
+    html += '</div>';
+  });
+  document.getElementById('wdb-result').innerHTML = html;
+}
+
+function wdbTab(btn, idx){
+  document.querySelectorAll('#wdb-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('[id^="wdb-corner-"]').forEach(el=>el.style.display='none');
+  document.getElementById('wdb-corner-'+idx).style.display='block';
+}
+
+async function saveWdaebonDB(){
+  if(!_wdbData) return;
+  await fetch('/api/post/wdaebon',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:JSON.stringify(_wdbData),date:new Date().toISOString().slice(0,10)})});
+}
+
+async function clearWdaebon(){
+  if(!confirm('완대본 플로우 초기화할까요?'))return;
+  await fetch('/api/wdaebon/clear',{method:'POST'});
+  _wdbData=null;
+  document.getElementById('wdb-result').innerHTML='<span class="content-empty">완대본을 업로드해주세요</span>';
+}
+
+async function loadWdaebon(){
+  try{
+    const d=await fetch('/api/post/wdaebon').then(r=>r.json());
+    if(d.content){
+      _wdbData=JSON.parse(d.content);
+      renderWdaebon(_wdbData);
+    }
+  }catch(e){}
+}
+
+async function clearCalendar(){
+  if(!confirm('캘린더 초기화할까요?'))return;
+  await fetch('/api/calendar/clear',{method:'POST'});
+  _calData = null;
+  document.getElementById('cal-input').value='';
+  document.getElementById('cal-result').innerHTML='';
+}
+
+async function loadCalendar(){
+  try{
+    const d=await fetch('/api/post/calendar').then(r=>r.json());
+    if(d.content){
+      const data=JSON.parse(d.content);
+      renderCalendar(data);
+    }
+  }catch(e){}
+}
+
+async function searchEncyclopedia(){
+  const q = document.getElementById('enc-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('enc-btn');
+  const result = document.getElementById('enc-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/encyclopedia/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    if(!d.results || !d.results.length){
+      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.results.length+'건 검색됨</div>';
+    d.results.forEach(row=>{
+      html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #0984e3;">';
+      const 상황 = row['상황'] || '';
+      const 주제 = row['주제(시장/섹터/종목)'] || row['주제'] || '';
+      const 표현 = row['표현'] || '';
+      if(상황) html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:4px;">📌 '+상황+(주제?' · '+주제:'')+'</div>';
+      if(표현) html += '<div style="font-size:14px;color:#1a1d23;line-height:1.7;">'+표현+'</div>';
+      html += '</div>';
+    });
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='검색';
+}
+
+// PDF functions
+async function uploadPDFs(input){
+  const files = Array.from(input.files);
+  for(const file of files){
+    const reader = new FileReader();
+    reader.onload = async(e)=>{
+      const base64 = e.target.result.split(',')[1];
+      await fetch('/api/pdf/upload',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name: file.name, data: base64})
+      });
+      loadPDFList();
+    };
+    reader.readAsDataURL(file);
+  }
+  input.value='';
+}
+
+async function loadPDFList(){
+  const d = await fetch('/api/pdf/list').then(r=>r.json());
+  const tabs = document.getElementById('pdf-tabs');
+  if(!d.pdfs||!d.pdfs.length){
+    tabs.innerHTML='';
+    document.getElementById('pdf-viewer').innerHTML='<span class="content-empty">PDF를 업로드해주세요</span>';
+    return;
+  }
+  tabs.innerHTML = d.pdfs.map((p,i)=>
+    '<div style="display:flex;align-items:center;gap:2px;">'+
+    '<button class="tab'+(i===0?' active':'')+'" onclick="showPDF('+p.id+',this)" id="pdf-tab-'+p.id+'">'+p.name.replace('.pdf','').slice(0,15)+'</button>'+
+    '<button onclick="deletePDF('+p.id+')" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:12px;padding:0 2px;">✕</button>'+
+    '</div>'
+  ).join('');
+  if(d.pdfs.length) showPDF(d.pdfs[0].id, document.querySelector('#pdf-tabs .tab'));
+}
+
+async function showPDF(id, btn){
+  document.querySelectorAll('#pdf-tabs .tab').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  const viewer = document.getElementById('pdf-viewer');
+  viewer.innerHTML='<span class="content-empty">로딩 중...</span>';
+  const d = await fetch('/api/pdf/'+id).then(r=>r.json());
+  if(d.data){
+    viewer.innerHTML='<iframe src="data:application/pdf;base64,'+d.data+'" style="width:100%;height:500px;border:none;"></iframe>';
+  }
+}
+
+async function clearAllPDFs(){
+  if(!confirm('리포트 전체 삭제할까요?')) return;
+  const d = await fetch('/api/pdf/list').then(r=>r.json());
+  for(const p of (d.pdfs||[])){
+    await fetch('/api/pdf/'+p.id+'/delete',{method:'POST'});
+  }
+  loadPDFList();
+}
+
+async function deletePDF(id){
+  await fetch('/api/pdf/'+id+'/delete',{method:'POST'});
+  loadPDFList();
+}
+
+async function searchThemePrices(){
+  const q = document.getElementById('theme-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('theme-price-btn');
+  const result = document.getElementById('theme-price-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span> 조회 중...';
+  result.innerHTML='<span class="content-empty">시세 불러오는 중... (종목 수에 따라 10~20초 소요)</span>';
+  try{
+    const d = await fetch('/api/theme/prices?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    if(!d.stocks||!d.stocks.length){
+      result.innerHTML='<span class="content-empty">"'+q+'" 테마 종목이 없어요.</span>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.query+' · '+d.count+'종목</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">';
+    d.stocks.forEach(s=>{
+      const color = s.up === true ? '#d63031' : s.up === false ? '#0984e3' : '#636e72';
+      html += '<div style="padding:10px 12px;background:#f8f9fa;border-radius:10px;border-top:3px solid '+color+';">';
+      html += '<div style="font-size:13px;font-weight:700;color:#1a1d23;margin-bottom:4px;">'+s.name+'</div>';
+      html += '<div style="font-size:16px;font-weight:700;color:#1a1d23;font-family:DM Mono,monospace;">'+s.price+'</div>';
+      html += '<div style="font-size:12px;color:'+color+';font-weight:600;">'+s.change+' ('+s.pct+')</div>';
+      html += '<a href="https://m.stock.naver.com/domestic/stock/'+s.code+'/chart" target="_blank" style="font-size:10px;color:#b2bec3;">차트 →</a>';
+      html += '</div>';
+    });
+    html += '</div>';
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='조회';
+}
+
+async function searchEncyc(){
+  const q = document.getElementById('encyc-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('encyc-btn');
+  const result = document.getElementById('encyc-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/encyc/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    if(!d.results||!d.results.length){
+      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
+      return;
+    }
+    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.results.length+'건</div>';
+    d.results.forEach(row=>{
+      html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #0984e3;">';
+      const situation = row['상황'] || '';
+      const topic = row['주제(시장/섹터/종목)'] || row['주제'] || '';
+      const expr = row['표현'] || '';
+      if(situation) html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:4px;">📌 '+situation+'</div>';
+      if(topic) html += '<div style="font-size:12px;color:#0984e3;font-weight:600;margin-bottom:6px;">'+topic+'</div>';
+      if(expr) html += '<div style="font-size:14px;color:#1a1d23;line-height:1.7;">'+expr+'</div>';
+      html += '</div>';
+    });
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='검색';
+}
+
+async function searchGuest(){
+  const q = document.getElementById('guest-input').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('guest-btn');
+  const result = document.getElementById('guest-result');
+  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
+  result.innerHTML='<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/guest/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    if(d.error){
+      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+      return;
+    }
+    const sheets = Object.keys(d.results||{});
+    if(!sheets.length){
+      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
+      return;
+    }
+    let html = '';
+    sheets.forEach(sheet=>{
+      const rows = d.results[sheet];
+      html += '<div style="margin-bottom:20px;">';
+      html += '<div style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.08em;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #e8b84b;">📋 '+sheet+' · '+rows.length+'건</div>';
+      rows.forEach(row=>{
+        html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #e8b84b;">';
+        const entries = Object.entries(row).filter(([k,v])=>v&&v.trim());
+        // 날짜, 이름, 코너 먼저
+        const priority = ['날짜','이름','코너'];
+        const header = priority.map(k=>{
+          const e = entries.find(([ek])=>ek===k);
+          return e ? '<span style="font-size:12px;font-weight:700;color:#1a1d23;">'+e[1]+'</span>' : '';
+        }).filter(Boolean).join(' · ');
+        if(header) html += '<div style="margin-bottom:6px;">'+header+'</div>';
+        // 나머지 내용
+        entries.forEach(([k,v])=>{
+          if(priority.includes(k)) return;
+          html += '<div style="margin-bottom:3px;">';
+          html += '<span style="font-size:11px;color:#7a8099;font-weight:700;margin-right:6px;">'+k+'</span>';
+          if(v.startsWith('http')){
+            html += '<a href="'+v+'" target="_blank" style="font-size:12px;color:#0984e3;">🔗 링크</a>';
+          } else {
+            html += '<span style="font-size:13px;color:#2d3436;">'+v+'</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    result.innerHTML = html;
+  }catch(e){
+    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML='검색';
+}
+
+// 완대본
+let _wdbData = null;
+
+async function uploadWdaebon(input){
+  const files = Array.from(input.files);
+  let allText = '';
+  for(const file of files){
+    const text = await file.text();
+    allText += text + '\n\n';
+  }
+  input.value='';
+  if(!allText.trim()) return;
+  const btn = document.querySelector('#wdb-file');
+  document.getElementById('wdb-result').innerHTML='<span class="content-empty"><span class="spinner"></span> AI가 분석 중...</span>';
+  try{
+    const d = await fetch('/api/wdaebon/parse',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content:allText})
+    }).then(r=>r.json());
+    if(d.error){
+      document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
+    } else {
+      _wdbData = d;
+      renderWdaebon(d);
+      const badge=document.getElementById('wdb-badge');
+      badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+    }
+  }catch(e){
+    document.getElementById('wdb-result').innerHTML='<span class="content-empty">오류 발생</span>';
+  }
+}
+
+function renderWdaebon(data){
+  if(!data||!data.corners||!data.corners.length){
+    document.getElementById('wdb-result').innerHTML='<span class="content-empty">완대본을 업로드해주세요</span>';
+    return;
+  }
+  let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+data.broadcast_date+' · '+data.corners.length+'개 코너</div>';
+  html += '<div class="tab-bar" id="wdb-tabs">';
+  data.corners.forEach((c,i)=>{
+    html += '<button class="tab'+(i===0?' active':'')+'" onclick="wdbTab(this,'+i+')">'+
+      '#'+c.number+' '+c.title+'</button>';
+  });
+  html += '</div>';
+  data.corners.forEach((c,i)=>{
+    html += '<div id="wdb-corner-'+i+'" style="display:'+(i===0?'block':'none')+';">';
+    // 출연자
+    if(c.guests&&c.guests.length){
+      html += '<div style="margin-bottom:10px;padding:8px 12px;background:#f0f7ff;border-radius:8px;">';
+      html += '<span style="font-size:11px;font-weight:700;color:#0984e3;">👤 출연자</span> ';
+      html += c.guests.map(g=>'<span style="font-size:13px;color:#2d3436;margin-left:6px;">'+g+'</span>').join('');
+      html += '</div>';
+    }
+    // 질문들
+    if(c.questions&&c.questions.length){
+      c.questions.forEach((q,qi)=>{
+        html += '<div style="margin-bottom:12px;padding:10px 14px;background:#f8f9fa;border-radius:10px;border-left:3px solid #e8b84b;">';
+        html += '<div style="font-size:12px;font-weight:700;color:#e8b84b;margin-bottom:6px;">'+q.q_num+'</div>';
+        html += '<div style="font-size:13px;color:#2d3436;line-height:1.7;margin-bottom:8px;" contenteditable="true" '+
+          'onblur="_wdbData.corners['+i+'].questions['+qi+'].question=this.innerText;saveWdaebonDB()">'+q.question+'</div>';
+        if(q.supers&&q.supers.length){
+          html += '<div style="font-size:11px;color:#7a8099;">';
+          q.supers.forEach(s=>{
+            html += '<div>📺 '+s+'</div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+    }
+    // 메모
+    html += '<div style="margin-top:8px;">';
+    html += '<textarea class="input-area" style="min-height:60px;font-size:13px;" placeholder="코너 메모..." '+
+      'onchange="_wdbData.corners['+i+'].memo=this.value;saveWdaebonDB()">'+(c.memo||'')+'</textarea>';
+    html += '</div>';
+    html += '</div>';
+  });
+  document.getElementById('wdb-result').innerHTML = html;
+}
+
+function wdbTab(btn, idx){
+  document.querySelectorAll('#wdb-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('[id^="wdb-corner-"]').forEach(el=>el.style.display='none');
+  document.getElementById('wdb-corner-'+idx).style.display='block';
+}
+
+async function saveWdaebonDB(){
+  if(!_wdbData) return;
+  await fetch('/api/post/wdaebon',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:JSON.stringify(_wdbData),date:new Date().toISOString().slice(0,10)})});
+}
+
+async function clearWdaebon(){
+  if(!confirm('완대본 플로우 초기화할까요?'))return;
+  await fetch('/api/wdaebon/clear',{method:'POST'});
+  _wdbData=null;
+  document.getElementById('wdb-result').innerHTML='<span class="content-empty">완대본을 업로드해주세요</span>';
+}
+
+async function loadWdaebon(){
+  try{
+    const d=await fetch('/api/post/wdaebon').then(r=>r.json());
+    if(d.content){
+      _wdbData=JSON.parse(d.content);
+      renderWdaebon(_wdbData);
+    }
+  }catch(e){}
 }
 
 async function clearCalendar(){
@@ -1927,12 +2671,14 @@ async function loadAll(){
 loadAll();
 loadFutures();
 loadAutoFutures();
-loadReportTabs();
+loadReport();
 loadNote();
 loadTodo();
+loadMemo();
 loadNews();
 loadCalendar();
 loadPDFList();
+loadWdaebon();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
