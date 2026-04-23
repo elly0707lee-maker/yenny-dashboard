@@ -1772,30 +1772,25 @@ function parseWdb(text){
   }
   if(current) corners.push(current);
   
-  // 각 코너에서 출연자 추출
+  // 각 코너에서 출연자 추출 ("이름 | 직함" 형식)
   corners.forEach(c=>{
-    const text = (c.body || []).join('\n');
-    // 패턴: "이름 | 소속 직함" 또는 "이름 - 소속 직함" 또는 "네임수퍼> 이름 | 직함"
-    const patterns = [
-      /네임수퍼[>\s]*([^|\n—–-]+?)[\s]*[|｜][\s]*([^\n]+)/g,
-      /^[\s]*([가-힣]{2,4})[\s]*[|｜][\s]*([^\n]+)/gm,
-      /([가-힣]{2,4})[\s]+(대표|연구원|센터장|애널리스트|이사|차장|팀장|본부장|연구위원|소장|매니저|투자자문|자문|부사장|전무|상무|수석|선임|위원)/g,
-    ];
+    const bodyLines = c.body || [];
     const seen = new Set();
-    for(const pat of patterns){
-      let m;
-      while((m = pat.exec(text)) !== null){
+    c.guests = [];
+    for(const line of bodyLines){
+      // "이름 | 직함" 패턴만 (가장 확실한 방식)
+      const m = line.match(/([가-힣]{2,4})\s*[|｜]\s*(.+)/);
+      if(m){
         const name = m[1].trim();
-        const title = (m[2]||'').trim().split(/[,\n]/)[0].trim();
+        const title = m[2].trim();
         const key = name + '|' + title;
-        if(!seen.has(key) && name.length <= 4 && name.length >= 2){
+        if(!seen.has(key)){
           seen.add(key);
           c.guests.push({name, title});
         }
       }
     }
-    // 상위 2명만 유지
-    c.guests = c.guests.slice(0, 3);
+    c.guests = c.guests.slice(0, 4);
   });
   return corners;
 }
