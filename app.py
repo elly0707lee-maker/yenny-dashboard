@@ -917,9 +917,20 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .grid-futures-todo{display:grid;grid-template-columns:1fr 2fr;gap:10px}
 .grid-todo-memo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid-domestic{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+/* 미국·글로벌: PC 4열 × 3행 기본 순서 유지 */
+.grid-us{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 @media(max-width:680px){
   /* 국내 시장 2열 (4개 카드를 2x2로) */
   .grid-domestic{grid-template-columns:1fr 1fr!important;gap:8px}
+  /* 미국·글로벌 3열 + 순서 재배치 */
+  .grid-us{grid-template-columns:1fr 1fr 1fr!important;gap:6px}
+  /* 행1: 다우(1), S&P(2), 나스닥(3) - 그대로 */
+  /* 행2: 10년물(5), DXY(6), VIX(7) - 그대로 */
+  /* 행3: WTI(9), 브렌트(10), 금(11) - 그대로 */
+  /* 행4: EWY(4→12), 필반(8→13), DRAM(12→14) */
+  .us-4{order:12}
+  .us-8{order:13}
+  .us-12{order:14}
   .container{padding:12px;padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
   /* 국내 시장은 2열 (코스피/코스닥/원달러) */
   .grid3{grid-template-columns:1fr 1fr!important;gap:8px}
@@ -937,9 +948,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
   .content-card{padding:12px 14px}
   .card{padding:12px 10px}
   /* 미국 3분할일 때 글씨 더 작게 */
-  .grid4 .metric-val{font-size:16px!important;letter-spacing:-0.3px}
-  .grid4 .metric-label{font-size:9px!important}
-  .grid4 .metric-chg{font-size:11px}
+  .grid4 .metric-val, .grid-us .metric-val{font-size:16px!important;letter-spacing:-0.3px}
+  .grid4 .metric-label, .grid-us .metric-label{font-size:9px!important}
+  .grid4 .metric-chg, .grid-us .metric-chg{font-size:11px}
   .grid3 .metric-val{font-size:22px}
   .grid3 .metric-label{font-size:10px}
   .metric-val{font-size:22px}
@@ -1085,23 +1096,19 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   <!-- 미국·글로벌 -->
   <div class="section-label">미국·글로벌</div>
-  <div class="grid4">
-    <div class="card"><div class="metric-label">다우존스</div><div class="metric-val" id="dow-val"><span class="loading">—</span></div><div class="metric-chg" id="dow-chg"></div></div>
-    <div class="card"><div class="metric-label">S&amp;P 500</div><div class="metric-val" id="sp500-val"><span class="loading">—</span></div><div class="metric-chg" id="sp500-chg"></div></div>
-    <div class="card"><div class="metric-label">나스닥</div><div class="metric-val" id="nasdaq-val"><span class="loading">—</span></div><div class="metric-chg" id="nasdaq-chg"></div></div>
-    <div class="card"><div class="metric-label">EWY</div><div class="metric-val" id="ewy-val"><span class="loading">—</span></div><div class="metric-chg" id="ewy-chg"></div></div>
-  </div>
-  <div class="grid4" style="margin-top:8px;">
-    <div class="card"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
-    <div class="card"><div class="metric-label">달러인덱스 (DXY)</div><div class="metric-val" id="dxy-val"><span class="loading">—</span></div><div class="metric-chg" id="dxy-chg"></div></div>
-    <div class="card"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
-    <div class="card"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
-  </div>
-  <div class="grid4" style="margin-top:8px;">
-    <div class="card"><div class="metric-label">WTI 유가</div><div class="metric-val" id="wti-val"><span class="loading">—</span></div><div class="metric-chg" id="wti-chg"></div></div>
-    <div class="card"><div class="metric-label">브렌트유</div><div class="metric-val" id="brent-val"><span class="loading">—</span></div><div class="metric-chg" id="brent-chg"></div></div>
-    <div class="card"><div class="metric-label">금</div><div class="metric-val" id="gold-val"><span class="loading">—</span></div><div class="metric-chg" id="gold-chg"></div></div>
-    <div class="card"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
+  <div class="grid-us">
+    <div class="card us-1"><div class="metric-label">다우존스</div><div class="metric-val" id="dow-val"><span class="loading">—</span></div><div class="metric-chg" id="dow-chg"></div></div>
+    <div class="card us-2"><div class="metric-label">S&amp;P 500</div><div class="metric-val" id="sp500-val"><span class="loading">—</span></div><div class="metric-chg" id="sp500-chg"></div></div>
+    <div class="card us-3"><div class="metric-label">나스닥</div><div class="metric-val" id="nasdaq-val"><span class="loading">—</span></div><div class="metric-chg" id="nasdaq-chg"></div></div>
+    <div class="card us-4"><div class="metric-label">EWY</div><div class="metric-val" id="ewy-val"><span class="loading">—</span></div><div class="metric-chg" id="ewy-chg"></div></div>
+    <div class="card us-5"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
+    <div class="card us-6"><div class="metric-label">달러인덱스 (DXY)</div><div class="metric-val" id="dxy-val"><span class="loading">—</span></div><div class="metric-chg" id="dxy-chg"></div></div>
+    <div class="card us-7"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
+    <div class="card us-8"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
+    <div class="card us-9"><div class="metric-label">WTI 유가</div><div class="metric-val" id="wti-val"><span class="loading">—</span></div><div class="metric-chg" id="wti-chg"></div></div>
+    <div class="card us-10"><div class="metric-label">브렌트유</div><div class="metric-val" id="brent-val"><span class="loading">—</span></div><div class="metric-chg" id="brent-chg"></div></div>
+    <div class="card us-11"><div class="metric-label">금</div><div class="metric-val" id="gold-val"><span class="loading">—</span></div><div class="metric-chg" id="gold-chg"></div></div>
+    <div class="card us-12"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
   </div>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;align-items:center;">
     <a href="https://www.bloomberg.com/asia" target="_blank" class="btn">📰 Bloomberg</a>
