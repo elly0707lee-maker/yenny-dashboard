@@ -1084,6 +1084,8 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button onclick="rtSize(this,'5')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>
         <button onclick="rtSize(this,'3')" title="기본 크기">A</button>
         <button onclick="rtSize(this,'2')" title="작은 글씨" style="font-size:10px;">A⁻</button>
+        <span style="flex:1;"></span>
+        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>
       </div>
       <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:300px;"></div>
     </div>
@@ -1760,16 +1762,41 @@ function parseWdb(text){
     const match = line.match(/^\s*#(\d+)\s*\.?\s*(.*)/);
     if(match){
       if(current) corners.push(current);
-      current = {number:match[1], title:match[2].trim()||'코너'+match[1], body:[]};
+      current = {number:match[1], title:match[2].trim()||'코너'+match[1], body:[], guests:[]};
     } else if(current){
       current.body.push(line);
     } else if(line.trim()){
-      // 첫 # 이전 내용은 인트로로
-      if(!corners.length) corners.push({number:'0', title:'인트로', body:[line]});
+      if(!corners.length) corners.push({number:'0', title:'인트로', body:[line], guests:[]});
       else corners[0].body.push(line);
     }
   }
   if(current) corners.push(current);
+  
+  // 각 코너에서 출연자 추출
+  corners.forEach(c=>{
+    const text = (c.body || []).join('\n');
+    // 패턴: "이름 | 소속 직함" 또는 "이름 - 소속 직함" 또는 "네임수퍼> 이름 | 직함"
+    const patterns = [
+      /네임수퍼[>\s]*([^|\n—–-]+?)[\s]*[|｜][\s]*([^\n]+)/g,
+      /^[\s]*([가-힣]{2,4})[\s]*[|｜][\s]*([^\n]+)/gm,
+      /([가-힣]{2,4})[\s]+(대표|연구원|센터장|애널리스트|이사|차장|팀장|본부장|연구위원|소장|매니저|투자자문|자문|부사장|전무|상무|수석|선임|위원)/g,
+    ];
+    const seen = new Set();
+    for(const pat of patterns){
+      let m;
+      while((m = pat.exec(text)) !== null){
+        const name = m[1].trim();
+        const title = (m[2]||'').trim().split(/[,\n]/)[0].trim();
+        const key = name + '|' + title;
+        if(!seen.has(key) && name.length <= 4 && name.length >= 2){
+          seen.add(key);
+          c.guests.push({name, title});
+        }
+      }
+    }
+    // 상위 2명만 유지
+    c.guests = c.guests.slice(0, 3);
+  });
   return corners;
 }
 
@@ -1807,9 +1834,26 @@ function renderWdb(){
   html += '<button onclick="rtSize(this,\'5\')" title="큰 글씨 (Cmd+Shift+L)" style="font-size:16px;">A⁺</button>';
   html += '<button onclick="rtSize(this,\'3\')" title="기본 크기">A</button>';
   html += '<button onclick="rtSize(this,\'2\')" title="작은 글씨" style="font-size:10px;">A⁻</button>';
+  html += '<span style="flex:1;"></span>';
+  html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>';
   html += '</div>';
-  // 에디터
+  // 출연자 카드
   const active = corners[_wdbActiveTab] || corners[0];
+  if(active.guests && active.guests.length){
+    html += '<div style="margin-bottom:10px;padding:10px 14px;background:linear-gradient(135deg,#fdfbf5,#fff);border-radius:10px;border:1.5px solid #e8b84b;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">';
+    html += '<span style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.05em;">👤 출연자</span>';
+    active.guests.forEach(g=>{
+      html += '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:white;border-radius:20px;border:1px solid #e8b84b;">';
+      html += '<span style="font-size:13px;font-weight:700;color:#1a1d23;">'+g.name+'</span>';
+      if(g.title){
+        html += '<span style="font-size:11px;color:#7a8099;">|</span>';
+        html += '<span style="font-size:12px;color:#636e72;">'+g.title+'</span>';
+      }
+      html += '</span>';
+    });
+    html += '</div>';
+  }
+  // 에디터
   const activeText = (active.body || []).join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
   // 이미 저장된 html이 있으면 복원
   const savedHtml = _wdbTabHtml[_wdbActiveTab];
@@ -1848,10 +1892,19 @@ function wdbShowTab(i){
 }
 
 async function saveWdaebon(){
-  const val = document.getElementById('wdb-input').value;
+  // 현재 편집 중인 탭의 HTML도 저장
+  const currentEditor = document.getElementById('wdb-tab-edit');
+  if(currentEditor){
+    const idx = parseInt(currentEditor.dataset.idx);
+    _wdbTabHtml[idx] = currentEditor.innerHTML;
+  }
+  const payload = {
+    text: document.getElementById('wdb-input').value,
+    tabHtml: _wdbTabHtml
+  };
   await fetch('/api/post/wdaebon',{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
+    body:JSON.stringify({content:JSON.stringify(payload),date:new Date().toISOString().slice(0,10)})
   });
   const badge=document.getElementById('wdb-badge');
   badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
@@ -1865,6 +1918,7 @@ async function clearWdaebon(){
   });
   document.getElementById('wdb-input').value='';
   document.getElementById('wdb-tabs-container').innerHTML='';
+  _wdbTabHtml = {};
   _wdbActiveTab = 0;
 }
 
@@ -1872,7 +1926,16 @@ async function loadWdaebon(){
   try{
     const d=await fetch('/api/post/wdaebon').then(r=>r.json());
     if(d.content){
-      document.getElementById('wdb-input').value=d.content;
+      // JSON 형식이면 새 포맷, 아니면 구버전 plaintext
+      let text = d.content;
+      try{
+        const payload = JSON.parse(d.content);
+        if(payload && typeof payload === 'object' && payload.text !== undefined){
+          text = payload.text;
+          _wdbTabHtml = payload.tabHtml || {};
+        }
+      }catch(e){}
+      document.getElementById('wdb-input').value = text;
       renderWdb();
     }
   }catch(e){}
