@@ -914,11 +914,17 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.grid-futures-todo{display:grid;grid-template-columns:1fr 2fr;gap:10px}
+.grid-todo-memo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media(max-width:680px){
-  .container{padding:12px}
-  .grid2{grid-template-columns:1fr;gap:8px}
-  .grid3{grid-template-columns:1fr 1fr}
-  .grid4{grid-template-columns:1fr 1fr}
+  .container{padding:12px;padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
+  /* 모든 2분할/3분할/4분할을 1열로 */
+  .grid2, .grid3, .grid4, .grid-futures-todo, .grid-todo-memo{grid-template-columns:1fr!important;gap:8px}
+  /* inline style grid도 오버라이드 */
+  [style*="grid-template-columns:1fr 1fr"],
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns:1fr 2fr"],
+  [style*="grid-template-columns: 1fr 2fr"]{grid-template-columns:1fr!important}
   .section-label{margin:18px 0 8px;font-size:10px}
   .content-card{padding:12px 14px}
   .metric-val{font-size:22px}
@@ -936,8 +942,6 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
   h1, .dashboard-title{font-size:18px!important}
   .input-row{flex-direction:column}
   .input-row .btn{width:100%}
-  /* 아이폰 Safe Area */
-  .container{padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
 }
 .card{background:#fff;border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.04)}
 .metric-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
@@ -1024,7 +1028,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   </div>
 
   <!-- 야간선물 + 오늘의 할일 -->
-  <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:8px;">
+  <div class="grid-futures-todo" style="margin-top:8px;">
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">🌙 야간선물</span>
@@ -1038,7 +1042,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="btn" onclick="clearFutures()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:0;">
+    <div class="grid-todo-memo" style="margin-bottom:0;">
       <!-- 투두리스트 -->
       <div class="content-card" style="margin-bottom:0;">
         <div class="content-header">
