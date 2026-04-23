@@ -1062,10 +1062,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   </div>
 
   <!-- 완대본 플로우 -->
-  <div class="section-label">📋 오늘 방송 플로우</div>
+  <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card">
     <div class="content-header">
-      <span class="content-title">📋 완대본 플로우</span>
+      <span class="content-title">🎙️ ON AIR</span>
       <div style="display:flex;gap:6px;align-items:center;">
         <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
         <button class="btn btn-green" onclick="saveWdaebon()">저장</button>
@@ -1073,7 +1073,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       </div>
     </div>
     <div style="font-size:11px;color:#7a8099;margin-bottom:8px;">
-      💡 Claude에서 정리한 코너별 플로우를 아래에 붙여넣기 하세요. 각 코너는 <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#1 제목</code>, <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#2 제목</code> 형식으로 구분돼요.
+      💡 Claude에서 정리한 코너별 플로우를 아래에 붙여넣기 하세요. 각 코너는 <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#1 제목</code>, <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#2 제목</code> 형식으로 구분돼요. <b>탭 내용을 직접 편집할 수 있어요.</b>
     </div>
     <textarea class="input-area" id="wdb-input" placeholder="예시:
 #1 오프닝
@@ -1689,16 +1689,37 @@ function renderWdb(){
     box.innerHTML = '';
     return;
   }
+  if(_wdbActiveTab >= corners.length) _wdbActiveTab = 0;
   let html = '<div class="tab-bar" style="flex-wrap:wrap;">';
   corners.forEach((c,i)=>{
     html += '<button class="tab'+(i===_wdbActiveTab?' active':'')+'" onclick="wdbShowTab('+i+')">#'+c.number+' '+c.title+'</button>';
   });
   html += '</div>';
   const active = corners[_wdbActiveTab] || corners[0];
-  html += '<div style="padding:14px;background:#f8f9fa;border-radius:10px;border-left:3px solid #e8b84b;white-space:pre-wrap;font-size:13px;line-height:1.7;color:#2d3436;">';
-  html += (active.body.join('\n').trim() || '(내용 없음)');
-  html += '</div>';
+  const activeText = active.body.join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
+  html += '<textarea class="input-area" id="wdb-tab-edit" data-idx="'+_wdbActiveTab+'" '+
+    'style="min-height:240px;font-size:13px;line-height:1.7;border-left:3px solid #e8b84b;background:#fdfbf5;" '+
+    'oninput="onWdbTabEdit(this)" placeholder="이 코너 내용을 직접 편집하세요...">'+
+    (activeText.replace(/</g,'&lt;').replace(/>/g,'&gt;')) + '</textarea>';
   box.innerHTML = html;
+}
+
+function onWdbTabEdit(textarea){
+  // 편집된 내용을 원본 textarea에 반영
+  const idx = parseInt(textarea.dataset.idx);
+  const newBody = textarea.value;
+  const fullText = document.getElementById('wdb-input').value;
+  const corners = parseWdb(fullText);
+  if(!corners[idx]) return;
+  corners[idx].body = newBody.split('\n');
+  // 다시 조립
+  const rebuilt = corners.map(c=>{
+    const header = c.number === '0' ? '' : '#'+c.number+' '+c.title;
+    const body = c.body.join('\n');
+    return header ? header+'\n'+body : body;
+  }).join('\n\n');
+  document.getElementById('wdb-input').value = rebuilt;
+  // 저장 배지는 자동 감춤
 }
 
 function wdbShowTab(i){
