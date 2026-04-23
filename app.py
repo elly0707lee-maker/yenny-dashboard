@@ -842,6 +842,14 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .etf-chg{font-weight:700;font-family:'DM Mono',monospace}
 textarea.input-area{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;resize:vertical;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7}
 textarea.input-area:focus{outline:none;border-color:#e8b84b;background:#fff}
+/* 리치 에디터 */
+.rich-editor{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7;overflow-y:auto;outline:none}
+.rich-editor:focus{border-color:#e8b84b;background:#fff}
+.rich-editor:empty::before{content:attr(data-placeholder);color:#b2bec3;pointer-events:none}
+.richtext-toolbar{display:flex;gap:4px;flex-wrap:wrap;padding:6px;background:#f0f2f5;border-radius:8px;margin-bottom:6px}
+.richtext-toolbar button{width:30px;height:28px;border:1px solid #dfe6e9;background:white;color:#2d3436;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:all .1s}
+.richtext-toolbar button:hover{background:#e8b84b;color:white;border-color:#e8b84b}
+.richtext-toolbar .rt-sep{width:1px;background:#dfe6e9;margin:2px 2px}
 input.input-line{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:15px;font-weight:600;padding:10px 14px;font-family:'DM Mono',monospace}
 input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 .input-row{display:flex;gap:8px;align-items:flex-start;margin-top:10px}
@@ -1057,7 +1065,27 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
           <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
         </div>
       </div>
-      <textarea class="input-area" id="note-input" placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:300px;"></textarea>
+      <div class="richtext-toolbar" data-target="note-rich">
+        <button onclick="rtCmd(this,'bold')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>
+        <button onclick="rtCmd(this,'italic')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>
+        <button onclick="rtCmd(this,'underline')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>
+        <button onclick="rtCmd(this,'strikeThrough')" title="취소선"><s>S</s></button>
+        <span class="rt-sep"></span>
+        <button onclick="rtHighlight(this,'#fff3a0')" title="노란색 하이라이트 (Cmd/Ctrl+Shift+Y)" style="background:#fff3a0;">H</button>
+        <button onclick="rtHighlight(this,'#ffd6d6')" title="분홍색 하이라이트" style="background:#ffd6d6;">H</button>
+        <button onclick="rtHighlight(this,'#d6f0ff')" title="파란색 하이라이트" style="background:#d6f0ff;">H</button>
+        <button onclick="rtHighlight(this,'transparent')" title="하이라이트 제거" style="background:white;">✕</button>
+        <span class="rt-sep"></span>
+        <button onclick="rtColor(this,'#d63031')" title="빨간 글자" style="color:#d63031;">A</button>
+        <button onclick="rtColor(this,'#0984e3')" title="파란 글자" style="color:#0984e3;">A</button>
+        <button onclick="rtColor(this,'#00b894')" title="초록 글자" style="color:#00b894;">A</button>
+        <button onclick="rtColor(this,'#2d3436')" title="기본색">A</button>
+        <span class="rt-sep"></span>
+        <button onclick="rtSize(this,'5')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>
+        <button onclick="rtSize(this,'3')" title="기본 크기">A</button>
+        <button onclick="rtSize(this,'2')" title="작은 글씨" style="font-size:10px;">A⁻</button>
+      </div>
+      <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:300px;"></div>
     </div>
   </div>
 
@@ -1482,9 +1510,59 @@ async function loadMemo(){
     if(d.content) document.getElementById('memo-input').value=d.content;
   }catch(e){}
 }
+// 리치 텍스트 편집 명령
+function rtGetTarget(btn){
+  const tb = btn.closest('.richtext-toolbar');
+  return document.getElementById(tb.dataset.target);
+}
+function rtCmd(btn, cmd){
+  const el = rtGetTarget(btn);
+  el.focus();
+  document.execCommand(cmd, false, null);
+}
+function rtHighlight(btn, color){
+  const el = rtGetTarget(btn);
+  el.focus();
+  document.execCommand('backColor', false, color);
+}
+function rtColor(btn, color){
+  const el = rtGetTarget(btn);
+  el.focus();
+  document.execCommand('foreColor', false, color);
+}
+function rtSize(btn, size){
+  const el = rtGetTarget(btn);
+  el.focus();
+  document.execCommand('fontSize', false, size);
+}
+
+// 단축키 등록
+document.addEventListener('keydown', function(e){
+  const active = document.activeElement;
+  if(!active || !active.classList.contains('rich-editor')) return;
+  const mod = e.metaKey || e.ctrlKey;
+  if(!mod) return;
+  // Cmd+Shift+Y = 노란 하이라이트
+  if(e.shiftKey && e.key.toLowerCase() === 'y'){
+    e.preventDefault();
+    document.execCommand('backColor', false, '#fff3a0');
+  }
+  // Cmd+Shift+L = 큰 글자
+  else if(e.shiftKey && e.key.toLowerCase() === 'l'){
+    e.preventDefault();
+    document.execCommand('fontSize', false, '5');
+  }
+  // Cmd+Shift+R = 빨간 글자
+  else if(e.shiftKey && e.key.toLowerCase() === 'r'){
+    e.preventDefault();
+    document.execCommand('foreColor', false, '#d63031');
+  }
+  // B/I/U는 브라우저 기본 동작 유지
+});
+
 async function saveNote(){
-  const val=document.getElementById('note-input').value.trim();
-  if(!val)return;
+  const el = document.getElementById('note-rich');
+  const val = el ? el.innerHTML : '';
   await fetch('/api/post/note',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
   const badge=document.getElementById('note-badge');
@@ -1494,13 +1572,17 @@ async function saveNote(){
 async function clearNote(){
   if(!confirm('노트 초기화할까요?'))return;
   await fetch('/api/note/clear',{method:'POST'});
-  document.getElementById('note-input').value='';
+  const el = document.getElementById('note-rich');
+  if(el) el.innerHTML='';
 }
 
 async function loadNote(){
   try{
     const d=await fetch('/api/post/note').then(r=>r.json());
-    if(d.content){document.getElementById('note-input').value=d.content;}
+    if(d.content){
+      const el = document.getElementById('note-rich');
+      if(el) el.innerHTML = d.content;
+    }
   }catch(e){}
 }
 
@@ -1695,31 +1777,59 @@ function renderWdb(){
     html += '<button class="tab'+(i===_wdbActiveTab?' active':'')+'" onclick="wdbShowTab('+i+')">#'+c.number+' '+c.title+'</button>';
   });
   html += '</div>';
+  // 리치 툴바 + 에디터
+  html += '<div class="richtext-toolbar" data-target="wdb-tab-edit">';
+  html += '<button onclick="rtCmd(this,\'bold\')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>';
+  html += '<button onclick="rtCmd(this,\'italic\')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>';
+  html += '<button onclick="rtCmd(this,\'underline\')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>';
+  html += '<button onclick="rtCmd(this,\'strikeThrough\')" title="취소선"><s>S</s></button>';
+  html += '<span class="rt-sep"></span>';
+  html += '<button onclick="rtHighlight(this,\'#fff3a0\')" title="노란 하이라이트 (Cmd+Shift+Y)" style="background:#fff3a0;">H</button>';
+  html += '<button onclick="rtHighlight(this,\'#ffd6d6\')" title="분홍 하이라이트" style="background:#ffd6d6;">H</button>';
+  html += '<button onclick="rtHighlight(this,\'#d6f0ff\')" title="파랑 하이라이트" style="background:#d6f0ff;">H</button>';
+  html += '<button onclick="rtHighlight(this,\'transparent\')" title="하이라이트 제거" style="background:white;">✕</button>';
+  html += '<span class="rt-sep"></span>';
+  html += '<button onclick="rtColor(this,\'#d63031\')" title="빨간색 (Cmd+Shift+R)" style="color:#d63031;">A</button>';
+  html += '<button onclick="rtColor(this,\'#0984e3\')" title="파랑색" style="color:#0984e3;">A</button>';
+  html += '<button onclick="rtColor(this,\'#00b894\')" title="초록색" style="color:#00b894;">A</button>';
+  html += '<button onclick="rtColor(this,\'#2d3436\')" title="기본색">A</button>';
+  html += '<span class="rt-sep"></span>';
+  html += '<button onclick="rtSize(this,\'5\')" title="큰 글씨 (Cmd+Shift+L)" style="font-size:16px;">A⁺</button>';
+  html += '<button onclick="rtSize(this,\'3\')" title="기본 크기">A</button>';
+  html += '<button onclick="rtSize(this,\'2\')" title="작은 글씨" style="font-size:10px;">A⁻</button>';
+  html += '</div>';
+  // 에디터
   const active = corners[_wdbActiveTab] || corners[0];
-  const activeText = active.body.join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
-  html += '<textarea class="input-area" id="wdb-tab-edit" data-idx="'+_wdbActiveTab+'" '+
+  const activeText = (active.body || []).join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
+  // 이미 저장된 html이 있으면 복원
+  const savedHtml = _wdbTabHtml[_wdbActiveTab];
+  const initialHtml = savedHtml || activeText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  html += '<div class="rich-editor" id="wdb-tab-edit" contenteditable="true" data-idx="'+_wdbActiveTab+'" '+
     'style="min-height:240px;font-size:13px;line-height:1.7;border-left:3px solid #e8b84b;background:#fdfbf5;" '+
-    'oninput="onWdbTabEdit(this)" placeholder="이 코너 내용을 직접 편집하세요...">'+
-    (activeText.replace(/</g,'&lt;').replace(/>/g,'&gt;')) + '</textarea>';
+    'oninput="onWdbTabEdit(this)" data-placeholder="이 코너 내용을 직접 편집하세요...">'+
+    initialHtml + '</div>';
   box.innerHTML = html;
 }
 
-function onWdbTabEdit(textarea){
-  // 편집된 내용을 원본 textarea에 반영
-  const idx = parseInt(textarea.dataset.idx);
-  const newBody = textarea.value;
+// 탭별 HTML 저장
+let _wdbTabHtml = {};
+
+function onWdbTabEdit(editor){
+  const idx = parseInt(editor.dataset.idx);
+  // HTML 저장
+  _wdbTabHtml[idx] = editor.innerHTML;
+  // 텍스트만 원본 textarea에 반영 (재파싱용)
+  const plain = editor.innerText;
   const fullText = document.getElementById('wdb-input').value;
   const corners = parseWdb(fullText);
   if(!corners[idx]) return;
-  corners[idx].body = newBody.split('\n');
-  // 다시 조립
+  corners[idx].body = plain.split('\n');
   const rebuilt = corners.map(c=>{
     const header = c.number === '0' ? '' : '#'+c.number+' '+c.title;
     const body = c.body.join('\n');
     return header ? header+'\n'+body : body;
   }).join('\n\n');
   document.getElementById('wdb-input').value = rebuilt;
-  // 저장 배지는 자동 감춤
 }
 
 function wdbShowTab(i){
