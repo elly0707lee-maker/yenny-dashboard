@@ -665,6 +665,11 @@ def guest_search():
                 if all(term in row_text for term in terms):
                     matched.append(row)
             if matched:
+                # 날짜 기준 최신순 정렬
+                def get_date_key(row):
+                    date_val = row.get("날짜", "") or row.get("date", "")
+                    return str(date_val)
+                matched.sort(key=get_date_key, reverse=True)
                 results[sheet_name] = matched
         except:
             pass
