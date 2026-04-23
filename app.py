@@ -1772,21 +1772,41 @@ function parseWdb(text){
   }
   if(current) corners.push(current);
   
-  // 각 코너에서 출연자 추출 ("이름 | 직함" 형식)
+  // 각 코너에서 출연자 추출 ("이름 | 직함" 형식) - 제목 + body 둘 다 검사
   corners.forEach(c=>{
-    const bodyLines = c.body || [];
     const seen = new Set();
     c.guests = [];
-    for(const line of bodyLines){
-      // "이름 | 직함" 패턴만 (가장 확실한 방식)
-      const m = line.match(/([가-힣]{2,4})\s*[|｜]\s*(.+)/);
-      if(m){
+    // 검사 대상: title 줄 + body 전체
+    const searchLines = [c.title, ...(c.body || [])];
+    for(const line of searchLines){
+      // 한 줄에 여러 명이 있을 수도 있으니 global 매칭
+      const re = /([가-힣]{2,4})\s*[|｜]\s*([^|｜\n]+?)(?=(?:\s*[+＋]|\s*,|\s*\/|\s*$|\s{2,}))/g;
+      let m;
+      while((m = re.exec(line)) !== null){
         const name = m[1].trim();
-        const title = m[2].trim();
+        let title = m[2].trim();
+        // 앞뒤 불필요한 기호 제거
+        title = title.replace(/[—–\-]+$/, '').replace(/^[—–\-]+/, '').trim();
+        // 뒤쪽 (전화연결) 같은 괄호는 유지하되, 그 뒤 잡 텍스트는 제거
+        title = title.replace(/\s*\(([^)]+)\).*$/, ' ($1)');
+        if(!title) continue;
         const key = name + '|' + title;
         if(!seen.has(key)){
           seen.add(key);
           c.guests.push({name, title});
+        }
+      }
+      // fallback: 단일 "이름 | 직함" 
+      if(!c.guests.length){
+        const simple = line.match(/([가-힣]{2,4})\s*[|｜]\s*(.+?)(?:\s*[—–\-(]|\s*$)/);
+        if(simple){
+          const name = simple[1].trim();
+          const title = simple[2].trim();
+          const key = name + '|' + title;
+          if(title && !seen.has(key)){
+            seen.add(key);
+            c.guests.push({name, title});
+          }
         }
       }
     }
