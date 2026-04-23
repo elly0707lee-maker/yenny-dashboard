@@ -916,17 +916,32 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .grid-futures-todo{display:grid;grid-template-columns:1fr 2fr;gap:10px}
 .grid-todo-memo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid-domestic{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 @media(max-width:680px){
+  /* 국내 시장 2열 (4개 카드를 2x2로) */
+  .grid-domestic{grid-template-columns:1fr 1fr!important;gap:8px}
   .container{padding:12px;padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
-  /* 모든 2분할/3분할/4분할을 1열로 */
-  .grid2, .grid3, .grid4, .grid-futures-todo, .grid-todo-memo{grid-template-columns:1fr!important;gap:8px}
-  /* inline style grid도 오버라이드 */
-  [style*="grid-template-columns:1fr 1fr"],
-  [style*="grid-template-columns: 1fr 1fr"],
+  /* 국내 시장은 2열 (코스피/코스닥/원달러) */
+  .grid3{grid-template-columns:1fr 1fr!important;gap:8px}
+  /* 미국·글로벌은 3열 유지 */
+  .grid4{grid-template-columns:1fr 1fr 1fr!important;gap:6px}
+  /* 2분할은 여전히 1열 (노트/체크포인트 같은 큰 카드는) */
+  .grid2{grid-template-columns:1fr!important;gap:8px}
+  /* 야간선물+투두/메모는 1열 */
+  .grid-futures-todo, .grid-todo-memo{grid-template-columns:1fr!important;gap:8px}
+  /* inline style 2fr / 1fr 1fr 중첩 처리 */
   [style*="grid-template-columns:1fr 2fr"],
   [style*="grid-template-columns: 1fr 2fr"]{grid-template-columns:1fr!important}
+  [style*="display:grid"][style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}
   .section-label{margin:18px 0 8px;font-size:10px}
   .content-card{padding:12px 14px}
+  .card{padding:12px 10px}
+  /* 미국 3분할일 때 글씨 더 작게 */
+  .grid4 .metric-val{font-size:16px!important;letter-spacing:-0.3px}
+  .grid4 .metric-label{font-size:9px!important}
+  .grid4 .metric-chg{font-size:11px}
+  .grid3 .metric-val{font-size:22px}
+  .grid3 .metric-label{font-size:10px}
   .metric-val{font-size:22px}
   .metric-label{font-size:10px}
   .content-title{font-size:14px}
@@ -1007,7 +1022,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   <!-- 국내 시장 -->
   <div class="section-label">국내 시장</div>
-  <div class="grid3">
+  <div class="grid-domestic">
     <div class="card">
       <div class="metric-label">코스피</div>
       <div class="metric-val" id="kospi-val"><span class="loading">—</span></div>
@@ -1025,24 +1040,22 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div class="metric-val" id="usdkrw-val"><span class="loading">—</span></div>
       <div class="metric-chg" id="usdkrw-chg"></div>
     </div>
-  </div>
-
-  <!-- 야간선물 + 오늘의 할일 -->
-  <div class="grid-futures-todo" style="margin-top:8px;">
-    <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">🌙 야간선물</span>
-        <span class="saved-badge" id="futures-badge">✓ 저장됨</span>
+    <div class="content-card" style="margin-bottom:0;padding:12px 14px;">
+      <div class="content-header" style="margin-bottom:6px;">
+        <span class="metric-label" style="margin-bottom:0;">🌙 야간선물</span>
+        <span class="saved-badge" id="futures-badge">✓</span>
       </div>
-      <div id="futures-display" class="futures-val">—</div>
-      <div id="futures-auto-val" style="font-size:11px;color:#b2bec3;margin-bottom:6px;"></div>
-      <div class="input-row">
-        <input class="input-line" id="futures-input" placeholder="예) +1.2%" style="flex:1;" />
-        <button class="btn btn-green" onclick="saveFutures()">저장</button>
-        <button class="btn" onclick="clearFutures()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+      <div id="futures-display" class="futures-val" style="font-size:22px;">—</div>
+      <div id="futures-auto-val" style="font-size:10px;color:#b2bec3;margin-bottom:6px;"></div>
+      <div style="display:flex;gap:4px;">
+        <input class="input-line" id="futures-input" placeholder="+1.2%" style="flex:1;font-size:13px;padding:6px 10px;" />
+        <button class="btn btn-green" onclick="saveFutures()" style="font-size:11px;padding:6px 10px;">저장</button>
       </div>
     </div>
-    <div class="grid-todo-memo" style="margin-bottom:0;">
+  </div>
+
+  <!-- 투두리스트 + 메모 -->
+  <div class="grid-todo-memo" style="margin-top:10px;">
       <!-- 투두리스트 -->
       <div class="content-card" style="margin-bottom:0;">
         <div class="content-header">
@@ -1068,7 +1081,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         </div>
         <textarea class="input-area" id="memo-input" placeholder="메모..." style="min-height:120px;"></textarea>
       </div>
-    </div>
   </div>
 
   <!-- 미국·글로벌 -->
