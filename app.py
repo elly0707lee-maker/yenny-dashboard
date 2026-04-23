@@ -914,7 +914,31 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:680px){.grid3{grid-template-columns:1fr 1fr}.grid4{grid-template-columns:1fr 1fr}}
+@media(max-width:680px){
+  .container{padding:12px}
+  .grid2{grid-template-columns:1fr;gap:8px}
+  .grid3{grid-template-columns:1fr 1fr}
+  .grid4{grid-template-columns:1fr 1fr}
+  .section-label{margin:18px 0 8px;font-size:10px}
+  .content-card{padding:12px 14px}
+  .metric-val{font-size:22px}
+  .metric-label{font-size:10px}
+  .content-title{font-size:14px}
+  .tab{font-size:11px;padding:4px 10px}
+  .btn{font-size:12px;padding:6px 10px}
+  .rich-editor, textarea.input-area{font-size:14px;min-height:220px!important}
+  .richtext-toolbar{overflow-x:auto;flex-wrap:nowrap;padding:4px}
+  .richtext-toolbar button{min-width:28px;flex-shrink:0}
+  .richtext-toolbar span[style*="flex:1"]{display:none!important}
+  .richtext-toolbar span[style*="font-size:10px"]{display:none!important}
+  .content-body{min-height:200px!important}
+  .content-header{flex-wrap:wrap;gap:6px}
+  h1, .dashboard-title{font-size:18px!important}
+  .input-row{flex-direction:column}
+  .input-row .btn{width:100%}
+  /* 아이폰 Safe Area */
+  .container{padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
+}
 .card{background:#fff;border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.04)}
 .metric-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
 .metric-val{font-size:26px;font-weight:700;color:#1a1d23;letter-spacing:-.5px;font-family:'DM Mono',monospace}
