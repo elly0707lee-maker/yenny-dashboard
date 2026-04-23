@@ -1,13 +1,15 @@
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, session, redirect, url_for
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 import anthropic
 import pg8000.native
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # 30일 유지
+app.secret_key = os.environ.get("SECRET_KEY", "yenny-dashboard-secret-2026-change-me")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -51,12 +53,79 @@ init_db()
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # 1. 세션 기반 로그인 체크 (PWA/폼 로그인)
+        if session.get('logged_in'):
+            return f(*args, **kwargs)
+        # 2. Basic Auth 체크 (봇/API 호출용)
         auth = request.authorization
-        if not auth or auth.password != DASHBOARD_PASSWORD:
-            return Response("로그인 필요", 401,
-                {"WWW-Authenticate": 'Basic realm="Yenny Dashboard"'})
-        return f(*args, **kwargs)
+        if auth and auth.password == DASHBOARD_PASSWORD:
+            return f(*args, **kwargs)
+        # 3. JSON 요청이면 401, 일반 페이지면 로그인 페이지로
+        if request.path.startswith('/api/'):
+            return jsonify({"error": "unauthorized"}), 401
+        return redirect(url_for('login', next=request.path))
     return decorated
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if password == DASHBOARD_PASSWORD:
+            session.permanent = True
+            session['logged_in'] = True
+            next_url = request.args.get('next', '/')
+            # 안전한 redirect만 허용
+            if not next_url.startswith('/'):
+                next_url = '/'
+            return redirect(next_url)
+        error = "비밀번호가 틀렸어요"
+    else:
+        error = None
+    
+    err_html = f'<div style="color:#d63031;font-size:13px;margin-top:10px;text-align:center;">{error}</div>' if error else ''
+    return Response("""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Yenny">
+<link rel="manifest" href="/manifest.json">
+<title>Yenny Dashboard · 로그인</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Noto Sans KR',sans-serif;background:linear-gradient(135deg,#1a1d23,#2d3436);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:white;border-radius:20px;padding:40px 32px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.logo{font-size:48px;text-align:center;margin-bottom:16px}
+h1{font-size:24px;text-align:center;color:#1a1d23;margin-bottom:8px;font-weight:700}
+.sub{font-size:13px;color:#7a8099;text-align:center;margin-bottom:28px}
+input{width:100%;padding:14px 16px;border:1.5px solid #dfe6e9;border-radius:12px;font-size:15px;font-family:inherit;background:#f8f9fa;outline:none;transition:all .15s}
+input:focus{border-color:#e8b84b;background:white}
+button{width:100%;padding:14px;margin-top:12px;background:#1a1d23;color:#e8b84b;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s}
+button:hover{background:#2d3436}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="logo">🎙️</div>
+<h1>Yenny Dashboard</h1>
+<p class="sub">방송 준비를 시작할까요?</p>
+<form method="POST" action="/login""" + (f"?next={request.args.get('next','/')}" if request.args.get('next') else "") + """">
+<input type="password" name="password" placeholder="비밀번호" autofocus required autocomplete="current-password">
+<button type="submit">로그인</button>
+""" + err_html + """
+</form>
+</div>
+</body>
+</html>""", mimetype="text/html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 
 def get_kis_token():
@@ -218,11 +287,47 @@ def get_latest_post(t):
 
 @app.route("/manifest.json")
 def manifest():
-    return Response(open("manifest.json").read(), mimetype="application/manifest+json")
+    import json
+    return Response(json.dumps({
+        "name": "Yenny Dashboard",
+        "short_name": "Yenny",
+        "description": "머니플러스 방송 준비 대시보드",
+        "start_url": "/",
+        "display": "standalone",
+        "orientation": "portrait-primary",
+        "background_color": "#1a1d23",
+        "theme_color": "#1a1d23",
+        "icons": [
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+        ]
+    }), mimetype="application/manifest+json")
+
 
 @app.route("/service-worker.js")
 def sw():
-    return Response(open("service-worker.js").read(), mimetype="application/javascript")
+    return Response("""const CACHE='yenny-v3';
+self.addEventListener('install',e=>{self.skipWaiting()});
+self.addEventListener('activate',e=>{
+  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
+  self.clients.claim();
+});
+self.addEventListener('fetch',e=>{
+  // API와 POST는 캐시 안 함
+  if(e.request.method!=='GET' || e.request.url.includes('/api/') || e.request.url.includes('/login')) return;
+  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+});""", mimetype="application/javascript")
+
+
+# 간단한 SVG 아이콘
+@app.route("/icon-192.png")
+@app.route("/icon-512.png")
+def icon():
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" fill="#1a1d23" rx="80"/>
+<text x="256" y="330" font-size="280" text-anchor="middle" font-family="sans-serif">🎙️</text>
+</svg>'''
+    return Response(svg, mimetype="image/svg+xml")
 
 @app.route("/")
 @requires_auth
@@ -1038,9 +1143,9 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   <!-- 체크포인트 + 노트 2분할 -->
   <div class="section-label">체크포인트 / 노트</div>
-  <div class="grid2" style="align-items:start;margin-bottom:10px;">
+  <div class="grid2" style="align-items:stretch;margin-bottom:10px;">
     <!-- 왼쪽: 체크포인트 -->
-    <div class="content-card" style="margin-bottom:0;">
+    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">☑ 오늘 체크포인트</span>
         <span class="content-date" id="checkpoint-date"></span>
@@ -1053,10 +1158,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
         <button class="tab" onclick="cpTab(this,'after')">📌시간외</button>
       </div>
-      <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
+      <div class="content-body" id="checkpoint-body" style="flex:1;min-height:400px;"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
     </div>
     <!-- 오른쪽: 노트 -->
-    <div class="content-card" style="margin-bottom:0;">
+    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">📓 오늘의 노트</span>
         <div style="display:flex;gap:6px;align-items:center;">
@@ -1087,7 +1192,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <span style="flex:1;"></span>
         <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>
       </div>
-      <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:300px;"></div>
+      <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="flex:1;min-height:400px;"></div>
     </div>
   </div>
 
