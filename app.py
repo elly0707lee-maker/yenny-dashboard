@@ -1071,14 +1071,14 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button onclick="rtCmd(this,'underline')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>
         <button onclick="rtCmd(this,'strikeThrough')" title="취소선"><s>S</s></button>
         <span class="rt-sep"></span>
-        <button onclick="rtHighlight(this,'#fff3a0')" title="노란색 하이라이트 (Cmd/Ctrl+Shift+Y)" style="background:#fff3a0;">H</button>
+        <button onclick="rtHighlight(this,'#fff3a0')" title="노란색 하이라이트 (Cmd/Ctrl+Shift+H)" style="background:#fff3a0;">H</button>
         <button onclick="rtHighlight(this,'#ffd6d6')" title="분홍색 하이라이트" style="background:#ffd6d6;">H</button>
         <button onclick="rtHighlight(this,'#d6f0ff')" title="파란색 하이라이트" style="background:#d6f0ff;">H</button>
         <button onclick="rtHighlight(this,'transparent')" title="하이라이트 제거" style="background:white;">✕</button>
         <span class="rt-sep"></span>
-        <button onclick="rtColor(this,'#d63031')" title="빨간 글자" style="color:#d63031;">A</button>
-        <button onclick="rtColor(this,'#0984e3')" title="파란 글자" style="color:#0984e3;">A</button>
-        <button onclick="rtColor(this,'#00b894')" title="초록 글자" style="color:#00b894;">A</button>
+        <button onclick="rtColor(this,'#d63031')" title="빨간 글자 (Cmd/Ctrl+Shift+R)" style="color:#d63031;">A</button>
+        <button onclick="rtColor(this,'#0984e3')" title="파란 글자 (Cmd/Ctrl+Shift+B)" style="color:#0984e3;">A</button>
+        <button onclick="rtColor(this,'#00b894')" title="초록 글자 (Cmd/Ctrl+Shift+G)" style="color:#00b894;">A</button>
         <button onclick="rtColor(this,'#2d3436')" title="기본색">A</button>
         <span class="rt-sep"></span>
         <button onclick="rtSize(this,'5')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>
@@ -1541,24 +1541,34 @@ document.addEventListener('keydown', function(e){
   const active = document.activeElement;
   if(!active || !active.classList.contains('rich-editor')) return;
   const mod = e.metaKey || e.ctrlKey;
-  if(!mod) return;
-  // Cmd+Shift+Y = 노란 하이라이트
-  if(e.shiftKey && e.key.toLowerCase() === 'y'){
+  if(!mod || !e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  // Cmd+Shift+H = 노란 하이라이트
+  if(key === 'h'){
     e.preventDefault();
     document.execCommand('backColor', false, '#fff3a0');
   }
   // Cmd+Shift+L = 큰 글자
-  else if(e.shiftKey && e.key.toLowerCase() === 'l'){
+  else if(key === 'l'){
     e.preventDefault();
     document.execCommand('fontSize', false, '5');
   }
   // Cmd+Shift+R = 빨간 글자
-  else if(e.shiftKey && e.key.toLowerCase() === 'r'){
+  else if(key === 'r'){
     e.preventDefault();
     document.execCommand('foreColor', false, '#d63031');
   }
-  // B/I/U는 브라우저 기본 동작 유지
-});
+  // Cmd+Shift+B = 파란 글자
+  else if(key === 'b'){
+    e.preventDefault();
+    document.execCommand('foreColor', false, '#0984e3');
+  }
+  // Cmd+Shift+G = 초록 글자
+  else if(key === 'g'){
+    e.preventDefault();
+    document.execCommand('foreColor', false, '#00b894');
+  }
+}, true);
 
 async function saveNote(){
   const el = document.getElementById('note-rich');
