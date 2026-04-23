@@ -1028,27 +1028,26 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="theme-price-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- 체크포인트 -->
-  <div class="section-label">체크포인트</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">☑ 오늘 체크포인트</span>
-      <span class="content-date" id="checkpoint-date"></span>
+  <!-- 체크포인트 + 노트 2분할 -->
+  <div class="section-label">체크포인트 / 노트</div>
+  <div class="grid2" style="align-items:start;margin-bottom:10px;">
+    <!-- 왼쪽: 체크포인트 -->
+    <div class="content-card" style="margin-bottom:0;">
+      <div class="content-header">
+        <span class="content-title">☑ 오늘 체크포인트</span>
+        <span class="content-date" id="checkpoint-date"></span>
+      </div>
+      <div class="tab-bar" id="cp-tabs">
+        <button class="tab active" onclick="cpTab(this,'all')">전체</button>
+        <button class="tab" onclick="cpTab(this,'indicator')">📌지표</button>
+        <button class="tab" onclick="cpTab(this,'sector')">📌섹터</button>
+        <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
+        <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
+        <button class="tab" onclick="cpTab(this,'after')">📌시간외</button>
+      </div>
+      <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
     </div>
-    <div class="tab-bar" id="cp-tabs">
-      <button class="tab active" onclick="cpTab(this,'all')">전체</button>
-      <button class="tab" onclick="cpTab(this,'indicator')">📌지표</button>
-      <button class="tab" onclick="cpTab(this,'sector')">📌섹터</button>
-      <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
-      <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
-      <button class="tab" onclick="cpTab(this,'after')">📌시간외</button>
-    </div>
-    <div class="content-body" id="checkpoint-body"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
-  </div>
-
-  <!-- 노트 + 리포트 -->
-  <div class="section-label">노트 / 특징 리포트</div>
-  <div class="grid2" style="margin-bottom:10px;">
+    <!-- 오른쪽: 노트 -->
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">📓 오늘의 노트</span>
@@ -1058,28 +1057,35 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
           <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
         </div>
       </div>
-      <textarea class="input-area" id="note-input" placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:140px;"></textarea>
-    </div>
-    <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">📝 특징 리포트</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span class="saved-badge" id="report-badge">✓ 저장됨</span>
-          <button class="btn btn-green" onclick="saveReport()">저장</button>
-          <button class="btn" onclick="clearReport()" style="color:#f87171;border-color:#3a1a1a;">↺ 초기화</button>
-        </div>
-      </div>
-      <div class="tab-bar">
-        <button class="tab active" onclick="reportTab(this,'up')" id="rtab-up">📈 상승</button>
-        <button class="tab" onclick="reportTab(this,'dn')" id="rtab-dn">📉 하락</button>
-        <button class="tab" onclick="reportTab(this,'feature')" id="rtab-feature">⭐ 특징</button>
-      </div>
-      <textarea class="input-area" id="report-up-input" placeholder="상승 내용 입력..." style="min-height:120px;"></textarea>
-      <textarea class="input-area" id="report-dn-input" placeholder="하락 내용 입력..." style="min-height:120px;display:none;"></textarea>
-      <textarea class="input-area" id="report-feature-input" placeholder="특징 내용 입력..." style="min-height:120px;display:none;"></textarea>
+      <textarea class="input-area" id="note-input" placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="min-height:300px;"></textarea>
     </div>
   </div>
 
+  <!-- 완대본 플로우 -->
+  <div class="section-label">📋 오늘 방송 플로우</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">📋 완대본 플로우</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
+        <button class="btn btn-green" onclick="saveWdaebon()">저장</button>
+        <button class="btn" onclick="clearWdaebon()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
+      </div>
+    </div>
+    <div style="font-size:11px;color:#7a8099;margin-bottom:8px;">
+      💡 Claude에서 정리한 코너별 플로우를 아래에 붙여넣기 하세요. 각 코너는 <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#1 제목</code>, <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#2 제목</code> 형식으로 구분돼요.
+    </div>
+    <textarea class="input-area" id="wdb-input" placeholder="예시:
+#1 오프닝
+이예은 앵커 오프닝 멘트...
+
+#2 미국 증시 브리핑  
+김예림 - 뉴욕 증시 마감 브리핑
+
+#3 앵커 브리핑
+..." style="min-height:120px;font-family:monospace;font-size:12px;" oninput="renderWdb()"></textarea>
+    <div id="wdb-tabs-container" style="margin-top:14px;"></div>
+  </div>
 
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
@@ -1649,6 +1655,88 @@ async function clearCalendar(){
   document.getElementById('cal-result').innerHTML='';
 }
 
+// 완대본 플로우 (텍스트 붙여넣기 → 탭 자동 분리)
+let _wdbActiveTab = 0;
+
+function parseWdb(text){
+  if(!text||!text.trim()) return [];
+  // #1 제목, #2 제목 형식으로 분리
+  const lines = text.split('\n');
+  const corners = [];
+  let current = null;
+  for(const line of lines){
+    const match = line.match(/^\s*#(\d+)\s*\.?\s*(.*)/);
+    if(match){
+      if(current) corners.push(current);
+      current = {number:match[1], title:match[2].trim()||'코너'+match[1], body:[]};
+    } else if(current){
+      current.body.push(line);
+    } else if(line.trim()){
+      // 첫 # 이전 내용은 인트로로
+      if(!corners.length) corners.push({number:'0', title:'인트로', body:[line]});
+      else corners[0].body.push(line);
+    }
+  }
+  if(current) corners.push(current);
+  return corners;
+}
+
+function renderWdb(){
+  const text = document.getElementById('wdb-input').value;
+  const corners = parseWdb(text);
+  const box = document.getElementById('wdb-tabs-container');
+  if(!corners.length){
+    box.innerHTML = '';
+    return;
+  }
+  let html = '<div class="tab-bar" style="flex-wrap:wrap;">';
+  corners.forEach((c,i)=>{
+    html += '<button class="tab'+(i===_wdbActiveTab?' active':'')+'" onclick="wdbShowTab('+i+')">#'+c.number+' '+c.title+'</button>';
+  });
+  html += '</div>';
+  const active = corners[_wdbActiveTab] || corners[0];
+  html += '<div style="padding:14px;background:#f8f9fa;border-radius:10px;border-left:3px solid #e8b84b;white-space:pre-wrap;font-size:13px;line-height:1.7;color:#2d3436;">';
+  html += (active.body.join('\n').trim() || '(내용 없음)');
+  html += '</div>';
+  box.innerHTML = html;
+}
+
+function wdbShowTab(i){
+  _wdbActiveTab = i;
+  renderWdb();
+}
+
+async function saveWdaebon(){
+  const val = document.getElementById('wdb-input').value;
+  await fetch('/api/post/wdaebon',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
+  });
+  const badge=document.getElementById('wdb-badge');
+  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+}
+
+async function clearWdaebon(){
+  if(!confirm('완대본 플로우 초기화할까요?'))return;
+  await fetch('/api/post/wdaebon',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({content:'',date:new Date().toISOString().slice(0,10)})
+  });
+  document.getElementById('wdb-input').value='';
+  document.getElementById('wdb-tabs-container').innerHTML='';
+  _wdbActiveTab = 0;
+}
+
+async function loadWdaebon(){
+  try{
+    const d=await fetch('/api/post/wdaebon').then(r=>r.json());
+    if(d.content){
+      document.getElementById('wdb-input').value=d.content;
+      renderWdb();
+    }
+  }catch(e){}
+}
+
 async function loadCalendar(){
   try{
     const d=await fetch('/api/post/calendar').then(r=>r.json());
@@ -2017,6 +2105,7 @@ loadMemo();
 loadNews();
 loadCalendar();
 loadPDFList();
+loadWdaebon();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
