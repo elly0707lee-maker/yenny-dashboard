@@ -1203,7 +1203,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="tab" onclick="cpTab(this,'sector')">📌섹터</button>
         <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
         <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
-        <button class="tab" onclick="cpTab(this,'after')">📌시간외</button>
       </div>
       <div class="content-body" id="checkpoint-body" style="flex:1;min-height:400px;"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
     </div>
@@ -2369,8 +2368,7 @@ const CP_SECTIONS = {
   indicator: ['📌지표'],
   sector: ['📌Sector','📌sector'],
   kospi: ['📌코스피'],
-  kosdaq: ['📌코스닥'],
-  after: ['📌시간외','📌NXT']
+  kosdaq: ['📌코스닥']
 };
 const CL_SECTIONS = {
   figure: ['📌 마감수치','📌마감수치'],
