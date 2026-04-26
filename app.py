@@ -59,11 +59,15 @@ def requires_auth(f):
         # 1. 세션 기반 로그인 체크 (PWA/폼 로그인)
         if session.get('logged_in'):
             return f(*args, **kwargs)
-        # 2. Basic Auth 체크 (봇/API 호출용)
+        # 2. X-API-Secret 헤더 체크 (봇/PWA fallback)
+        api_secret_header = request.headers.get("X-API-Secret", "")
+        if api_secret_header and api_secret_header == API_SECRET:
+            return f(*args, **kwargs)
+        # 3. Basic Auth 체크 (봇/API 호출용)
         auth = request.authorization
         if auth and auth.password == DASHBOARD_PASSWORD:
             return f(*args, **kwargs)
-        # 3. JSON 요청이면 401, 일반 페이지면 로그인 페이지로
+        # 4. JSON 요청이면 401, 일반 페이지면 로그인 페이지로
         if request.path.startswith('/api/'):
             return jsonify({"error": "unauthorized"}), 401
         return redirect(url_for('login', next=request.path))
@@ -335,7 +339,11 @@ def icon():
 @app.route("/")
 @requires_auth
 def index():
-    return Response(get_html(), mimetype="text/html")
+    html = get_html()
+    # JS에서 사용할 API_SECRET을 head에 주입
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/api/market")
@@ -1692,12 +1700,21 @@ async function loadMemo(){
     if(d.content) document.getElementById('memo-input').value=d.content;
   }catch(e){}
 }
-// 모든 fetch 호출에 credentials 자동 추가 (쿠키 포함)
+// 모든 fetch 호출에 credentials + X-API-Secret 자동 추가 (PWA 인증 안정화)
 const _origFetch = window.fetch;
 window.fetch = function(url, options){
   options = options || {};
   if(typeof url === 'string' && (url.startsWith('/') || url.startsWith(location.origin))){
     options.credentials = options.credentials || 'include';
+    options.headers = options.headers || {};
+    if(window._API_SECRET){
+      // Headers 객체와 일반 객체 둘 다 처리
+      if(options.headers instanceof Headers){
+        options.headers.set('X-API-Secret', window._API_SECRET);
+      } else {
+        options.headers['X-API-Secret'] = window._API_SECRET;
+      }
+    }
   }
   return _origFetch(url, options);
 };
