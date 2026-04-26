@@ -9,6 +9,9 @@ import pg8000.native
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # 30일 유지
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.secret_key = os.environ.get("SECRET_KEY", "yenny-dashboard-secret-2026-change-me")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -1689,6 +1692,16 @@ async function loadMemo(){
     if(d.content) document.getElementById('memo-input').value=d.content;
   }catch(e){}
 }
+// 모든 fetch 호출에 credentials 자동 추가 (쿠키 포함)
+const _origFetch = window.fetch;
+window.fetch = function(url, options){
+  options = options || {};
+  if(typeof url === 'string' && (url.startsWith('/') || url.startsWith(location.origin))){
+    options.credentials = options.credentials || 'include';
+  }
+  return _origFetch(url, options);
+};
+
 // 리치 텍스트 편집 명령
 function rtGetTarget(btn){
   const tb = btn.closest('.richtext-toolbar');
