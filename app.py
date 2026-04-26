@@ -2097,6 +2097,12 @@ function onWdbTabEdit(editor){
     return header ? header+'\n'+body : body;
   }).join('\n\n');
   document.getElementById('wdb-input').value = rebuilt;
+  
+  // 자동 저장 (디바운스 — 입력 멈춘 후 2초 뒤)
+  if(window._wdbAutoSaveTimer) clearTimeout(window._wdbAutoSaveTimer);
+  window._wdbAutoSaveTimer = setTimeout(()=>{
+    saveWdaebon();
+  }, 2000);
 }
 
 function wdbShowTab(i){
@@ -2105,22 +2111,48 @@ function wdbShowTab(i){
 }
 
 async function saveWdaebon(){
-  // 현재 편집 중인 탭의 HTML도 저장
-  const currentEditor = document.getElementById('wdb-tab-edit');
-  if(currentEditor){
-    const idx = parseInt(currentEditor.dataset.idx);
-    _wdbTabHtml[idx] = currentEditor.innerHTML;
-  }
-  const payload = {
-    text: document.getElementById('wdb-input').value,
-    tabHtml: _wdbTabHtml
-  };
-  await fetch('/api/post/wdaebon',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:JSON.stringify(payload),date:new Date().toISOString().slice(0,10)})
-  });
   const badge=document.getElementById('wdb-badge');
-  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+  try{
+    // 현재 편집 중인 탭의 HTML도 저장
+    const currentEditor = document.getElementById('wdb-tab-edit');
+    if(currentEditor){
+      const idx = parseInt(currentEditor.dataset.idx);
+      _wdbTabHtml[idx] = currentEditor.innerHTML;
+    }
+    const payload = {
+      text: document.getElementById('wdb-input').value,
+      tabHtml: _wdbTabHtml
+    };
+    const payloadStr = JSON.stringify(payload);
+    
+    // 크기 체크 - 너무 크면 경고
+    if(payloadStr.length > 500000){
+      alert('⚠️ 데이터가 너무 커요 (' + Math.round(payloadStr.length/1024) + 'KB). 일부 내용을 줄이거나 분할 저장해주세요.');
+      return;
+    }
+    
+    const res = await fetch('/api/post/wdaebon',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({content:payloadStr,date:new Date().toISOString().slice(0,10)})
+    });
+    
+    if(!res.ok){
+      const errText = await res.text();
+      alert('❌ 저장 실패 (HTTP ' + res.status + ')\n' + errText.slice(0, 200));
+      return;
+    }
+    
+    badge.textContent = '✓ 저장됨 (' + new Date().toLocaleTimeString('ko-KR', {hour: '2-digit', minute: '2-digit', second: '2-digit'}) + ')';
+    badge.style.display='inline';
+    badge.style.color = '#00b894';
+    setTimeout(()=>badge.style.display='none', 4000);
+  }catch(e){
+    alert('❌ 저장 오류: ' + e.message);
+    badge.textContent = '❌ 저장 실패';
+    badge.style.color = '#d63031';
+    badge.style.display = 'inline';
+  }
 }
 
 async function clearWdaebon(){
