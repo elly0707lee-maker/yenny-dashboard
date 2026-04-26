@@ -1444,9 +1444,35 @@ async function loadPost(type,bid,did){
       const b=document.getElementById(bid),dt=document.getElementById(did);
       if(dt)dt.textContent=d.date||'';
       if(b){
+        // 현재 선택된 탭 기억
+        let activeTabKey = null;
+        if(type==='checkpoint'){
+          const activeTab = document.querySelector('#cp-tabs .tab.active');
+          if(activeTab){
+            const m = activeTab.getAttribute('onclick')?.match(/cpTab\(this,'(\w+)'\)/);
+            if(m) activeTabKey = m[1];
+          }
+        } else if(type==='closing'){
+          const activeTab = document.querySelector('#cl-tabs .tab.active');
+          if(activeTab){
+            const m = activeTab.getAttribute('onclick')?.match(/clTab\(this,'(\w+)'\)/);
+            if(m) activeTabKey = m[1];
+          }
+        }
+        // 데이터 업데이트
         b.textContent=d.content;
         if(type==='checkpoint') _cpRaw=d.content;
         if(type==='closing') _clRaw=d.content;
+        // 탭 복원
+        if(activeTabKey && activeTabKey !== 'all'){
+          if(type==='checkpoint'){
+            const targetBtn = document.querySelector('#cp-tabs .tab[onclick*="\''+activeTabKey+'\'"]');
+            if(targetBtn) cpTab(targetBtn, activeTabKey);
+          } else if(type==='closing'){
+            const targetBtn = document.querySelector('#cl-tabs .tab[onclick*="\''+activeTabKey+'\'"]');
+            if(targetBtn) clTab(targetBtn, activeTabKey);
+          }
+        }
       }
     }
   }catch(e){}
