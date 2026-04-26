@@ -1851,6 +1851,27 @@ function addCalGuest(dayIdx){
   if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
 }
 
+function addCalItem(dayIdx){
+  const inp = document.getElementById('cal-new-'+dayIdx);
+  const val = inp?.value.trim();
+  if(!val || !_calData) return;
+  _calData.days[dayIdx].items = _calData.days[dayIdx].items || [];
+  _calData.days[dayIdx].items.push(val);
+  saveCalendarDB();
+  renderCalendar(_calData);
+  const tabs = document.querySelectorAll('#cal-tabs .tab');
+  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
+}
+
+function deleteCalItem(dayIdx, itemIdx){
+  if(!_calData || !_calData.days[dayIdx]) return;
+  _calData.days[dayIdx].items.splice(itemIdx, 1);
+  saveCalendarDB();
+  renderCalendar(_calData);
+  const tabs = document.querySelectorAll('#cal-tabs .tab');
+  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
+}
+
 function calTab(btn, panelId){
   document.querySelectorAll('#cal-tabs .tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
