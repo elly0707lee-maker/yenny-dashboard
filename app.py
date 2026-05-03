@@ -2821,49 +2821,6 @@ function _renderMarkerStockCards(cards){
       return html;
     }).join('') + '</div>';
 }
-  const cards = [];
-  const lines = text.split('\n');
-  let cur = null;
-  for(const raw of lines){
-    const l = raw.trim();
-    if(!l) continue;
-    if(l.startsWith('📌')) continue;
-    // ✔️/✓ 헤더 또는 종목명/항목명 (불릿 아닌 줄)
-    if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')){
-      if(cur) cards.push(cur);
-      cur = {name: l.replace(/^[✔️✔✓]\s*/,'').trim(), bullets:[]};
-    } else if(l.startsWith('-')||l.startsWith('•')){
-      if(cur) cur.bullets.push(l.replace(/^[-•]\s*/,''));
-      else { cur = {name: '', bullets:[l.replace(/^[-•]\s*/,'')]}; }
-    } else {
-      // 새 항목 시작
-      if(cur) cards.push(cur);
-      cur = {name: l, bullets:[]};
-    }
-  }
-  if(cur) cards.push(cur);
-  return cards.filter(c=>c.name||c.bullets.length);
-}
-
-function _renderGenericCards(cards, label){
-  if(!cards.length) return '<span class="content-empty">'+label+' 정보가 없어요</span>';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
-    cards.map(c=>{
-      const nameHtml = c.name ? _formatStockLine(c.name) : '';
-      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
-      if(label){
-        html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+label+'</div>';
-      }
-      if(nameHtml){
-        html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">'+nameHtml+'</div>';
-      }
-      if(c.bullets.length){
-        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+_formatStockLine(b)).join('<br>')+'</div>';
-      }
-      html += '</div>';
-      return html;
-    }).join('') + '</div>';
-}
 
 function clTab(btn, key){
   document.querySelectorAll('#cl-tabs .tab').forEach(b=>b.classList.remove('active'));
