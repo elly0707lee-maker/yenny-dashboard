@@ -1,2977 +1,767 @@
-from flask import Flask, jsonify, request, Response, session, redirect, url_for
-import requests
+"""
+Morning Broadcast CheckPoint Bot 🌅
+방송 전 뉴스 → 섹터/종목 자동 분류 텔레그램 봇
++ 여러 태그 한 번에 입력 가능
++ 대시보드 자동 전송
+"""
+
+import logging
 import os
-from datetime import datetime, timedelta
-from functools import wraps
+import re
+import asyncio
+import aiohttp
+import base64
+from bs4 import BeautifulSoup
+from telegram import Update, BotCommand
+from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 import anthropic
-import pg8000.native
+from datetime import datetime
 
-app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)  # 30일 유지
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.secret_key = os.environ.get("SECRET_KEY", "yenny-dashboard-secret-2026-change-me")
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# ── 설정 ──────────────────────────────────────────────────
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "")
-KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "")
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "yenny2026")
-API_SECRET = os.environ.get("API_SECRET", "moneyplus")
+ALLOWED_USER_ID = int(os.environ.get("ALLOWED_USER_ID", "0"))
 
-_kis_token_cache = {"token": "", "expires": 0}
+# 대시보드 설정
+DASHBOARD_URL = os.environ.get("DASHBOARD_URL", "").rstrip("/")
+API_SECRET = os.environ.get("API_SECRET", "")
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 
-def get_db():
-    import urllib.parse as _up
-    r = _up.urlparse(DATABASE_URL)
-    return pg8000.native.Connection(
-        host=r.hostname, port=r.port or 5432,
-        database=r.path.lstrip('/'),
-        user=r.username, password=r.password,
-        ssl_context=True
-    )
-
-def init_db():
-    conn = get_db()
-    conn.run("""CREATE TABLE IF NOT EXISTS posts (
-        id SERIAL PRIMARY KEY,
-        type TEXT NOT NULL, content TEXT NOT NULL,
-        date TEXT NOT NULL, created_at TEXT NOT NULL)""")
+# ── 대시보드 전송 ─────────────────────────────────────────
+async def send_to_dashboard(content: str, date_label: str) -> tuple[bool, str]:
+    """대시보드로 체크포인트 전송. (성공여부, 에러메시지) 반환"""
+    if not DASHBOARD_URL:
+        return False, "DASHBOARD_URL 환경변수 없음"
+    if not API_SECRET:
+        return False, "API_SECRET 환경변수 없음"
     try:
-        conn.run("""CREATE TABLE IF NOT EXISTS pdfs (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            data TEXT NOT NULL,
-            created_at TEXT NOT NULL)""")
-    except Exception:
-        pass
-    conn.close()
-
-init_db()
-
-
-def requires_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        # 1. 세션 기반 로그인 체크 (PWA/폼 로그인)
-        if session.get('logged_in'):
-            return f(*args, **kwargs)
-        # 2. X-API-Secret 헤더 체크 (봇/PWA fallback)
-        api_secret_header = request.headers.get("X-API-Secret", "")
-        if api_secret_header and api_secret_header == API_SECRET:
-            return f(*args, **kwargs)
-        # 3. Basic Auth 체크 (봇/API 호출용)
-        auth = request.authorization
-        if auth and auth.password == DASHBOARD_PASSWORD:
-            return f(*args, **kwargs)
-        # 4. JSON 요청이면 401, 일반 페이지면 로그인 페이지로
-        if request.path.startswith('/api/'):
-            return jsonify({"error": "unauthorized"}), 401
-        return redirect(url_for('login', next=request.path))
-    return decorated
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        password = request.form.get("password", "")
-        if password == DASHBOARD_PASSWORD:
-            session.permanent = True
-            session['logged_in'] = True
-            next_url = request.args.get('next', '/')
-            # 안전한 redirect만 허용
-            if not next_url.startswith('/'):
-                next_url = '/'
-            return redirect(next_url)
-        error = "비밀번호가 틀렸어요"
-    else:
-        error = None
-    
-    err_html = f'<div style="color:#d63031;font-size:13px;margin-top:10px;text-align:center;">{error}</div>' if error else ''
-    return Response("""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Yenny">
-<link rel="manifest" href="/manifest.json">
-<title>Yenny Dashboard · 로그인</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,'Noto Sans KR',sans-serif;background:linear-gradient(135deg,#1a1d23,#2d3436);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-.card{background:white;border-radius:20px;padding:40px 32px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-.logo{font-size:48px;text-align:center;margin-bottom:16px}
-h1{font-size:24px;text-align:center;color:#1a1d23;margin-bottom:8px;font-weight:700}
-.sub{font-size:13px;color:#7a8099;text-align:center;margin-bottom:28px}
-input{width:100%;padding:14px 16px;border:1.5px solid #dfe6e9;border-radius:12px;font-size:15px;font-family:inherit;background:#f8f9fa;outline:none;transition:all .15s}
-input:focus{border-color:#e8b84b;background:white}
-button{width:100%;padding:14px;margin-top:12px;background:#1a1d23;color:#e8b84b;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s}
-button:hover{background:#2d3436}
-</style>
-</head>
-<body>
-<div class="card">
-<div class="logo">🎙️</div>
-<h1>Yenny Dashboard</h1>
-<p class="sub">방송 준비를 시작할까요?</p>
-<form method="POST" action="/login""" + (f"?next={request.args.get('next','/')}" if request.args.get('next') else "") + """">
-<input type="password" name="password" placeholder="비밀번호" autofocus required autocomplete="current-password">
-<button type="submit">로그인</button>
-""" + err_html + """
-</form>
-</div>
-</body>
-</html>""", mimetype="text/html")
-
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
-
-
-def get_kis_token():
-    import time
-    if _kis_token_cache["token"] and time.time() < _kis_token_cache["expires"]:
-        return _kis_token_cache["token"]
-    try:
-        r = requests.post(
-            "https://openapi.koreainvestment.com:9443/oauth2/tokenP",
-            json={"grant_type": "client_credentials",
-                  "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET},
-            timeout=6)
-        data = r.json()
-        token = data.get("access_token", "")
-        _kis_token_cache["token"] = token
-        _kis_token_cache["expires"] = time.time() + 3600 * 20  # 20시간
-        return token
-    except:
-        return ""
-
-
-def kis_get(path, tr_id, params):
-    if not KIS_APP_KEY:
-        return {}
-    try:
-        token = get_kis_token()
-        headers = {
-            "authorization": f"Bearer {token}",
-            "appkey": KIS_APP_KEY,
-            "appsecret": KIS_APP_SECRET,
-            "tr_id": tr_id,
-            "Content-Type": "application/json"
-        }
-        r = requests.get(
-            f"https://openapi.koreainvestment.com:9443{path}",
-            headers=headers, params=params, timeout=6)
-        return r.json()
-    except:
-        return {}
-
-
-def get_yahoo_quote(symbol):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://finance.yahoo.com/",
-        "Origin": "https://finance.yahoo.com",
-    }
-    for base in ["query1", "query2"]:
-        for ver in ["v8", "v7"]:
-            try:
-                if ver == "v8":
-                    url = f"https://{base}.finance.yahoo.com/v8/finance/chart/{symbol}"
-                    r = requests.get(url, headers=headers, timeout=10)
-                    meta = r.json()["chart"]["result"][0]["meta"]
-                    price = round(meta.get("regularMarketPrice", 0), 2)
-                    prev = meta.get("chartPreviousClose") or meta.get("previousClose", price)
+        date_iso = datetime.now().strftime("%Y-%m-%d")
+        url = f"{DASHBOARD_URL}/api/post/checkpoint"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Secret": API_SECRET,
+                },
+                json={"content": content, "date": date_iso},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    logger.info(f"✅ 대시보드 전송 성공: {date_label}")
+                    return True, ""
                 else:
-                    url = f"https://{base}.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
-                    r = requests.get(url, headers=headers, timeout=10)
-                    q = r.json()["quoteResponse"]["result"][0]
-                    price = round(q.get("regularMarketPrice", 0), 2)
-                    prev = q.get("regularMarketPreviousClose", price)
-                chg = round((price - prev) / prev * 100, 2) if prev else 0
-                if price > 0:
-                    return {"value": price, "change": chg}
-            except:
-                continue
-    return {"value": None, "change": None}
+                    body = await resp.text()
+                    err = f"HTTP {resp.status}: {body[:150]}"
+                    logger.error(f"❌ 대시보드 전송 실패: {err}")
+                    return False, err
+    except Exception as e:
+        err = f"{type(e).__name__}: {str(e)[:150]}"
+        logger.error(f"❌ 대시보드 전송 오류: {err}")
+        return False, err
 
 
-def get_korean_market():
-    result = {}
-    for mkt, code in [("kospi", "0001"), ("kosdaq", "1001")]:
-        d = kis_get("/uapi/domestic-stock/v1/quotations/inquire-index-price",
-                    "FHPUP02100000",
-                    {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": code}).get("output", {})
-        raw_chg = d.get("bstp_nmix_prdy_ctrt", None)
-        try:
-            chg_val = float(raw_chg) if raw_chg not in (None, "", "0") else None
-        except:
-            chg_val = None
-        raw_val = d.get("bstp_nmix_prpr", None)
-        try:
-            idx_val = float(raw_val) if raw_val not in (None, "") else None
-        except:
-            idx_val = None
-        result[mkt] = {
-            "value": idx_val,
-            "change": chg_val,
-            "foreign": None, "institution": None
-        }
-        sup = kis_get("/uapi/domestic-stock/v1/quotations/inquire-index-investor",
-                      "FHPST01710000",
-                      {"FID_COND_MRKT_DIV_CODE": "U", "FID_INPUT_ISCD": code,
-                       "FID_INPUT_DATE_1": datetime.now().strftime("%Y%m%d")}).get("output", [])
-        if sup and isinstance(sup, list):
-            result[mkt]["foreign"] = sup[0].get("frgn_ntby_qty", None)
-            result[mkt]["institution"] = sup[0].get("orgn_ntby_qty", None)
-            result[mkt]["individual"] = sup[0].get("indv_ntby_qty", None)
-
-    result["futures_auto"] = None
-
-    return result
-
-
-# 코스피 업종 코드 → 이름
-# 코스피 업종 ETF (Yahoo Finance 심볼)
-SECTOR_ETFS = [
-    ("반도체",   "091160.KS"),
-    ("2차전지",  "305720.KS"),
-    ("바이오",   "207920.KS"),
-    ("금융",     "139270.KS"),
-    ("에너지",   "117700.KS"),
-    ("방산",     "471550.KS"),
-    ("조선",     "466920.KS"),
-    ("자동차",   "091180.KS"),
-    ("건설",     "102960.KS"),
-    ("IT",       "148020.KS"),
-]
-
-def get_sector_data():
-    result = []
-    for name, symbol in SECTOR_ETFS:
-        q = get_yahoo_quote(symbol)
-        if q["change"] is not None:
-            result.append({"name": name, "change": q["change"]})
-    result.sort(key=lambda x: x["change"], reverse=True)
-    return {"top5": result[:5], "bot5": list(reversed(result[-5:]))}
-
-
-def get_global_market():
-    syms = {
-        "nasdaq": "%5EIXIC", "dow": "%5EDJI", "sp500": "%5EGSPC",
-        "wti": "CL%3DF", "brent": "BZ%3DF",
-        "usdkrw": "USDKRW%3DX",
-        "vix": "%5EVIX", "ewy": "EWY",
-        "tnx": "%5ETNX", "sox": "%5ESOX",
-        "dxy": "DX-Y.NYB", "gold": "GC%3DF", "dram": "SOXX"
+# ── URL 크롤링 ──────────────────────────────────────────
+async def fetch_url_text(url: str) -> str | None:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
     }
-    return {k: get_yahoo_quote(v) for k, v in syms.items()}
-
-
-def save_post(t, content, date):
-    conn = get_db()
-    conn.run(
-        "INSERT INTO posts (type,content,date,created_at) VALUES (:t,:c,:d,:ca)",
-        t=t, c=content, d=date, ca=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    conn.close()
-
-
-def get_latest_post(t):
-    conn = get_db()
-    rows = conn.run("SELECT content,date FROM posts WHERE type=:t ORDER BY id DESC LIMIT 1", t=t)
-    conn.close()
-    return {"content": rows[0][0], "date": rows[0][1]} if rows else None
-
-
-@app.route("/manifest.json")
-def manifest():
-    import json
-    return Response(json.dumps({
-        "name": "Yenny Dashboard",
-        "short_name": "Yenny",
-        "description": "머니플러스 방송 준비 대시보드",
-        "start_url": "/",
-        "display": "standalone",
-        "orientation": "portrait-primary",
-        "background_color": "#1a1d23",
-        "theme_color": "#1a1d23",
-        "icons": [
-            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
-        ]
-    }), mimetype="application/manifest+json")
-
-
-@app.route("/service-worker.js")
-def sw():
-    return Response("""const CACHE='yenny-v3';
-self.addEventListener('install',e=>{self.skipWaiting()});
-self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
-  self.clients.claim();
-});
-self.addEventListener('fetch',e=>{
-  // API와 POST는 캐시 안 함
-  if(e.request.method!=='GET' || e.request.url.includes('/api/') || e.request.url.includes('/login')) return;
-  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
-});""", mimetype="application/javascript")
-
-
-# 간단한 SVG 아이콘
-@app.route("/icon-192.png")
-@app.route("/icon-512.png")
-def icon():
-    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-<rect width="512" height="512" fill="#1a1d23" rx="80"/>
-<text x="256" y="330" font-size="280" text-anchor="middle" font-family="sans-serif">🎙️</text>
-</svg>'''
-    return Response(svg, mimetype="image/svg+xml")
-
-@app.route("/")
-@requires_auth
-def index():
-    html = get_html()
-    # JS에서 사용할 API_SECRET을 head에 주입
-    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
-    html = html.replace('</head>', f'{secret_script}</head>', 1)
-    return Response(html, mimetype="text/html")
-
-
-@app.route("/api/market")
-@requires_auth
-def api_market():
-    g = get_global_market()
-    k = get_korean_market()
-    return jsonify({**g, **k})
-
-
-@app.route("/api/sector")
-@requires_auth
-def api_sector():
-    return jsonify(get_sector_data())
-
-
-@app.route("/api/post/<pt>")
-@requires_auth
-def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
-    if pt not in valid:
-        return jsonify({"error": "invalid"}), 400
-    return jsonify(get_latest_post(pt) or {})
-
-
-@app.route("/debug/<pt>")
-@requires_auth
-def debug_post(pt):
-    """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon")
-    if pt not in valid:
-        return Response("invalid", 400)
-    data = get_latest_post(pt) or {}
-    content = data.get("content", "")
-    date = data.get("date", "")
-    # 보이지 않는 문자도 확인 가능하도록
-    import json as _json
-    return Response(
-        f"<html><head><meta charset='utf-8'><title>{pt} debug</title></head><body style='font-family:monospace;padding:20px;'>"
-        f"<h2>{pt} (date: {date})</h2>"
-        f"<p>길이: {len(content)} chars</p>"
-        f"<pre style='background:#f5f5f5;padding:15px;border:1px solid #ddd;white-space:pre-wrap;'>{content.replace('<','&lt;')}</pre>"
-        f"<h3>JSON encoded (특수문자 확인용)</h3>"
-        f"<pre style='background:#fff5f5;padding:15px;border:1px solid #ddd;white-space:pre-wrap;font-size:11px;'>{_json.dumps(content, ensure_ascii=False)}</pre>"
-        f"</body></html>",
-        mimetype="text/html"
-    )
-
-
-@app.route("/api/post/<pt>", methods=["POST"])
-def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
-    if pt not in valid:
-        return jsonify({"error": "invalid"}), 400
-    # 대시보드 직접 저장은 인증 필요
-    auth = request.authorization
-    bot_secret = request.headers.get("X-API-Secret", "")
-    if bot_secret != API_SECRET and (not auth or auth.password != DASHBOARD_PASSWORD):
-        return jsonify({"error": "unauthorized"}), 401
-    body = request.json or {}
-    content = body.get("content", "")
-    date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
-    if not content:
-        return jsonify({"error": "content required"}), 400
-    save_post(pt, content, date)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/news")
-@requires_auth
-def api_news():
-    import xml.etree.ElementTree as ET
-    feeds = [
-        ("한경 속보", "https://www.hankyung.com/feed/breaking-news"),
-        ("한경 경제", "https://www.hankyung.com/feed/economy"),
-        ("한경 증권", "https://www.hankyung.com/feed/stock"),
-        ("한경 금융", "https://www.hankyung.com/feed/finance"),
-        ("한경 국제", "https://www.hankyung.com/feed/international"),
-        ("매일경제", "https://www.mk.co.kr/rss/30000001/"),
-        ("매일경제 증권", "https://www.mk.co.kr/rss/30100041/"),
-        ("파이낸셜뉴스", "https://www.fnnews.com/rss/fn_economy_rss.xml"),
-        ("머니투데이", "https://rss.mt.co.kr/mt_finance.xml"),
-        ("구글 경제뉴스", "https://news.google.com/rss/search?q=%EA%B2%BD%EC%A0%9C+%EC%A6%9D%EA%B6%8C&hl=ko&gl=KR&ceid=KR:ko"),
-    ]
-    items = []
-    for source, url in feeds:
-        try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
-            root = ET.fromstring(r.content)
-            ns = {"dc": "http://purl.org/dc/elements/1.1/"}
-            for item in root.findall(".//item")[:5]:
-                title = item.findtext("title", "").strip()
-                link = item.findtext("link", "").strip()
-                pub = item.findtext("pubDate", "").strip()
-                if title and link:
-                    items.append({"title": title, "link": link, "pub": pub, "source": source})
-        except Exception as e:
-            pass
-    # Sort by pub date roughly (string sort works for RFC 2822)
-    items.sort(key=lambda x: x["pub"], reverse=True)
-    return jsonify({"items": items[:25]})
-
-
-@app.route("/api/theme/prices")
-@requires_auth
-def theme_prices():
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "테마명 없음"}), 400
-
-    SHEET_ID = os.environ.get("SHEET_ID", "")
-    if not SHEET_ID:
-        return jsonify({"error": "SHEET_ID 없음"}), 500
-
-    import csv, io as _io
-    sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
     try:
-        res = requests.get(sheet_url, timeout=10)
-        res.encoding = "utf-8"
-        data = list(csv.DictReader(_io.StringIO(res.text)))
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status != 200:
+                    return None
+                html = await resp.text(errors="ignore")
+                soup = BeautifulSoup(html, "html.parser")
+                for selector in ["article", ".article-body", ".article_body", "#articleBody",
+                                  ".news-content", ".content-article", "main"]:
+                    el = soup.select_one(selector)
+                    if el:
+                        text = el.get_text(separator="\n", strip=True)
+                        if len(text) > 100:
+                            return text[:2000]
+                og_desc = soup.find("meta", property="og:description")
+                og_title = soup.find("meta", property="og:title")
+                parts = []
+                if og_title:
+                    parts.append(og_title.get("content", ""))
+                if og_desc:
+                    parts.append(og_desc.get("content", ""))
+                if parts:
+                    return "\n".join(parts)
+                return None
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    # 테마 포함 종목 (중복 제거)
-    seen = set()
-    stocks = []
-    for r in data:
-        if query in r.get("테마", ""):
-            code = r.get("종목코드", "").strip()
-            name = r.get("종목명", "").strip()
-            theme = r.get("테마", "").strip()
-            if code and name and code not in seen:
-                seen.add(code)
-                stocks.append({"code": code, "name": name, "theme": theme})
-
-    if not stocks:
-        return jsonify({"stocks": [], "query": query})
-
-    # 시세 일괄 조회
-    results = []
-    for s in stocks:
-        try:
-            r = requests.get(
-                f"https://m.stock.naver.com/api/stock/{s['code']}/basic",
-                headers={"User-Agent": "Mozilla/5.0"}, timeout=4)
-            if r.status_code == 200:
-                d = r.json()
-                price = d.get("closePrice") or d.get("currentPrice", "")
-                pct = d.get("fluctuationsRatio", "")
-                change = d.get("compareToPreviousClosePrice", "")
-                try:
-                    pct_f = float(str(pct).replace(",",""))
-                    price_i = int(str(price).replace(",",""))
-                    change_i = int(str(change).replace(",",""))
-                    arrow = "▲" if pct_f >= 0 else "▼"
-                    sign = "+" if pct_f >= 0 else ""
-                    results.append({
-                        "code": s["code"],
-                        "name": s["name"],
-                        "theme": s["theme"],
-                        "price": f"{price_i:,}",
-                        "change": f"{arrow} {abs(change_i):,}",
-                        "pct": f"{sign}{pct_f:.2f}%",
-                        "up": pct_f >= 0
-                    })
-                except:
-                    results.append({"code": s["code"], "name": s["name"], "theme": s["theme"], "price": str(price), "change": "", "pct": "", "up": None})
-        except:
-            results.append({"code": s["code"], "name": s["name"], "theme": s["theme"], "price": "—", "change": "", "pct": "", "up": None})
-
-    # 등락률 내림차순 정렬
-    results.sort(key=lambda x: float(x["pct"].replace("%","").replace("+","") or 0), reverse=True)
-    return jsonify({"stocks": results, "query": query, "count": len(results)})
+        logger.info(f"URL 크롤링 실패 ({url}): {e}")
+        return None
 
 
-@app.route("/api/kstock/search")
-@requires_auth
-def kstock_search():
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "검색어 없음"}), 400
+def extract_urls(text: str) -> list:
+    return re.findall(r'https?://[^\s]+', text)
 
-    SHEET_ID = os.environ.get("SHEET_ID", "")
-    NAVER_ID = os.environ.get("NAVER_CLIENT_ID", "")
-    NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 
-    if not SHEET_ID:
-        return jsonify({"error": "SHEET_ID 환경변수 없음"}), 500
+async def enrich_text_with_url(text: str) -> str:
+    urls = extract_urls(text)
+    if not urls:
+        return text
+    enriched = text
+    for url in urls:
+        fetched = await fetch_url_text(url)
+        if fetched:
+            enriched = enriched.replace(url, f"{url}\n{fetched}")
+    return enriched
 
+
+# ── 이미지 → Claude Vision으로 지표 추출 ──────────────────
+async def extract_indicators_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str | None:
     try:
-        import csv, io as _io
-        sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
-        res = requests.get(sheet_url, timeout=10)
-        res.encoding = "utf-8"
-        data = list(csv.DictReader(_io.StringIO(res.text)))
-
-        stock_hits = [r for r in data if r.get("종목명", "").strip() == query.strip()]
-        # 종목 검색 결과 있으면 테마 검색 생략 (삼성전자 검색 시 삼성전자향 등 안 나오게)
-        if stock_hits:
-            theme_hits = []
-        else:
-            theme_hits = [r for r in data if query in r.get("테마", "")]
-
-        lines = []
-
-        if stock_hits:
-            from collections import OrderedDict
-            grouped = OrderedDict()
-            for r in stock_hits:
-                name = r.get("종목명", "")
-                if name not in grouped:
-                    grouped[name] = []
-                grouped[name].append(r)
-
-            for name, rows in grouped.items():
-                lines.append(f"📌 [{name}]")
-                for r in rows:
-                    theme = r.get("테마", "")
-                    desc = r.get("특징", "").strip()
-                    lines.append(f"☑️ {theme}")
-                    if desc:
-                        lines.append(f"➡️ {desc}")
-                    lines.append("")
-
-                code = rows[0].get("종목코드", "").strip()
-                if code:
-                    try:
-                        pr = requests.get(
-                            f"https://m.stock.naver.com/api/stock/{code}/basic",
-                            headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-                        pd = pr.json()
-                        price = pd.get("closePrice") or pd.get("currentPrice", "")
-                        change = pd.get("compareToPreviousClosePrice", "")
-                        pct = pd.get("fluctuationsRatio", "")
-                        if price:
-                            arrow = "▲" if float(str(change).replace(",","") or 0) >= 0 else "▼"
-                            lines.append(f"📊 {int(str(price).replace(',','')):,}원 {arrow} {pct}%")
-                    except:
-                        pass
-                    lines.append(f"🔗 https://m.stock.naver.com/domestic/stock/{code}/total")
-                lines.append("")
-
-        if theme_hits:
-            if stock_hits:
-                lines.append("─" * 20)
-            lines.append(f"🗂 [{query}] 관련 종목")
-            for i, r in enumerate(theme_hits, 1):
-                name = r.get("종목명", "")
-                theme = r.get("테마", "")
-                desc = r.get("특징", "").strip()
-                line = f"{i}. {name}  ({theme})"
-                if desc:
-                    line += f"\n   ➡️ {desc}"
-                lines.append(line)
-            lines.append("")
-
-        if NAVER_ID and (stock_hits or theme_hits):
-            try:
-                import re as _re
-                def clean(t): return _re.sub(r"<[^>]+>","",t)
-                nr_date = requests.get(
-                    "https://openapi.naver.com/v1/search/news.json",
-                    headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
-                    params={"query": query, "display": 3, "sort": "date"}, timeout=8)
-                news_date = nr_date.json().get("items", [])
-                nr_sim = requests.get(
-                    "https://openapi.naver.com/v1/search/news.json",
-                    headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
-                    params={"query": query, "display": 5, "sort": "sim"}, timeout=8)
-                news_sim = nr_sim.json().get("items", [])
-                date_links = {item["link"] for item in news_date}
-                news_sim_unique = [n for n in news_sim if n["link"] not in date_links][:2]
-                if news_date or news_sim_unique:
-                    lines.append(f"📰 뉴스 ({query})")
-                    lines.append("")
-                    if news_date:
-                        lines.append("🕐 최신순")
-                        for i, item in enumerate(news_date, 1):
-                            lines.append(f"{i}. {clean(item['title'])}")
-                            lines.append(f"   🔗 {item['link']}")
-                    if news_sim_unique:
-                        lines.append("")
-                        lines.append("🎯 관련도순")
-                        for i, item in enumerate(news_sim_unique, 1):
-                            lines.append(f"{i}. {clean(item['title'])}")
-                            lines.append(f"   🔗 {item['link']}")
-            except:
-                pass
-
-        if not stock_hits and not theme_hits:
-            lines.append(f"❓ '{query}' — 등록된 종목/테마가 없어요.")
-
-        # Get first stock code for chart (TradingView KRX format)
-        first_code = None
-        if stock_hits:
-            from collections import OrderedDict
-            raw_code = stock_hits[0].get("종목코드", "").strip()
-            if raw_code:
-                first_code = "KRX:" + raw_code
-        # Extract price line for display
-        price_display = None
-        for line in lines:
-            if "원" in line and ("▲" in line or "▼" in line):
-                price_display = line.replace("📊 ", "")
-                break
-        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits), "code": first_code, "price": price_display})
-
+        image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+        response = client.messages.create(
+            model="claude-opus-4-20250514",
+            max_tokens=500,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": image_data,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "이 이미지에서 시장 지표 수치만 추출해줘.\n"
+                            "형식: 항목명 현재값 (등락%)\n"
+                            "예시:\n"
+                            "SOX 7,773.13 (+1.34%)\n"
+                            "VIX 23.95 (-1.45%)\n"
+                            "EWY 133.81 (+6.38%)\n"
+                            "WTI 90.70 (+2.92%)\n"
+                            "DXY 99.17 (+0.23%)\n"
+                            "US10Y 4.362% (+0.026)\n\n"
+                            "수치가 없는 항목은 제외. 설명 없이 수치만 나열."
+                        )
+                    }
+                ],
+            }]
+        )
+        return response.content[0].text.strip()
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"이미지 분석 오류: {e}")
+        return None
 
 
-@app.route("/api/todo/clear", methods=["POST"])
-@requires_auth
-def clear_todo():
-    save_post("todo", "", datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
+# ── 사용자별 상태 저장 ────────────────────────────────────
+# { user_id: { "date": "3/13", "buffer": [...], "last_checkpoint": "..." } }
+user_state = {}
 
 
-@app.route("/api/encyclopedia/search")
-@requires_auth
-def encyclopedia_search():
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "검색어 없음"}), 400
+# ── Claude 프롬프트 ────────────────────────────────────────
+SYSTEM_PROMPT = """너는 한국 경제방송 앵커의 방송 전 브리핑을 도와주는 전문 어시스턴트야.
 
-    ENC_SHEET_ID = "1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs"
-    import csv, io as _io, re
-    terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
+입력 데이터는 아래 형식으로 구조화되어 들어와:
 
-    try:
-        url = f"https://docs.google.com/spreadsheets/d/{ENC_SHEET_ID}/export?format=csv"
-        r = requests.get(url, timeout=10)
-        r.encoding = "utf-8"
-        rows = list(csv.DictReader(_io.StringIO(r.text)))
-        matched = []
-        for row in rows:
-            row_text = " ".join(str(v) for v in row.values())
-            if all(term in row_text for term in terms):
-                matched.append(row)
-        return jsonify({"results": matched, "query": query})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+[태그유형: 값]
+내용
 
-
-@app.route("/api/pdf/upload", methods=["POST"])
-@requires_auth
-def pdf_upload():
-    from datetime import datetime as dt
-    body = request.json or {}
-    name = body.get("name", "report.pdf")
-    data = body.get("data", "")
-    if not data:
-        return jsonify({"error": "파일 없음"}), 400
-    conn = get_db()
-    rows = conn.run("SELECT id FROM pdfs ORDER BY created_at ASC")
-    if rows and len(rows) >= 3:
-        conn.run("DELETE FROM pdfs WHERE id=:i", i=rows[0][0])
-    conn.run("INSERT INTO pdfs (name, data, created_at) VALUES (:n,:d,:c)",
-             n=name, d=data, c=dt.now().isoformat())
-    conn.close()
-    return jsonify({"ok": True})
-
-
-@app.route("/api/pdf/list")
-@requires_auth
-def pdf_list():
-    conn = get_db()
-    rows = conn.run("SELECT id, name, created_at FROM pdfs ORDER BY created_at DESC")
-    conn.close()
-    if not rows:
-        return jsonify({"pdfs": []})
-    return jsonify({"pdfs": [{"id": r[0], "name": r[1], "date": r[2][:10] if r[2] else ""} for r in rows]})
-
-
-@app.route("/api/pdf/<int:pdf_id>")
-@requires_auth
-def pdf_get(pdf_id):
-    conn = get_db()
-    rows = conn.run("SELECT name, data FROM pdfs WHERE id=:i", i=pdf_id)
-    conn.close()
-    if not rows:
-        return jsonify({"error": "없음"}), 404
-    return jsonify({"name": rows[0][0], "data": rows[0][1]})
-
-
-@app.route("/api/pdf/<int:pdf_id>/delete", methods=["POST"])
-@requires_auth
-def pdf_delete(pdf_id):
-    conn = get_db()
-    conn.run("DELETE FROM pdfs WHERE id=:i", i=pdf_id)
-    conn.close()
-    return jsonify({"ok": True})
-
-
-@app.route("/api/encyc/search")
-@requires_auth
-def encyc_search():
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "검색어 없음"}), 400
-
-    ENCYC_SHEET_ID = os.environ.get("ENCYC_SHEET_ID", "")
-    if not ENCYC_SHEET_ID:
-        return jsonify({"error": "ENCYC_SHEET_ID 없음"}), 500
-
-    import csv, io as _io, re
-    sheet_url = f"https://docs.google.com/spreadsheets/d/{ENCYC_SHEET_ID}/export?format=csv"
-    terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
-
-    try:
-        r = requests.get(sheet_url, timeout=10)
-        r.encoding = "utf-8"
-        rows = list(csv.DictReader(_io.StringIO(r.text)))
-        matched = []
-        for row in rows:
-            row_text = " ".join(str(v) for v in row.values())
-            if all(term in row_text for term in terms):
-                matched.append(row)
-        return jsonify({"results": matched, "query": query})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/guest/search")
-@requires_auth
-def guest_search():
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "검색어 없음"}), 400
-
-    GUEST_SHEET_ID = os.environ.get("GUEST_SHEET_ID", "")
-    if not GUEST_SHEET_ID:
-        return jsonify({"error": "GUEST_SHEET_ID 없음"}), 500
-
-    import csv, io as _io
-    base_url = f"https://docs.google.com/spreadsheets/d/{GUEST_SHEET_ID}/export?format=csv&gid="
-
-    # Sheet GIDs - 탭 순서대로
-    sheets = [
-        ("Master", "437534302"),
-        ("History", "1633570539"),
-        ("골든픽", "1460063403"),
-        ("오늘장전략", "1283113183"),
-    ]
-
-    # 공백이나 /로 구분된 복수 검색어 → AND 조건
-    import re
-    terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
-
-    results = {}
-    for sheet_name, gid in sheets:
-        try:
-            r = requests.get(base_url + gid, timeout=10)
-            r.encoding = "utf-8"
-            rows = list(csv.DictReader(_io.StringIO(r.text)))
-            matched = []
-            for row in rows:
-                row_text = " ".join(str(v) for v in row.values())
-                if all(term in row_text for term in terms):
-                    matched.append(row)
-            if matched:
-                # 날짜 기준 최신순 정렬
-                def get_date_key(row):
-                    date_val = row.get("날짜", "") or row.get("date", "")
-                    return str(date_val)
-                matched.sort(key=get_date_key, reverse=True)
-                results[sheet_name] = matched
-        except:
-            pass
-
-    return jsonify({"results": results, "query": query, "terms": terms})
-
-
-@app.route("/api/calendar/parse", methods=["POST"])
-@requires_auth
-def calendar_parse():
-    body = request.json or {}
-    raw = body.get("content", "")
-    if not raw:
-        return jsonify({"error": "내용 없음"}), 400
-    try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": f"""아래는 주간 증시 일정 텍스트입니다.
-날짜별로 파싱해서 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 절대 포함하지 마세요.
-
-{{
-  "week_label": "4월 11일~17일",
-  "days": [
-    {{
-      "date": "4월 11일 토요일",
-      "day_key": "sat",
-      "items": ["美-이란, 파키스탄서 협상 개시", "푸틴, 우크라 전쟁 부활절 휴전 선언"],
-      "guests": ["반종민 소장 - 주도주를 만드는 이슈", "박종현 대표 - 가는 종목이 더 간다"]
-    }}
-  ]
-}}
+태그 유형:
+- SECTOR: 섹터/테마명 (사용자 지정 — 반드시 그대로 사용)
+- KOSPI: 코스피 종목명 (사용자 지정)
+- KOSDAQ: 코스닥 종목명 (사용자 지정)
+- US_MARKET: 미증시 마감 내용
+- INDICATOR: 시장 지표 (수치 그대로 유지)
+- AUTO: 태그 없이 들어온 일반 기사
 
 규칙:
-- day_key는 mon/tue/wed/thu/fri/sat/sun 중 하나
-- items: 경제·증권 일정만. 핵심 한 줄 요약. 세부내용 생략.
-- guests: 출연자 이름과 주제가 있으면 guests 배열에. "이름 - 주제" 형식. 출연자가 없으면 빈 배열 [].
-- 출연자처럼 보이는 항목(사람 이름 + 주제/소속)은 반드시 guests로 분류.
+1. SECTOR 태그가 있으면 → 반드시 📌Sector 아래 ✔️섹터명으로 표시
+2. KOSPI 태그는 반드시 📌코스피 칸에만. 섹터로 승격 금지.
+3. KOSDAQ 태그는 반드시 📌코스닥 칸에만. 섹터로 승격 금지.
+4. US_MARKET 태그는 📌美증시 마감 칸에만 표시. 없으면 섹션 통째로 생략.
+5. INDICATOR 태그는 📌지표 섹션으로 맨 위에. 수치 절대 수정 금지. 없으면 섹션 생략.
+6. AUTO 태그는 네가 섹터 판단해서 분류
+7. ** 볼드 표시 절대 금지
+8. 섹터 중분류는 ✔️ 사용
+9. 섹터 안 "관련 종목:" 줄에는 등락률 ±2% 이상만 포함
+10. 같은 종목이 섹터에도 들어가고 코스피/코스닥에도 들어가면 두 군데 모두 유지하되 표현 약간 다르게
+11. 등락률에 따라온 ⏰(시간외)/🌙(NXT) 이모지는 그대로 유지
+12. 각 섹터(✔️)의 불릿은 최대 2개. 핵심만.
+13. 출처 정보가 들어왔어도 결과에는 사실 한 줄만 정리
 
-텍스트:
-{raw}"""}]
+출력 형식:
+{날짜} Check Point✨
+
+📌지표
+[INDICATOR 내용. 없으면 섹션 통째로 생략]
+
+📌美증시 마감
+[US_MARKET 내용. 없으면 섹션 통째로 생략]
+
+📌Sector
+✔️[섹터명]
+- 핵심 내용
+- 관련 종목: 종목A(+X%⏰), 종목B(+Y%⏰)
+
+📌코스피
+[종목명]
+- 관련 내용 (등락률⏰)
+
+📌코스닥
+[종목명]
+- 관련 내용 (등락률⏰)
+"""
+
+EDIT_PROMPT = """너는 체크포인트 문서를 수정하는 어시스턴트야.
+
+규칙:
+1. ** 볼드 표시 절대 금지
+2. 섹터 중분류는 ✔️ 사용
+3. 원본 형식과 구조 유지하면서 해당 항목만 수정
+4. 수정 지시 외 부분은 절대 건드리지 말 것
+5. 전체 체크포인트를 그대로 출력 (수정된 부분 포함)"""
+
+
+# ── 멀티 태그 파싱 (여러 태그를 한 번에) ──────────────────
+def parse_multi_tag_message(text: str) -> list:
+    """
+    한 메시지에 여러 태그가 있을 때 자동 분리.
+    예시:
+        섹터/반도체
+        - 반도체 슈퍼사이클 강세
+        - 관련 종목: 시지트로닉스(+6.96%⏰)
+
+        섹터/조선기자재
+        - 데이터센터 기대감
+        - 관련 종목: 동방선기(+3.28%⏰)
+
+        코스닥/바이젠셀
+        - VT-EBV-N 승인 후 차익실현 (-1.79%⏰)
+
+    반환: [(tag_type, tag_value, content), ...]
+    """
+    items = []
+    
+    # 태그 패턴: 줄 시작에 "섹터/", "코스피/", "코스닥/", "지표/", "미증시/" 등
+    # 각 태그마다 다음 태그 직전까지를 content로 잡음
+    tag_pattern = re.compile(
+        r'^(섹터|코스피|코스닥|지표|미증시|US_MARKET|US|미국증시)\s*/\s*([^\n\r]*)',
+        re.MULTILINE | re.IGNORECASE
+    )
+    
+    matches = list(tag_pattern.finditer(text))
+    
+    if not matches:
+        # 태그가 하나도 없으면 AUTO로 처리
+        if text.strip():
+            return [("AUTO", "", text.strip())]
+        return []
+    
+    # 첫 번째 태그 이전 내용도 AUTO로 처리할지 — 일단 무시
+    
+    for i, match in enumerate(matches):
+        tag_korean = match.group(1).strip()
+        tag_value = match.group(2).strip()
+        
+        # content 시작 위치: 태그 줄 다음 줄부터
+        content_start = match.end()
+        
+        # content 끝 위치: 다음 태그 시작 직전
+        if i + 1 < len(matches):
+            content_end = matches[i + 1].start()
+        else:
+            content_end = len(text)
+        
+        content = text[content_start:content_end].strip()
+        
+        # 한국어 태그 → 영어 변환
+        tag_map = {
+            "섹터": "SECTOR",
+            "코스피": "KOSPI",
+            "코스닥": "KOSDAQ",
+            "지표": "INDICATOR",
+            "미증시": "US_MARKET",
+            "us_market": "US_MARKET",
+            "us": "US_MARKET",
+            "미국증시": "US_MARKET",
+        }
+        tag_type = tag_map.get(tag_korean.lower(), tag_map.get(tag_korean, "AUTO"))
+        
+        # 지표/미증시는 tag_value가 비어있을 수 있음 (전체가 content)
+        if tag_type in ("INDICATOR", "US_MARKET"):
+            if tag_value:  # "지표/some text" 형식이면 tag_value도 content 일부
+                content = (tag_value + "\n" + content).strip()
+                tag_value = ""
+        
+        if content:  # 내용이 있는 것만 추가
+            items.append((tag_type, tag_value, content))
+    
+    return items
+
+
+def format_buffer_for_claude(buffer: list) -> str:
+    parts = []
+    us_market_lines = []
+    indicator_lines = []
+    sector_items = []
+    auto_items = []
+
+    for item in buffer:
+        tag_type, tag_value, content = item
+        if tag_type == "US_MARKET":
+            us_market_lines.append(content.strip())
+        elif tag_type == "INDICATOR":
+            indicator_lines.append(content.strip())
+        elif tag_type == "SECTOR":
+            sector_items.append(f"[SECTOR: {tag_value}]\n{content}")
+        elif tag_type == "AUTO":
+            auto_items.append(f"[AUTO]\n{content}")
+
+    if indicator_lines:
+        parts.append(f"[INDICATOR]\n" + "\n".join(indicator_lines))
+    if us_market_lines:
+        parts.append(f"[US_MARKET]\n" + "\n".join(us_market_lines))
+    parts.extend(sector_items)
+    parts.extend(auto_items)
+
+    return "\n\n---\n\n".join(parts)
+
+
+async def build_checkpoint(buffer: list, date_str: str, prev_checkpoint: str = None) -> str:
+    """체크포인트 생성. KOSPI/KOSDAQ는 코드에서 직접 처리. 섹터/지표/미증시는 Claude가 처리."""
+    claude_buffer = []
+    kospi_items = []
+    kosdaq_items = []
+
+    for item in buffer:
+        tag_type, tag_value, content = item
+        if tag_type == "KOSPI":
+            kospi_items.append((tag_value, content))
+        elif tag_type == "KOSDAQ":
+            kosdaq_items.append((tag_value, content))
+        else:
+            claude_buffer.append(item)
+
+    # Claude로 섹터/지표/미증시/AUTO 처리
+    if claude_buffer or prev_checkpoint:
+        structured = format_buffer_for_claude(claude_buffer)
+        if prev_checkpoint:
+            cp_base = re.split(r"\n📌코스피", prev_checkpoint)[0]
+            user_content = (
+                f"날짜: {date_str}\n\n기존 체크포인트 (📌코스피/코스닥 섹션 제외):\n{cp_base}\n\n"
+                f"---\n\n추가 내용 (반영해서 업데이트해줘. 📌코스피/📌코스닥 섹션은 출력하지 말 것):\n\n{structured}"
+            )
+        else:
+            user_content = (
+                f"날짜: {date_str}\n\n{structured}\n\n"
+                f"※ 📌코스피/📌코스닥 섹션은 출력하지 말 것. 지표/美증시/Sector만 출력."
+                if structured.strip() else f"날짜: {date_str}"
+            )
+
+        response = client.messages.create(
+            model="claude-opus-4-20250514",
+            max_tokens=2500,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_content}],
         )
-        import json
-        text = msg.content[0].text.strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text)
-        save_post("calendar", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        base = response.content[0].text.strip()
+    else:
+        base = f"{date_str} Check Point✨"
+
+    # 기존 코스피/코스닥 파싱
+    existing_kospi_map = {}
+    existing_kosdaq_map = {}
+
+    if prev_checkpoint:
+        def parse_stock_section(section_text: str) -> dict:
+            result = {}
+            current_name = None
+            current_lines = []
+            for line in section_text.strip().split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("-"):
+                    if current_name:
+                        current_lines.append(line)
+                else:
+                    if current_name:
+                        result[current_name] = current_lines
+                    current_name = line
+                    current_lines = []
+            if current_name:
+                result[current_name] = current_lines
+            return result
+
+        kospi_m = re.search(r"📌코스피\n(.*?)(?=\n📌|\Z)", prev_checkpoint, re.DOTALL)
+        kosdaq_m = re.search(r"📌코스닥\n(.*?)(?=\n📌|\Z)", prev_checkpoint, re.DOTALL)
+        if kospi_m:
+            existing_kospi_map = parse_stock_section(kospi_m.group(1))
+        if kosdaq_m:
+            existing_kosdaq_map = parse_stock_section(kosdaq_m.group(1))
+
+    def summarize_content(content: str) -> list:
+        """코스피/코스닥 종목 내용을 핵심 한두 줄로 정리"""
+        seen = set()
+        lines = []
+        for l in content.split("\n"):
+            l = l.strip()
+            if not l:
+                continue
+            if l.startswith("http"):
+                continue
+            skip_keywords = ["기자 구독", "구독하기", "Forwarded from", "today at",
+                             "naver.com", "hankyung.com", "글자크기", "스크랩",
+                             "로그인", "회원가입"]
+            if any(skip in l for skip in skip_keywords):
+                continue
+            korean_chars = sum(1 for c in l if '\uAC00' <= c <= '\uD7A3')
+            if korean_chars < 2 and len(l) < 20:
+                continue
+            key = l.replace("-", "").strip()
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(l)
+        bullets = [l for l in lines if len(l) > 5][:2]
+        return [f"- {b}" if not b.startswith("-") else b for b in bullets]
+
+    for name, content in kospi_items:
+        existing_kospi_map[name] = summarize_content(content)
+    for name, content in kosdaq_items:
+        existing_kosdaq_map[name] = summarize_content(content)
+
+    def build_stock_block(header: str, stock_map: dict) -> str:
+        if not stock_map:
+            return ""
+        lines_out = [header]
+        items = []
+        for name, bullets in stock_map.items():
+            item_lines = [name] + bullets
+            items.append("\n".join(item_lines))
+        lines_out.append("\n\n".join(items))
+        return "\n".join(lines_out)
+
+    kospi_block = build_stock_block("📌코스피", existing_kospi_map)
+    kosdaq_block = build_stock_block("📌코스닥", existing_kosdaq_map)
+
+    result = base.strip()
+    if kospi_block:
+        result += "\n\n" + kospi_block
+    if kosdaq_block:
+        result += "\n\n" + kosdaq_block
+
+    return result.strip()
 
 
-@app.route("/api/calendar/update", methods=["POST"])
-@requires_auth
-def calendar_update():
-    import json
-    body = request.json or {}
-    data = body.get("data", {})
-    save_post("calendar", json.dumps(data, ensure_ascii=False), datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
+async def apply_partial_edit(checkpoint: str, edit_type: str, target: str, new_content: str) -> str:
+    if edit_type == "섹터":
+        instruction = f"📌Sector 아래 ✔️{target} 섹션의 내용을 아래로 교체해줘:\n{new_content}"
+    elif edit_type == "코스피":
+        instruction = f"📌코스피 아래 '{target}' 항목의 내용을 아래로 교체해줘:\n{new_content}"
+    elif edit_type == "코스닥":
+        instruction = f"📌코스닥 아래 '{target}' 항목의 내용을 아래로 교체해줘:\n{new_content}"
+    elif edit_type == "미증시":
+        instruction = f"📌美증시 마감 섹션 내용을 아래로 교체해줘:\n{new_content}"
+    elif edit_type == "지표":
+        instruction = f"📌지표 섹션 내용을 아래로 교체해줘:\n{new_content}"
+    else:
+        instruction = f"'{target}' 항목을 찾아서 내용을 아래로 교체해줘:\n{new_content}"
+
+    response = client.messages.create(
+        model="claude-opus-4-20250514",
+        max_tokens=2500,
+        system=EDIT_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": f"아래 체크포인트에서 {instruction}\n\n체크포인트:\n{checkpoint}"
+        }],
+    )
+    return response.content[0].text
 
 
-@app.route("/api/calendar/clear", methods=["POST"])
-@requires_auth
-def calendar_clear():
-    save_post("calendar", "", datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
+# ── 메시지 핸들러 ─────────────────────────────────────────
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if ALLOWED_USER_ID != 0 and user_id != ALLOWED_USER_ID:
+        await update.message.reply_text("접근 권한이 없습니다.")
+        return
+
+    user_text = update.message.text
+    if not user_text or not user_text.strip():
+        return
+
+    text = user_text.strip()
+
+    # ── 1) 새 체크포인트 시작 ──
+    new_session_match = re.search(
+        r"(\d{1,2}/\d{1,2})\s*(체크포인트|checkpoint)\s*(생성|시작|열어|만들어)",
+        text, re.IGNORECASE
+    )
+    if new_session_match:
+        date_str = new_session_match.group(1)
+        user_state[user_id] = {
+            "date": date_str,
+            "buffer": [],
+            "last_checkpoint": None,
+        }
+        await update.message.reply_text(
+            f"📅 {date_str} 체크포인트 새로 시작!\n\n"
+            f"📥 입력 방법:\n"
+            f"한 메시지에 여러 태그를 넣어도 자동 분리해드려요!\n\n"
+            f"예시:\n"
+            f"섹터/반도체\n"
+            f"- 슈퍼사이클 기대감\n"
+            f"- 관련 종목: 시지트로닉스(+6.96%⏰)\n\n"
+            f"섹터/조선기자재\n"
+            f"- 데이터센터 기대감\n"
+            f"- 관련 종목: 동방선기(+3.28%⏰)\n\n"
+            f"코스닥/바이젠셀\n"
+            f"- VT-EBV-N 승인 (-1.79%⏰)\n\n"
+            f"📸 이미지(지표 캡쳐) 전송도 가능!\n"
+            f"✅ 정리 후 자동으로 대시보드 전송됩니다."
+        )
+        return
+
+    # ── 2) 전체수정 ──
+    if text.startswith("전체수정"):
+        new_checkpoint = text[4:].strip()
+        if not new_checkpoint:
+            await update.message.reply_text("전체수정 뒤에 체크포인트 내용을 붙여주세요!")
+            return
+        if user_id not in user_state:
+            today = datetime.now().strftime("%-m/%-d")
+            user_state[user_id] = {"date": today, "buffer": [], "last_checkpoint": None}
+        user_state[user_id]["last_checkpoint"] = new_checkpoint
+        user_state[user_id]["buffer"] = []
+        date_match = re.search(r"(\d{1,2}/\d{1,2})", new_checkpoint)
+        if date_match:
+            user_state[user_id]["date"] = date_match.group(1)
+        # 대시보드 자동 전송 (실패 시 상세 에러)
+        date_label = user_state[user_id]["date"]
+        sent, err = await send_to_dashboard(new_checkpoint, date_label)
+        if sent:
+            await update.message.reply_text(f"✅ 전체수정 완료! (📤 대시보드 전송 OK)\n\n" + new_checkpoint)
+        else:
+            await update.message.reply_text(f"✅ 전체수정 완료!\n⚠️ 대시보드 전송 실패: {err}\n\n" + new_checkpoint)
+        return
+
+    # ── 3) 부분수정 ──
+    edit_match = re.match(r"^수정\s*/\s*(.+?)\s*/\s*(.+?)[\n\r](.*)", text, re.DOTALL)
+    if edit_match:
+        edit_type = edit_match.group(1).strip()
+        target = edit_match.group(2).strip()
+        new_content = edit_match.group(3).strip()
+        state = user_state.get(user_id)
+        if not state or not state.get("last_checkpoint"):
+            await update.message.reply_text("수정할 체크포인트가 없어요!")
+            return
+        processing_msg = await update.message.reply_text(f"⏳ {edit_type}/{target} 수정 중...")
+        try:
+            result = await apply_partial_edit(state["last_checkpoint"], edit_type, target, new_content)
+            user_state[user_id]["last_checkpoint"] = result
+            sent, err = await send_to_dashboard(result, state["date"])
+            await processing_msg.delete()
+            if sent:
+                await update.message.reply_text(f"✅ 수정 완료! (📤 대시보드 전송 OK)\n\n" + result)
+            else:
+                await update.message.reply_text(f"✅ 수정 완료!\n⚠️ 대시보드 전송 실패: {err}\n\n" + result)
+        except Exception as e:
+            logger.error(f"수정 오류: {e}")
+            await processing_msg.edit_text(f"❌ 오류: {str(e)[:100]}")
+        return
+
+    # ── 4) 정리 요청 ──
+    trigger_words = ["정리해줘", "정리해", "정리 해줘", "뽑아줘"]
+    is_trigger = any(word in text for word in trigger_words)
+    if is_trigger:
+        state = user_state.get(user_id)
+        if not state or not state["buffer"]:
+            await update.message.reply_text("아직 받은 내용이 없어요! 기사나 뉴스를 먼저 보내주세요 📋")
+            return
+        processing_msg = await update.message.reply_text("⏳ 통합 정리 + 대시보드 전송 중...")
+        try:
+            date_str = state.get("date", datetime.now().strftime("%-m/%-d"))
+            result = await build_checkpoint(
+                state["buffer"],
+                date_str,
+                prev_checkpoint=state.get("last_checkpoint")
+            )
+            user_state[user_id]["last_checkpoint"] = result
+            user_state[user_id]["buffer"] = []
+            # 자동 대시보드 전송 (상세 에러 표시)
+            sent, err = await send_to_dashboard(result, date_str)
+            await processing_msg.delete()
+            if sent:
+                await update.message.reply_text(result + "\n\n📤 대시보드 전송 OK")
+            else:
+                await update.message.reply_text(result + f"\n\n⚠️ 대시보드 전송 실패: {err}")
+        except Exception as e:
+            logger.error(f"분석 오류: {e}")
+            await processing_msg.edit_text(f"❌ 오류: {str(e)[:100]}")
+        return
+
+    # ── 5) 일반 내용 → 멀티 태그 파싱 후 버퍼에 쌓기 ──
+    if len(text) < 5:
+        return
+
+    if user_id not in user_state:
+        today = datetime.now().strftime("%-m/%-d")
+        user_state[user_id] = {"date": today, "buffer": [], "last_checkpoint": None}
+
+    # URL 크롤링
+    has_url = bool(extract_urls(text))
+    if has_url:
+        processing_msg = await update.message.reply_text("🔍 링크 읽는 중...")
+        enriched_text = await enrich_text_with_url(text)
+        await processing_msg.delete()
+    else:
+        enriched_text = text
+
+    # 멀티 태그 파싱
+    parsed_items = parse_multi_tag_message(enriched_text)
+    
+    if not parsed_items:
+        return
+    
+    # 버퍼에 추가
+    for tag_type, tag_value, content in parsed_items:
+        user_state[user_id]["buffer"].append((tag_type, tag_value, content))
+    
+    count = len(user_state[user_id]["buffer"])
+    is_append = bool(user_state[user_id].get("last_checkpoint"))
+    mode = "추가" if is_append else "누적"
+    
+    # 파싱된 항목 요약
+    summary_parts = []
+    for tag_type, tag_value, _ in parsed_items:
+        if tag_type == "SECTOR":
+            summary_parts.append(f"✔️섹터/{tag_value}")
+        elif tag_type == "KOSPI":
+            summary_parts.append(f"📌코스피/{tag_value}")
+        elif tag_type == "KOSDAQ":
+            summary_parts.append(f"📌코스닥/{tag_value}")
+        elif tag_type == "INDICATOR":
+            summary_parts.append("📌지표")
+        elif tag_type == "US_MARKET":
+            summary_parts.append("📌美증시")
+        else:
+            summary_parts.append("🔍자동분류")
+    
+    summary = ", ".join(summary_parts)
+    
+    await update.message.reply_text(
+        f"✅ {len(parsed_items)}개 태그 인식!\n"
+        f"{summary}\n\n"
+        f"({count}개 {mode}) '정리해줘' 하시면 {'업데이트' if is_append else '정리'}하고 대시보드로 자동 전송할게요!"
+    )
 
 
-@app.route("/api/note/clear", methods=["POST"])
-@requires_auth
-def clear_note():
-    save_post("note", "", datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
+# ── 이미지 핸들러 ─────────────────────────────────────────
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """이미지 → 지표(INDICATOR)로 추출"""
+    user_id = update.effective_user.id
+    if ALLOWED_USER_ID != 0 and user_id != ALLOWED_USER_ID:
+        return
 
+    if user_id not in user_state:
+        today = datetime.now().strftime("%-m/%-d")
+        user_state[user_id] = {"date": today, "buffer": [], "last_checkpoint": None}
 
-@app.route("/api/report/clear", methods=["POST"])
-@requires_auth
-def clear_report():
-    for t in ("report_up","report_dn","report_feature"):
-        save_post(t, "", datetime.now().strftime("%Y-%m-%d"))
-    return jsonify({"ok": True})
+    processing_msg = await update.message.reply_text("📸 이미지 읽는 중...")
 
-
-
-
-@app.route("/api/briefing/generate", methods=["POST"])
-@requires_auth
-def generate_briefing():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY 없음"}), 500
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        today = datetime.now().strftime("%m월 %d일")
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{"role": "user", "content":
-                f"현지시각 {today} 미국 증시 브리핑 해줘. CNBC, Bloomberg, WSJ 반드시 웹서치해서 "
-                f"시장 주도 재료와 지수 수치, 주요 뉴스, 특징주를 한국어로 정리해줘."}]
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(file.file_path) as resp:
+                image_bytes = await resp.read()
+
+        extracted = await extract_indicators_from_image(image_bytes, "image/jpeg")
+
+        if not extracted:
+            await processing_msg.edit_text("❌ 이미지에서 지표를 읽지 못했어요.")
+            return
+
+        user_state[user_id]["buffer"].append(("INDICATOR", "", extracted))
+        count = len(user_state[user_id]["buffer"])
+        is_append = bool(user_state[user_id].get("last_checkpoint"))
+        mode = "추가" if is_append else "누적"
+
+        await processing_msg.delete()
+        await update.message.reply_text(
+            f"✅ 📌지표 저장 완료! ({count}개 {mode})\n\n"
+            f"📌지표\n{extracted}\n\n"
+            f"'정리해줘' 하시면 {'업데이트' if is_append else '정리'}할게요!"
         )
-        content = " ".join([b.text for b in msg.content if hasattr(b, "text") and b.text])
-        date = datetime.now().strftime("%Y-%m-%d")
-        save_post("briefing", content, date)
-        return jsonify({"content": content, "date": date})
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"이미지 처리 오류: {e}")
+        await processing_msg.edit_text(f"❌ 오류: {str(e)[:100]}")
 
 
+HELP_TEXT = """📋 CheckPoint Bot 명령어
 
+📅 세션시작
+3/16 체크포인트 생성
 
+📥 내용 쌓기 (한 메시지에 여러 태그 가능!)
+섹터/방산
+- 美-韓 협력 기대
+- 관련 종목: 한화에어로(+2.1%⏰)
 
-def get_html():
-    return r"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Yenny">
-<meta name="theme-color" content="#1a1d23">
-<link rel="manifest" href="/manifest.json">
-<title>Yenny Dashboard</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap');
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-height:100vh}
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;background:#1a1d23;position:sticky;top:0;z-index:10;border-bottom:3px solid #e8b84b}
-.topbar-title{font-size:16px;font-weight:700;color:#fff;letter-spacing:-.3px}
-.topbar-title span{color:#e8b84b;font-weight:400;font-size:13px;margin-left:6px}
-#clock{font-family:'DM Mono',monospace;font-size:13px;color:#e8b84b;letter-spacing:.05em}
-.container{padding:20px;max-width:1100px;margin:0 auto}
-.section-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.12em;text-transform:uppercase;margin:24px 0 10px;padding-left:2px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.grid-futures-todo{display:grid;grid-template-columns:1fr 2fr;gap:10px}
-.grid-todo-memo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.grid-domestic{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-/* 미국·글로벌: PC 4열 × 3행 기본 순서 유지 */
-.grid-us{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:680px){
-  /* 국내 시장 2열 (4개 카드를 2x2로) */
-  .grid-domestic{grid-template-columns:1fr 1fr!important;gap:8px}
-  /* 미국·글로벌 3열 + 순서 재배치 */
-  .grid-us{grid-template-columns:1fr 1fr 1fr!important;gap:6px}
-  /* 행1: 다우(1), S&P(2), 나스닥(3) - 그대로 */
-  /* 행2: 10년물(5), DXY(6), VIX(7) - 그대로 */
-  /* 행3: WTI(9), 브렌트(10), 금(11) - 그대로 */
-  /* 행4: EWY(4→12), 필반(8→13), DRAM(12→14) */
-  .us-4{order:12}
-  .us-8{order:13}
-  .us-12{order:14}
-  .container{padding:12px;padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
-  /* 국내 시장은 2열 (코스피/코스닥/원달러) */
-  .grid3{grid-template-columns:1fr 1fr!important;gap:8px}
-  /* 미국·글로벌은 3열 유지 */
-  .grid4{grid-template-columns:1fr 1fr 1fr!important;gap:6px}
-  /* 2분할은 여전히 1열 (노트/체크포인트 같은 큰 카드는) */
-  .grid2{grid-template-columns:1fr!important;gap:8px}
-  /* 야간선물+투두/메모는 1열 */
-  .grid-futures-todo, .grid-todo-memo{grid-template-columns:1fr!important;gap:8px}
-  /* inline style 2fr / 1fr 1fr 중첩 처리 */
-  [style*="grid-template-columns:1fr 2fr"],
-  [style*="grid-template-columns: 1fr 2fr"]{grid-template-columns:1fr!important}
-  [style*="display:grid"][style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}
-  .section-label{margin:18px 0 8px;font-size:10px}
-  .content-card{padding:12px 14px}
-  .card{padding:12px 10px}
-  /* 미국 3분할일 때 글씨 더 작게 */
-  .grid4 .metric-val, .grid-us .metric-val{font-size:16px!important;letter-spacing:-0.3px}
-  .grid4 .metric-label, .grid-us .metric-label{font-size:9px!important}
-  .grid4 .metric-chg, .grid-us .metric-chg{font-size:11px}
-  .grid3 .metric-val{font-size:22px}
-  .grid3 .metric-label{font-size:10px}
-  .metric-val{font-size:22px}
-  .metric-label{font-size:10px}
-  .content-title{font-size:14px}
-  .tab{font-size:11px;padding:4px 10px}
-  .btn{font-size:12px;padding:6px 10px}
-  .rich-editor, textarea.input-area{font-size:14px;min-height:220px!important}
-  .richtext-toolbar{overflow-x:auto;flex-wrap:nowrap;padding:4px}
-  .richtext-toolbar button{min-width:28px;flex-shrink:0}
-  .richtext-toolbar span[style*="flex:1"]{display:none!important}
-  .richtext-toolbar span[style*="font-size:10px"]{display:none!important}
-  .content-body{min-height:200px!important}
-  .content-header{flex-wrap:wrap;gap:6px}
-  h1, .dashboard-title{font-size:18px!important}
-  .input-row{flex-direction:column}
-  .input-row .btn{width:100%}
-}
-.card{background:#fff;border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.04)}
-.metric-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
-.metric-val{font-size:26px;font-weight:700;color:#1a1d23;letter-spacing:-.5px;font-family:'DM Mono',monospace}
-.metric-chg{font-size:13px;font-weight:600;margin-top:5px}
-.metric-sup{font-size:12px;color:#7a8099;margin-top:8px;display:flex;gap:12px}
-.up{color:#d63031}
-.dn{color:#0984e3}
-.flat{color:#b2bec3}
-.loading{color:#b2bec3;font-size:20px}
-.content-card{background:#fff;border-radius:14px;padding:18px 20px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 4px 16px rgba(0,0,0,.04)}
-.content-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
-.content-title{font-size:14px;font-weight:700;color:#1a1d23}
-.content-date{font-size:11px;color:#b2bec3;font-family:'DM Mono',monospace}
-.content-body{font-size:14px;color:#2d3436;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto}
-.content-empty{font-size:13px;color:#b2bec3;font-style:italic}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:1.5px solid #dfe6e9;background:#fff;color:#636e72;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
-.btn:hover{background:#f0f2f5;color:#1a1d23;border-color:#b2bec3}
-.btn-primary{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
-.btn-primary:hover{background:#2d3436;border-color:#2d3436}
-.btn-green{background:#00b894;border-color:#00b894;color:#fff}
-.btn-green:hover{background:#00a381}
-.btn.ls{opacity:.5;pointer-events:none}
-.refresh-dot{width:7px;height:7px;border-radius:50%;background:#e8b84b;display:inline-block;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.spinner{display:inline-block;width:13px;height:13px;border:2px solid #dfe6e9;border-top-color:#e8b84b;border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.etf-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #f0f2f5;font-size:13px}
-.etf-row:last-child{border-bottom:none}
-.etf-name{color:#2d3436;font-weight:500}
-.etf-chg{font-weight:700;font-family:'DM Mono',monospace}
-textarea.input-area{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;resize:vertical;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7}
-textarea.input-area:focus{outline:none;border-color:#e8b84b;background:#fff}
-/* 리치 에디터 */
-.rich-editor{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7;overflow-y:auto;outline:none}
-.rich-editor:focus{border-color:#e8b84b;background:#fff}
-.rich-editor:empty::before{content:attr(data-placeholder);color:#b2bec3;pointer-events:none}
-.richtext-toolbar{display:flex;gap:4px;flex-wrap:wrap;padding:6px;background:#f0f2f5;border-radius:8px;margin-bottom:6px}
-.richtext-toolbar button{width:30px;height:28px;border:1px solid #dfe6e9;background:white;color:#2d3436;border-radius:5px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;padding:0;transition:all .1s}
-.richtext-toolbar button:hover{background:#e8b84b;color:white;border-color:#e8b84b}
-.richtext-toolbar .rt-sep{width:1px;background:#dfe6e9;margin:2px 2px}
-input.input-line{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:15px;font-weight:600;padding:10px 14px;font-family:'DM Mono',monospace}
-input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
-.input-row{display:flex;gap:8px;align-items:flex-start;margin-top:10px}
-.saved-badge{font-size:11px;color:#00b894;font-weight:700;margin-left:8px;display:none}
-.tab-bar{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
-.tab{padding:5px 13px;border-radius:20px;border:1.5px solid #dfe6e9;background:#f0f2f5;color:#636e72;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
-.tab.active{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
-.tab:hover:not(.active){background:#fff;color:#1a1d23}
-.futures-val{font-size:28px;font-weight:700;color:#1a1d23;font-family:'DM Mono',monospace;margin-bottom:12px}
-</style>
-</head>
-<body>
-<div class="topbar">
-  <div class="topbar-title">Yenny Dashboard</div>
-  <div style="display:flex;align-items:center;gap:10px;">
-    <span class="refresh-dot"></span>
-    <span id="clock" style="font-size:12px;color:#666;"></span>
-  </div>
-</div>
+섹터/반도체
+- 슈퍼사이클 기대
+- 관련 종목: 시지트로닉스(+6.96%⏰)
 
-<div class="container">
+코스피/SK텔레콤
+- 구글 투자 계획 보도 (+2.5%⏰)
 
-  <!-- 국내 시장 -->
-  <div class="section-label">국내 시장</div>
-  <div class="grid-domestic">
-    <div class="card">
-      <div class="metric-label">코스피</div>
-      <div class="metric-val" id="kospi-val"><span class="loading">—</span></div>
-      <div class="metric-chg" id="kospi-chg"></div>
-      <div class="metric-sup" id="kospi-sup"></div>
-    </div>
-    <div class="card">
-      <div class="metric-label">코스닥</div>
-      <div class="metric-val" id="kosdaq-val"><span class="loading">—</span></div>
-      <div class="metric-chg" id="kosdaq-chg"></div>
-      <div class="metric-sup" id="kosdaq-sup"></div>
-    </div>
-    <div class="card">
-      <div class="metric-label">원/달러 (주간)</div>
-      <div class="metric-val" id="usdkrw-val"><span class="loading">—</span></div>
-      <div class="metric-chg" id="usdkrw-chg"></div>
-    </div>
-    <div class="content-card" style="margin-bottom:0;padding:12px 14px;">
-      <div class="content-header" style="margin-bottom:6px;">
-        <span class="metric-label" style="margin-bottom:0;">🌙 야간선물</span>
-        <span class="saved-badge" id="futures-badge">✓</span>
-      </div>
-      <div id="futures-display" class="futures-val" style="font-size:22px;">—</div>
-      <div id="futures-auto-val" style="font-size:10px;color:#b2bec3;margin-bottom:6px;"></div>
-      <div style="display:flex;gap:4px;">
-        <input class="input-line" id="futures-input" placeholder="+1.2%" style="flex:1;font-size:13px;padding:6px 10px;" />
-        <button class="btn btn-green" onclick="saveFutures()" style="font-size:11px;padding:6px 10px;">저장</button>
-      </div>
-    </div>
-  </div>
+코스닥/바이젠셀
+- VT-EBV-N 승인 (-1.79%⏰)
 
-  <!-- 투두리스트 + 메모 -->
-  <div class="grid-todo-memo" style="margin-top:10px;">
-      <!-- 투두리스트 -->
-      <div class="content-card" style="margin-bottom:0;">
-        <div class="content-header">
-          <span class="content-title">✅ 투두리스트</span>
-          <span class="saved-badge" id="todo-badge">✓ 저장됨</span>
-        </div>
-        <div id="todo-list" style="margin-bottom:8px;"></div>
-        <div style="display:flex;gap:6px;">
-          <input id="todo-new-input" class="input-line" placeholder="할일 추가..." style="flex:1;font-size:13px;"
-            onkeydown="if(event.key==='Enter')addTodoItem()"/>
-          <button class="btn btn-green" onclick="addTodoItem()" style="padding:8px 12px;">+</button>
-        </div>
-      </div>
-      <!-- 메모 -->
-      <div class="content-card" style="margin-bottom:0;">
-        <div class="content-header">
-          <span class="content-title">📝 메모</span>
-          <div style="display:flex;gap:6px;">
-            <span class="saved-badge" id="memo-badge">✓ 저장됨</span>
-            <button class="btn btn-green" onclick="saveMemo()">저장</button>
-            <button class="btn" onclick="clearMemo()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-          </div>
-        </div>
-        <textarea class="input-area" id="memo-input" placeholder="메모..." style="min-height:120px;"></textarea>
-      </div>
-  </div>
+📊 지표 입력
+지표/
+SOX +1.34%
+VIX 23.95 -1.45%
 
-  <!-- 미국·글로벌 -->
-  <div class="section-label">미국·글로벌</div>
-  <div class="grid-us">
-    <div class="card us-1"><div class="metric-label">다우존스</div><div class="metric-val" id="dow-val"><span class="loading">—</span></div><div class="metric-chg" id="dow-chg"></div></div>
-    <div class="card us-2"><div class="metric-label">S&amp;P 500</div><div class="metric-val" id="sp500-val"><span class="loading">—</span></div><div class="metric-chg" id="sp500-chg"></div></div>
-    <div class="card us-3"><div class="metric-label">나스닥</div><div class="metric-val" id="nasdaq-val"><span class="loading">—</span></div><div class="metric-chg" id="nasdaq-chg"></div></div>
-    <div class="card us-4"><div class="metric-label">EWY</div><div class="metric-val" id="ewy-val"><span class="loading">—</span></div><div class="metric-chg" id="ewy-chg"></div></div>
-    <div class="card us-5"><div class="metric-label">미국 10년물 금리</div><div class="metric-val" id="tnx-val"><span class="loading">—</span></div><div class="metric-chg" id="tnx-chg"></div></div>
-    <div class="card us-6"><div class="metric-label">달러인덱스 (DXY)</div><div class="metric-val" id="dxy-val"><span class="loading">—</span></div><div class="metric-chg" id="dxy-chg"></div></div>
-    <div class="card us-7"><div class="metric-label">VIX</div><div class="metric-val" id="vix-val"><span class="loading">—</span></div><div class="metric-chg" id="vix-chg"></div></div>
-    <div class="card us-8"><div class="metric-label">필라델피아반도체</div><div class="metric-val" id="sox-val"><span class="loading">—</span></div><div class="metric-chg" id="sox-chg"></div></div>
-    <div class="card us-9"><div class="metric-label">WTI 유가</div><div class="metric-val" id="wti-val"><span class="loading">—</span></div><div class="metric-chg" id="wti-chg"></div></div>
-    <div class="card us-10"><div class="metric-label">브렌트유</div><div class="metric-val" id="brent-val"><span class="loading">—</span></div><div class="metric-chg" id="brent-chg"></div></div>
-    <div class="card us-11"><div class="metric-label">금</div><div class="metric-val" id="gold-val"><span class="loading">—</span></div><div class="metric-chg" id="gold-chg"></div></div>
-    <div class="card us-12"><div class="metric-label">DRAM ETF (SOXX)</div><div class="metric-val" id="dram-val"><span class="loading">—</span></div><div class="metric-chg" id="dram-chg"></div></div>
-  </div>
-  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;align-items:center;">
-    <a href="https://www.bloomberg.com/asia" target="_blank" class="btn">📰 Bloomberg</a>
-    <a href="https://finviz.com/" target="_blank" class="btn">📊 Finviz</a>
-    <a href="https://www.cnbc.com/watchlist/" target="_blank" class="btn">📺 CNBC Watchlist</a>
-    <button class="btn" onclick="loadAll()" id="refresh-btn"><span>↻</span> 새로고침</button>
-  </div>
+📸 이미지 입력
+지표 캡쳐 → 자동 인식
 
-  <!-- 업종 등락률 -->
-  <div class="section-label">업종 등락률 (코스피) / 마켓맵</div>
-  <div class="grid2">
-    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;gap:0;">
-      <div class="tab-bar">
-        <button class="tab active" onclick="sectorTab(this,'top')" id="tab-sector-top">📈 상승</button>
-        <button class="tab" onclick="sectorTab(this,'bot')" id="tab-sector-bot">📉 하락</button>
-      </div>
-      <div id="sector-top"><span class="content-empty">로딩 중...</span></div>
-      <div id="sector-bot" style="display:none;"><span class="content-empty">로딩 중...</span></div>
-      <div style="border-top:1px solid #f0f2f5;margin-top:12px;padding-top:10px;">
-        <div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:8px;letter-spacing:.08em;">📰 증권 뉴스 (한국경제 · 연합뉴스 경제 · 세계)</div>
-        <div id="news-list" style="max-height:300px;overflow-y:auto;">
-          <span class="content-empty">뉴스 로딩 중...</span>
-        </div>
-        <div style="margin-top:6px;">
-          <button class="btn" onclick="loadNews()" style="font-size:11px;padding:5px 10px;">↻ 새로고침</button>
-        </div>
-      </div>
-    </div>
-    <div class="content-card" style="margin-bottom:0;padding:12px 16px 0;overflow:hidden;">
-      <div class="tab-bar">
-        <button class="tab active" onclick="mapTab(this,'kospi')" id="tab-map-kospi">코스피</button>
-        <button class="tab" onclick="mapTab(this,'kosdaq')" id="tab-map-kosdaq">코스닥</button>
-      </div>
-      <div style="display:flex;gap:6px;margin-bottom:8px;">
-        <a id="map-link-kospi" href="https://markets.hankyung.com/marketmap/kospi" target="_blank" class="btn btn-primary" style="font-size:11px;padding:6px 10px;">🗺 바로가기</a>
-        <a id="map-link-kosdaq" href="https://markets.hankyung.com/marketmap/kosdaq" target="_blank" class="btn" style="font-size:11px;padding:6px 10px;display:none;">🗺 바로가기</a>
-      </div>
-      <div style="width:100%;height:380px;overflow:hidden;border-radius:8px;position:relative;">
-        <iframe id="map-frame" src="https://markets.hankyung.com/marketmap/kospi"
-          style="width:250%;height:1100px;border:none;position:absolute;top:-220px;left:-75%;transform:scale(0.47);transform-origin:top center;"
-          scrolling="no"></iframe>
-      </div>
-    </div>
-  </div>
+✅ 정리 (대시보드 자동 전송!)
+정리해줘
 
-  <!-- K-Stock 검색 -->
-  <div class="section-label">종목 · 테마 검색</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">🔍 K-Stock 검색</span>
-      <span style="font-size:11px;color:#b2bec3;">종목명 또는 테마명 입력</span>
-    </div>
-    <div class="input-row">
-      <input class="input-line" id="kstock-input" placeholder="예) 삼성전자 / 방산 / 2차전지" style="flex:1;" onkeydown="if(event.key==='Enter')searchKstock()"/>
-      <button class="btn btn-primary" onclick="searchKstock()" id="kstock-btn">검색</button>
-    </div>
-    <div class="grid2" style="margin-top:14px;">
-      <div id="kstock-result"></div>
-      <div id="kstock-chart" style="display:none;">
-        <iframe id="kstock-chart-frame" src="" style="width:100%;height:400px;border:none;border-radius:10px;"></iframe>
-      </div>
-    </div>
-  </div>
+✏️ 부분수정
+수정/코스피/LG디스플레이
+- 새내용
 
-  <!-- 테마 시세 -->
-  <div class="section-label">📈 테마 시세</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📈 테마별 종목 시세</span>
-      <span style="font-size:11px;color:#b2bec3;">DB 기반 일괄 조회</span>
-    </div>
-    <div class="input-row">
-      <input class="input-line" id="theme-input" placeholder="예) 방산 / 2차전지 / 반도체" style="flex:1;"
-        onkeydown="if(event.key==='Enter')searchThemePrices()"/>
-      <button class="btn btn-primary" onclick="searchThemePrices()" id="theme-price-btn">조회</button>
-    </div>
-    <div id="theme-price-result" style="margin-top:14px;"></div>
-  </div>
+🔄 전체수정
+전체수정
+3/16 Check Point✨
+...전체내용..."""
 
-  <!-- 체크포인트 + 노트 2분할 -->
-  <div class="section-label">체크포인트 / 노트</div>
-  <div class="grid2" style="align-items:stretch;margin-bottom:10px;">
-    <!-- 왼쪽: 체크포인트 -->
-    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
-      <div class="content-header">
-        <span class="content-title">☑ 오늘 체크포인트</span>
-        <span class="content-date" id="checkpoint-date"></span>
-      </div>
-      <div class="tab-bar" id="cp-tabs">
-        <button class="tab active" onclick="cpTab(this,'all')">전체</button>
-        <button class="tab" onclick="cpTab(this,'indicator')">📌지표</button>
-        <button class="tab" onclick="cpTab(this,'sector')">📌섹터</button>
-        <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
-        <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
-      </div>
-      <div class="content-body" id="checkpoint-body" style="flex:1;min-height:400px;"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
-    </div>
-    <!-- 오른쪽: 노트 -->
-    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
-      <div class="content-header">
-        <span class="content-title">📓 오늘의 노트</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span class="saved-badge" id="note-badge">✓ 저장됨</span>
-          <button class="btn btn-green" onclick="saveNote()">저장</button>
-          <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-        </div>
-      </div>
-      <div class="richtext-toolbar" data-target="note-rich">
-        <button onclick="rtCmd(this,'bold')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>
-        <button onclick="rtCmd(this,'italic')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>
-        <button onclick="rtCmd(this,'underline')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>
-        <button onclick="rtCmd(this,'strikeThrough')" title="취소선"><s>S</s></button>
-        <span class="rt-sep"></span>
-        <button onclick="rtHighlight(this,'#fff3a0')" title="노란색 하이라이트 (Cmd/Ctrl+Shift+H)" style="background:#fff3a0;">H</button>
-        <button onclick="rtHighlight(this,'#ffd6d6')" title="분홍색 하이라이트" style="background:#ffd6d6;">H</button>
-        <button onclick="rtHighlight(this,'#d6f0ff')" title="파란색 하이라이트" style="background:#d6f0ff;">H</button>
-        <button onclick="rtHighlight(this,'transparent')" title="하이라이트 제거" style="background:white;">✕</button>
-        <span class="rt-sep"></span>
-        <button onclick="rtColor(this,'#d63031')" title="빨간 글자 (Cmd/Ctrl+Shift+R)" style="color:#d63031;">A</button>
-        <button onclick="rtColor(this,'#0984e3')" title="파란 글자 (Cmd/Ctrl+Shift+B)" style="color:#0984e3;">A</button>
-        <button onclick="rtColor(this,'#00b894')" title="초록 글자 (Cmd/Ctrl+Shift+G)" style="color:#00b894;">A</button>
-        <button onclick="rtColor(this,'#2d3436')" title="기본색">A</button>
-        <span class="rt-sep"></span>
-        <button onclick="rtSize(this,'5')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>
-        <button onclick="rtSize(this,'3')" title="기본 크기">A</button>
-        <button onclick="rtSize(this,'2')" title="작은 글씨" style="font-size:10px;">A⁻</button>
-        <span style="flex:1;"></span>
-        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>
-      </div>
-      <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="flex:1;min-height:400px;"></div>
-    </div>
-  </div>
 
-  <!-- 완대본 플로우 -->
-  <div class="section-label">🎙️ ON AIR</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">🎙️ ON AIR</span>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
-        <button class="btn btn-green" onclick="saveWdaebon()">저장</button>
-        <button class="btn" onclick="clearWdaebon()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-      </div>
-    </div>
-    <div style="font-size:11px;color:#7a8099;margin-bottom:8px;">
-      💡 Claude에서 정리한 코너별 플로우를 아래에 붙여넣기 하세요. 각 코너는 <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#1 제목</code>, <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#2 제목</code> 형식으로 구분돼요. <b>탭 내용을 직접 편집할 수 있어요.</b>
-    </div>
-    <textarea class="input-area" id="wdb-input" placeholder="예시:
-#1 오프닝
-이예은 앵커 오프닝 멘트...
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(HELP_TEXT)
 
-#2 미국 증시 브리핑  
-김예림 - 뉴욕 증시 마감 브리핑
 
-#3 앵커 브리핑
-..." style="min-height:120px;font-family:monospace;font-size:12px;" oninput="renderWdb()"></textarea>
-    <div id="wdb-tabs-container" style="margin-top:14px;"></div>
-  </div>
-
-  <!-- 마감일지 -->
-  <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
-  <div class="grid2" style="align-items:start;">
-    <!-- 왼쪽: 마감일지 -->
-    <div class="content-card" style="margin-bottom:0;">
-    <div class="content-header">
-      <span class="content-title">📋 마감일지</span>
-      <span class="content-date" id="closing-date"></span>
-    </div>
-    <div class="tab-bar" id="cl-tabs">
-      <button class="tab active" onclick="clTab(this,'all')">전체</button>
-      <button class="tab" onclick="clTab(this,'figure')">마감수치</button>
-      <button class="tab" onclick="clTab(this,'factor')">지수팩터</button>
-      <button class="tab" onclick="clTab(this,'supply')">수급</button>
-      <button class="tab" onclick="clTab(this,'sector')">특징업종</button>
-      <button class="tab" onclick="clTab(this,'stock')">특징주</button>
-      <button class="tab" onclick="clTab(this,'schedule')">내일일정</button>
-    </div>
-    <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
-    </div>
-    <!-- 오른쪽: PDF 뷰어 -->
-    <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">📄 리서치 리포트</span>
-        <div style="display:flex;gap:6px;">
-          <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
-            + 업로드
-            <input type="file" id="pdf-upload-input" accept=".pdf" multiple style="display:none;" onchange="uploadPDFs(this)"/>
-          </label>
-          <button class="btn" onclick="clearAllPDFs()" style="color:#d63031;border-color:#fab1a0;font-size:12px;padding:6px 12px;">↺ 전체삭제</button>
-        </div>
-      </div>
-      <div class="tab-bar" id="pdf-tabs" style="flex-wrap:wrap;"></div>
-      <div id="pdf-viewer" style="width:100%;height:500px;border-radius:8px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;">
-        <span class="content-empty">PDF를 업로드해주세요</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 주간 캘린더 -->
-  <div class="section-label">📅 주간 일정 캘린더</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📅 이번 주 주요 일정</span>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <span class="saved-badge" id="cal-badge">✓ 저장됨</span>
-        <button class="btn btn-primary" onclick="parseCalendar()" id="cal-btn">✦ AI 정리</button>
-        <button class="btn" onclick="clearCalendar()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-      </div>
-    </div>
-    <textarea class="input-area" id="cal-input" placeholder="주간 일정 텍스트 붙여넣기..." style="min-height:100px;"></textarea>
-    <div id="cal-result" style="margin-top:14px;"></div>
-  </div>
-
-  <!-- 출연자 DB 검색 -->
-  <div class="section-label">👤 출연자 DB 검색</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">👤 출연자 / 발언 검색</span>
-      <a href="https://docs.google.com/spreadsheets/d/1PENAycUyJS0WDhvC8aXHesHxmaXTq724261aWDnsMHc/edit?gid=437534302" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 DB 바로가기</a>
-    </div>
-    <div class="input-row">
-      <input class="input-line" id="guest-input" placeholder="예) ㅇㅇㅇ / 삼성전자 / 반도체" style="flex:1;"
-        onkeydown="if(event.key==='Enter')searchGuest()"/>
-      <button class="btn btn-primary" onclick="searchGuest()" id="guest-btn">검색</button>
-    </div>
-    <div id="guest-result" style="margin-top:14px;"></div>
-  </div>
-
-<!-- 표현 사전 -->
-  <div class="section-label">📖 Encyclopedia</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">📖 Encyclopedia</span>
-      <a href="https://docs.google.com/spreadsheets/d/1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 사전 바로가기</a>
-    </div>
-    <div class="input-row">
-      <input class="input-line" id="encyc-input" placeholder="예) 급락 / 금리인상 / 반도체" style="flex:1;"
-        onkeydown="if(event.key==='Enter')searchEncyc()"/>
-      <button class="btn btn-primary" onclick="searchEncyc()" id="encyc-btn">검색</button>
-    </div>
-    <div id="encyc-result" style="margin-top:14px;"></div>
-  </div>
-
-    <div style="height:32px;"></div>
-</div>
-
-<script>
-function updateClock(){
-  const kst=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
-  const p=n=>String(n).padStart(2,'0');
-  document.getElementById('clock').textContent='KST '+p(kst.getHours())+':'+p(kst.getMinutes())+':'+p(kst.getSeconds());
-}
-setInterval(updateClock,1000);updateClock();
-
-function fmt(v,d=2){
-  if(v===null||v===undefined)return'—';
-  return Number(v).toLocaleString('ko-KR',{minimumFractionDigits:d,maximumFractionDigits:d});
-}
-function cls(c){return c>0?'up':c<0?'dn':'flat';}
-function sgn(c){return c>=0?'+':'';}
-
-function renderM(iv,ic,val,chg){
-  const ve=document.getElementById(iv);
-  const ce=document.getElementById(ic);
-  if(!ve)return;
-  ve.textContent=(val!==null&&val!==undefined)?fmt(val):'—';
-  if(ce&&chg!==null&&chg!==undefined)
-    ce.innerHTML='<span class="'+cls(chg)+'">'+sgn(chg)+fmt(chg)+'%</span>';
-}
-
-function fmtSup(v){
-  if(v===null||v===undefined||v==='')return'—';
-  const n=parseInt(v);if(isNaN(n))return String(v);
-  const a=Math.abs(n);
-  const s=a>=1000000?(a/1000000).toFixed(1)+'M':a>=1000?(a/1000).toFixed(0)+'K':String(a);
-  return(n>=0?'+':'-')+s;
-}
-
-async function loadMarket(){
-  try{
-    const d=await fetch('/api/market').then(r=>r.json());
-    renderM('kospi-val','kospi-chg',d.kospi?.value,parseFloat(d.kospi?.change));
-    renderM('kosdaq-val','kosdaq-chg',d.kosdaq?.value,parseFloat(d.kosdaq?.change));
-    renderM('nasdaq-val','nasdaq-chg',d.nasdaq?.value,d.nasdaq?.change);
-    renderM('dow-val','dow-chg',d.dow?.value,d.dow?.change);
-    renderM('sp500-val','sp500-chg',d.sp500?.value,d.sp500?.change);
-    renderM('ewy-val','ewy-chg',d.ewy?.value,d.ewy?.change);
-    renderM('wti-val','wti-chg',d.wti?.value,d.wti?.change);
-    renderM('brent-val','brent-chg',d.brent?.value,d.brent?.change);
-    renderM('vix-val','vix-chg',d.vix?.value,d.vix?.change);
-    renderM('sox-val','sox-chg',d.sox?.value,d.sox?.change);
-    // 10년물은 소수점 2자리
-    const tnxEl=document.getElementById('tnx-val');
-    const tnxChgEl=document.getElementById('tnx-chg');
-    if(tnxEl&&d.tnx?.value!==null){
-      tnxEl.textContent=fmt(d.tnx?.value)+'%';
-      if(tnxChgEl&&d.tnx?.change!==null)
-        tnxChgEl.innerHTML='<span class="'+cls(d.tnx.change)+'">'+sgn(d.tnx.change)+fmt(d.tnx.change)+'%p</span>';
-    }
-    renderM('usdkrw-val','usdkrw-chg',d.usdkrw?.value,d.usdkrw?.change);
-    renderM('gold-val','gold-chg',d.gold?.value,d.gold?.change);
-    renderM('dxy-val','dxy-chg',d.dxy?.value,d.dxy?.change);
-    renderM('dram-val','dram-chg',d.dram?.value,d.dram?.change);
-    ['kospi','kosdaq'].forEach(m=>{
-      const el=document.getElementById(m+'-sup');if(!el)return;
-      const fv=d[m]?.foreign,iv=d[m]?.institution;
-      const fvn=parseInt(fv),ivn=parseInt(iv);
-      const indv=d[m]?.individual,indvn=parseInt(indv);
-      el.innerHTML='<span>개인 <b class="'+(indvn>0?'up':indvn<0?'dn':'flat')+'">'+fmtSup(indv)+'</b></span>'+
-                   '<span>외인 <b class="'+(fvn>0?'up':fvn<0?'dn':'flat')+'">'+fmtSup(fv)+'</b></span>'+
-                   '<span>기관 <b class="'+(ivn>0?'up':ivn<0?'dn':'flat')+'">'+fmtSup(iv)+'</b></span>';
-    });
-  }catch(e){console.error(e);}
-}
-
-async function loadSector(){
-  try{
-    const d=await fetch('/api/sector').then(r=>r.json());
-    const render=(id,arr)=>{
-      const el=document.getElementById(id);if(!el)return;
-      if(!arr||!arr.length){el.innerHTML='<span class="content-empty">데이터 없음</span>';return;}
-      el.innerHTML=arr.map(e=>'<div class="etf-row"><span class="etf-name">'+e.name+'</span>'+
-        '<span class="etf-chg '+cls(e.change)+'">'+sgn(e.change)+fmt(e.change)+'%</span></div>').join('');
-    };
-    render('sector-top',d.top5);render('sector-bot',d.bot5);
-  }catch(e){}
-}
-
-async function loadPost(type,bid,did){
-  try{
-    const d=await fetch('/api/post/'+type).then(r=>r.json());
-    if(d.content){
-      const b=document.getElementById(bid),dt=document.getElementById(did);
-      if(dt)dt.textContent=d.date||'';
-      if(b){
-        // 현재 선택된 탭 기억
-        let activeTabKey = null;
-        if(type==='checkpoint'){
-          const activeTab = document.querySelector('#cp-tabs .tab.active');
-          if(activeTab){
-            const m = activeTab.getAttribute('onclick')?.match(/cpTab\(this,'(\w+)'\)/);
-            if(m) activeTabKey = m[1];
-          }
-        } else if(type==='closing'){
-          const activeTab = document.querySelector('#cl-tabs .tab.active');
-          if(activeTab){
-            const m = activeTab.getAttribute('onclick')?.match(/clTab\(this,'(\w+)'\)/);
-            if(m) activeTabKey = m[1];
-          }
-        }
-        // 데이터 업데이트
-        if(type==='checkpoint') _cpRaw=d.content;
-        if(type==='closing') _clRaw=d.content;
-        // 탭 복원 또는 기본 'all' 카드 렌더
-        let restoredKey = activeTabKey || 'all';
-        if(type==='checkpoint'){
-          const targetBtn = document.querySelector('#cp-tabs .tab[onclick*="\''+restoredKey+'\'"]') 
-            || document.querySelector('#cp-tabs .tab.active')
-            || document.querySelector('#cp-tabs .tab');
-          if(targetBtn) cpTab(targetBtn, restoredKey);
-          else b.textContent = d.content;
-        } else if(type==='closing'){
-          const targetBtn = document.querySelector('#cl-tabs .tab[onclick*="\''+restoredKey+'\'"]') 
-            || document.querySelector('#cl-tabs .tab.active')
-            || document.querySelector('#cl-tabs .tab');
-          if(targetBtn) clTab(targetBtn, restoredKey);
-          else b.textContent = d.content;
-        } else {
-          b.textContent = d.content;
-        }
-      }
-    }
-  }catch(e){}
-}
-
-async function loadFutures(){
-  try{
-    const d=await fetch('/api/post/futures').then(r=>r.json());
-    if(d.content){
-      const el=document.getElementById('futures-display');
-      if(el)el.textContent=d.content;
-      const inp=document.getElementById('futures-input');
-      if(inp)inp.value=d.content;
-    }
-  }catch(e){}
-}
-
-async function loadAutoFutures(){
-  try{
-    const d=await fetch('/api/market').then(r=>r.json());
-    if(d.futures_auto){
-      const el=document.getElementById('futures-display');
-      const inp=document.getElementById('futures-input');
-      if(el && (!el.textContent || el.textContent==='—')) {
-        el.textContent=d.futures_auto;
-      }
-      const autoEl=document.getElementById('futures-auto-val');
-      if(autoEl) autoEl.textContent='KIS: '+d.futures_auto;
-    }
-  }catch(e){}
-}
-
-async function clearFutures(){
-  await fetch('/api/post/futures',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:'',date:new Date().toISOString().slice(0,10)})});
-  document.getElementById('futures-display').textContent='—';
-  document.getElementById('futures-input').value='';
-}
-
-async function saveFutures(){
-  const val=document.getElementById('futures-input').value.trim();
-  if(!val)return;
-  await fetch('/api/post/futures',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})
-  });
-  document.getElementById('futures-display').textContent=val;
-  const badge=document.getElementById('futures-badge');
-  badge.style.display='inline';
-  setTimeout(()=>badge.style.display='none',2000);
-}
-
-
-
-
-
-
-
-let _reportTab = 'up';
-
-function reportTab(btn, key){
-  document.querySelectorAll('#rtab-up,#rtab-dn,#rtab-feature').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  _reportTab = key;
-  ['up','dn','feature'].forEach(k=>{
-    const el=document.getElementById('report-'+k+'-input');
-    if(el) el.style.display = k===key?'block':'none';
-  });
-}
-
-async function saveReport(){
-  const val=document.getElementById('report-input')?.value.trim();
-  if(val===undefined) return;
-  await fetch('/api/post/report',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
-  const badge=document.getElementById('report-badge');
-  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
-}
-
-async function clearReport(){
-  if(!confirm('리포트 전체 초기화할까요?')) return;
-  await fetch('/api/report/clear',{method:'POST'});
-  ['up','dn','feature'].forEach(k=>{
-    const el=document.getElementById('report-'+k+'-input');
-    if(el) el.value='';
-  });
-}
-
-async function loadReport(){
-  try{
-    const d=await fetch('/api/post/report').then(r=>r.json());
-    if(d.content){
-      const el=document.getElementById('report-input');
-      if(el) el.value=d.content;
-    }
-  }catch(e){}
-}
-
-async function searchKstock(){
-  const q=document.getElementById('kstock-input').value.trim();
-  if(!q)return;
-  const btn=document.getElementById('kstock-btn');
-  const result=document.getElementById('kstock-result');
-  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span>';
-  result.innerHTML='<span class="content-empty">검색 중...</span>';
-  try{
-    const d=await fetch('/api/kstock/search?q='+encodeURIComponent(q)).then(r=>r.json());
-    if(d.error){
-      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-    }else{
-      result.innerHTML='<div class="content-body" style="max-height:400px;">'+d.result.replace(/\n/g,'<br>').replace(/🔗 (https?:\/\/[^\s<]+)/g,'🔗 <a href="$1" target="_blank" style="color:#0984e3;word-break:break-all;">$1</a>')+'</div>';
-      const chartDiv=document.getElementById('kstock-chart');
-      if(d.code && chartDiv){
-        chartDiv.style.display='block';
-        const rawCode = d.code.replace('KRX:','');
-        chartDiv.style.display='block';
-        const priceHtml = d.price ? '<div style=\"padding:14px 16px;background:#f8f9fa;border-radius:10px;margin-bottom:10px;\">'+
-          '<div style=\"font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;margin-bottom:4px;\">현재가</div>'+
-          '<div style=\"font-size:24px;font-weight:700;color:#1a1d23;\">'+d.price+'</div>'+
-          '</div>' : '';
-        chartDiv.innerHTML=priceHtml+
-          '<a href=\"https://m.stock.naver.com/domestic/stock/'+rawCode+'/chart\" target=\"_blank\" class=\"btn btn-primary\" style=\"width:100%;justify-content:center;font-size:14px;padding:16px;margin-bottom:8px;display:flex;\">📈 네이버 증권 차트 →</a>'+
-          '';
-      } else if(chartDiv){ chartDiv.style.display='none'; }
-    }
-  }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
-  btn.classList.remove('ls');btn.innerHTML='검색';
-}
-
-// 투두리스트
-let _todos = [];
-
-function renderTodos(){
-  const list = document.getElementById('todo-list');
-  if(!list) return;
-  if(!_todos.length){
-    list.innerHTML='<div style="color:#b2bec3;font-size:13px;padding:4px 0;">할일이 없어요 😊</div>';
-    return;
-  }
-  list.innerHTML = _todos.map((t,i)=>
-    '<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f2f5;">'+
-    '<input type="checkbox" '+(t.done?'checked':'')+' onchange="toggleTodo('+i+')" style="width:16px;height:16px;cursor:pointer;accent-color:#00b894;"/>'+
-    '<span style="flex:1;font-size:13px;'+(t.done?'text-decoration:line-through;color:#b2bec3;':'')+'" onclick="editTodo('+i+')" >'+t.text+'</span>'+
-    '<button onclick="deleteTodo('+i+')" style="border:none;background:none;color:#dfe6e9;cursor:pointer;font-size:14px;">✕</button>'+
-    '</div>'
-  ).join('');
-}
-
-function toggleTodo(i){
-  _todos[i].done = !_todos[i].done;
-  saveTodoDB();
-  renderTodos();
-}
-
-function deleteTodo(i){
-  _todos.splice(i,1);
-  saveTodoDB();
-  renderTodos();
-}
-
-function editTodo(i){
-  const newText = prompt('수정:', _todos[i].text);
-  if(newText && newText.trim()){
-    _todos[i].text = newText.trim();
-    saveTodoDB();
-    renderTodos();
-  }
-}
-
-function addTodoItem(){
-  const inp = document.getElementById('todo-new-input');
-  const val = inp?.value.trim();
-  if(!val) return;
-  _todos.push({text:val, done:false});
-  inp.value='';
-  saveTodoDB();
-  renderTodos();
-}
-
-async function saveTodoDB(){
-  await fetch('/api/post/todo',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:JSON.stringify(_todos),date:new Date().toISOString().slice(0,10)})});
-  const badge=document.getElementById('todo-badge');
-  if(badge){badge.style.display='inline';setTimeout(()=>badge.style.display='none',1500);}
-}
-
-async function loadTodo(){
-  try{
-    const d=await fetch('/api/post/todo').then(r=>r.json());
-    if(d.content){
-      try{ _todos=JSON.parse(d.content); }catch(e){ _todos=[]; }
-    }
-    renderTodos();
-  }catch(e){ renderTodos(); }
-}
-
-// 메모
-async function saveMemo(){
-  const val=document.getElementById('memo-input').value.trim();
-  await fetch('/api/post/memo',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
-  const badge=document.getElementById('memo-badge');
-  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
-}
-async function clearMemo(){
-  if(!confirm('메모 초기화할까요?'))return;
-  await fetch('/api/memo/clear',{method:'POST'});
-  document.getElementById('memo-input').value='';
-}
-async function loadMemo(){
-  try{
-    const d=await fetch('/api/post/memo').then(r=>r.json());
-    if(d.content) document.getElementById('memo-input').value=d.content;
-  }catch(e){}
-}
-// 모든 fetch 호출에 credentials + X-API-Secret 자동 추가 (PWA 인증 안정화)
-const _origFetch = window.fetch;
-window.fetch = function(url, options){
-  options = options || {};
-  if(typeof url === 'string' && (url.startsWith('/') || url.startsWith(location.origin))){
-    options.credentials = options.credentials || 'include';
-    options.headers = options.headers || {};
-    if(window._API_SECRET){
-      // Headers 객체와 일반 객체 둘 다 처리
-      if(options.headers instanceof Headers){
-        options.headers.set('X-API-Secret', window._API_SECRET);
-      } else {
-        options.headers['X-API-Secret'] = window._API_SECRET;
-      }
-    }
-  }
-  return _origFetch(url, options);
-};
-
-// 리치 텍스트 편집 명령
-function rtGetTarget(btn){
-  const tb = btn.closest('.richtext-toolbar');
-  return document.getElementById(tb.dataset.target);
-}
-function rtCmd(btn, cmd){
-  const el = rtGetTarget(btn);
-  el.focus();
-  document.execCommand(cmd, false, null);
-}
-function rtHighlight(btn, color){
-  const el = rtGetTarget(btn);
-  el.focus();
-  document.execCommand('backColor', false, color);
-}
-function rtColor(btn, color){
-  const el = rtGetTarget(btn);
-  el.focus();
-  document.execCommand('foreColor', false, color);
-}
-function rtSize(btn, size){
-  const el = rtGetTarget(btn);
-  el.focus();
-  document.execCommand('fontSize', false, size);
-}
-
-// 단축키 등록
-document.addEventListener('keydown', function(e){
-  const active = document.activeElement;
-  if(!active || !active.classList.contains('rich-editor')) return;
-  const mod = e.metaKey || e.ctrlKey;
-  if(!mod || !e.shiftKey) return;
-  const key = e.key.toLowerCase();
-  // Cmd+Shift+H = 노란 하이라이트
-  if(key === 'h'){
-    e.preventDefault();
-    document.execCommand('backColor', false, '#fff3a0');
-  }
-  // Cmd+Shift+L = 큰 글자
-  else if(key === 'l'){
-    e.preventDefault();
-    document.execCommand('fontSize', false, '5');
-  }
-  // Cmd+Shift+R = 빨간 글자
-  else if(key === 'r'){
-    e.preventDefault();
-    document.execCommand('foreColor', false, '#d63031');
-  }
-  // Cmd+Shift+B = 파란 글자
-  else if(key === 'b'){
-    e.preventDefault();
-    document.execCommand('foreColor', false, '#0984e3');
-  }
-  // Cmd+Shift+G = 초록 글자
-  else if(key === 'g'){
-    e.preventDefault();
-    document.execCommand('foreColor', false, '#00b894');
-  }
-}, true);
-
-async function saveNote(){
-  const el = document.getElementById('note-rich');
-  const val = el ? el.innerHTML : '';
-  await fetch('/api/post/note',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
-  const badge=document.getElementById('note-badge');
-  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
-}
-
-async function clearNote(){
-  if(!confirm('노트 초기화할까요?'))return;
-  await fetch('/api/note/clear',{method:'POST'});
-  const el = document.getElementById('note-rich');
-  if(el) el.innerHTML='';
-}
-
-async function loadNote(){
-  try{
-    const d=await fetch('/api/post/note').then(r=>r.json());
-    if(d.content){
-      const el = document.getElementById('note-rich');
-      if(el) el.innerHTML = d.content;
-    }
-  }catch(e){}
-}
-
-let _calData = null;
-
-async function saveCalendarDB(){
-  if(!_calData) return;
-  await fetch('/api/calendar/update',{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({data: _calData})
-  });
-}
-
-function renderCalendar(data){
-  _calData = data;
-  const result = document.getElementById('cal-result');
-  if(!data || !data.days || !data.days.length){
-    result.innerHTML='<span class="content-empty">일정이 없어요.</span>';
-    return;
-  }
-  const weekLabel = data.week_label || '';
-  let html = '';
-  if(weekLabel){
-    html += '<div style="font-size:12px;font-weight:700;color:#7a8099;margin-bottom:10px;">' + weekLabel + '</div>';
-  }
-
-  html += '<div class="tab-bar" id="cal-tabs">';
-  data.days.forEach(function(day, i){
-    const active = i===0 ? 'active' : '';
-    const shortDate = day.date.match(/\d+일/) ? day.date.match(/\d+일/)[0] : day.date.slice(0,6);
-    const dayName = day.date.match(/[월화수목금토일]요일/) ? day.date.match(/[월화수목금토일]요일/)[0] : '';
-    html += '<button class="tab ' + active + '" onclick="calTab(this,\'cal-day-' + i + '\')">' + shortDate + ' ' + dayName + '</button>';
-  });
-  html += '</div>';
-
-  data.days.forEach(function(day, i){
-    const display = i===0 ? 'block' : 'none';
-    html += '<div id="cal-day-' + i + '" style="display:' + display + ';">';
-    html += '<div style="font-size:13px;font-weight:700;color:#2d3436;margin-bottom:8px;">' + day.date + '</div>';
-
-    // Items
-    html += '<div id="cal-items-' + i + '">';
-    (day.items||[]).forEach(function(item,j){
-      const safeItem = item.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-      html += '<div style="padding:6px 0;border-bottom:1px solid #f0f2f5;display:flex;align-items:flex-start;gap:6px;">';
-      html += '<span style="color:#e8b84b;font-weight:700;font-size:13px;min-width:18px;">' + (j+1) + '.</span>';
-      html += '<input value="' + safeItem + '" style="flex:1;border:none;background:transparent;font-size:13px;color:#2d3436;padding:0;" onchange="_calData.days[' + i + '].items[' + j + ']=this.value;saveCalendarDB()"/>';
-      html += '<button onclick="deleteCalItem(' + i + ',' + j + ')" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>';
-      html += '</div>';
-    });
-    html += '</div>';
-
-    // Add item
-    html += '<div style="margin-top:8px;">';
-    html += '<input id="cal-new-' + i + '" class="input-area" placeholder="+ 일정 추가..." style="min-height:auto;padding:6px 10px;font-size:13px;" onkeydown="if(event.key===\'Enter\'){addCalItem(' + i + ');event.preventDefault();}"/>';
-    html += '<button class="btn" onclick="addCalItem(' + i + ')" style="margin-top:4px;font-size:12px;padding:5px 10px;">+ 추가</button>';
-    html += '</div>';
-
-    // Guests
-    html += '<div style="margin-top:12px;border-top:1px solid #f0f2f5;padding-top:10px;">';
-    html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:6px;">👤 출연자</div>';
-    html += '<div id="cal-guests-' + i + '">';
-    (day.guests||[]).forEach(function(guest,j){
-      const safeGuest = guest.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-      html += '<div style="padding:5px 0;border-bottom:1px solid #f0f2f5;display:flex;align-items:center;gap:6px;">';
-      html += '<span style="color:#0984e3;font-weight:700;font-size:12px;min-width:18px;">' + (j+1) + '.</span>';
-      html += '<input value="' + safeGuest + '" style="flex:1;border:none;background:transparent;font-size:13px;color:#2d3436;padding:0;" onchange="_calData.days[' + i + '].guests[' + j + ']=this.value;saveCalendarDB()"/>';
-      html += '<button onclick="deleteCalGuest(' + i + ',' + j + ')" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>';
-      html += '</div>';
-    });
-    html += '</div>';
-    html += '<div style="margin-top:6px;display:flex;gap:6px;">';
-    html += '<input id="cal-new-guest-' + i + '" class="input-area" placeholder="+ 출연자 추가... (이름 - 주제)" style="min-height:auto;padding:6px 10px;font-size:13px;flex:1;" onkeydown="if(event.key===\'Enter\'){addCalGuest(' + i + ');event.preventDefault();}"/>';
-    html += '<button class="btn" onclick="addCalGuest(' + i + ')" style="font-size:12px;padding:5px 10px;">+ 추가</button>';
-    html += '</div>';
-    html += '</div>';
-
-    html += '</div>';
-  });
-
-  result.innerHTML = html;
-}
-
-function deleteCalGuest(dayIdx, guestIdx){
-  if(!_calData) return;
-  _calData.days[dayIdx].guests = _calData.days[dayIdx].guests || [];
-  _calData.days[dayIdx].guests.splice(guestIdx, 1);
-  saveCalendarDB();
-  renderCalendar(_calData);
-  const tabs = document.querySelectorAll('#cal-tabs .tab');
-  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
-}
-
-function addCalGuest(dayIdx){
-  const inp = document.getElementById('cal-new-guest-'+dayIdx);
-  const val = inp?.value.trim();
-  if(!val || !_calData) return;
-  _calData.days[dayIdx].guests = _calData.days[dayIdx].guests || [];
-  _calData.days[dayIdx].guests.push(val);
-  saveCalendarDB();
-  renderCalendar(_calData);
-  const tabs = document.querySelectorAll('#cal-tabs .tab');
-  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
-}
-
-function addCalItem(dayIdx){
-  const inp = document.getElementById('cal-new-'+dayIdx);
-  const val = inp?.value.trim();
-  if(!val || !_calData) return;
-  _calData.days[dayIdx].items = _calData.days[dayIdx].items || [];
-  _calData.days[dayIdx].items.push(val);
-  saveCalendarDB();
-  renderCalendar(_calData);
-  const tabs = document.querySelectorAll('#cal-tabs .tab');
-  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
-}
-
-function deleteCalItem(dayIdx, itemIdx){
-  if(!_calData || !_calData.days[dayIdx]) return;
-  _calData.days[dayIdx].items.splice(itemIdx, 1);
-  saveCalendarDB();
-  renderCalendar(_calData);
-  const tabs = document.querySelectorAll('#cal-tabs .tab');
-  if(tabs[dayIdx]) calTab(tabs[dayIdx], 'cal-day-'+dayIdx);
-}
-
-function calTab(btn, panelId){
-  document.querySelectorAll('#cal-tabs .tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  document.querySelectorAll('#cal-result [id^="cal-day-"]').forEach(el=>el.style.display='none');
-  const el=document.getElementById(panelId);
-  if(el)el.style.display='block';
-}
-
-async function parseCalendar(){
-  const raw=document.getElementById('cal-input').value.trim();
-  if(!raw)return;
-  const btn=document.getElementById('cal-btn');
-  btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span> AI 정리 중...';
-  try{
-    const d=await fetch('/api/calendar/parse',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({content:raw})
-    }).then(r=>r.json());
-    if(d.error){
-      document.getElementById('cal-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-    } else {
-      // Merge with existing data if exists
-      if(_calData && _calData.days){
-        d.days.forEach(newDay => {
-          const existing = _calData.days.find(d2 => d2.day_key === newDay.day_key);
-          if(existing){
-            existing.items = [...(existing.items||[]), ...(newDay.items||[])];
-          }
-        });
-        renderCalendar(_calData);
-      } else {
-        renderCalendar(d);
-      }
-      document.getElementById('cal-input').value='';
-      const badge=document.getElementById('cal-badge');
-      badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
-    }
-  }catch(e){document.getElementById('cal-result').innerHTML='<span class="content-empty">오류 발생</span>';}
-  btn.classList.remove('ls');btn.innerHTML='✦ AI 정리';
-}
-
-async function clearCalendar(){
-  if(!confirm('캘린더 초기화할까요?'))return;
-  await fetch('/api/calendar/clear',{method:'POST'});
-  _calData = null;
-  document.getElementById('cal-input').value='';
-  document.getElementById('cal-result').innerHTML='';
-}
-
-// 완대본 플로우 (텍스트 붙여넣기 → 탭 자동 분리)
-let _wdbActiveTab = 0;
-
-function parseWdb(text){
-  if(!text||!text.trim()) return [];
-  // #1 제목, #2 제목 형식으로 분리
-  const lines = text.split('\n');
-  const corners = [];
-  let current = null;
-  for(const line of lines){
-    const match = line.match(/^\s*#(\d+)\s*\.?\s*(.*)/);
-    if(match){
-      if(current) corners.push(current);
-      current = {number:match[1], title:match[2].trim()||'코너'+match[1], body:[], guests:[]};
-    } else if(current){
-      current.body.push(line);
-    } else if(line.trim()){
-      if(!corners.length) corners.push({number:'0', title:'인트로', body:[line], guests:[]});
-      else corners[0].body.push(line);
-    }
-  }
-  if(current) corners.push(current);
-  
-  // 각 코너에서 출연자 추출 ("이름 | 직함" 형식) - 제목 + body 둘 다 검사
-  corners.forEach(c=>{
-    const seen = new Set();
-    c.guests = [];
-    // 검사 대상: title 줄 + body 전체
-    const searchLines = [c.title, ...(c.body || [])];
-    for(const line of searchLines){
-      // 한 줄에 여러 명이 있을 수도 있으니 global 매칭
-      const re = /([가-힣]{2,4})\s*[|｜]\s*([^|｜\n]+?)(?=(?:\s*[+＋]|\s*,|\s*\/|\s*$|\s{2,}))/g;
-      let m;
-      while((m = re.exec(line)) !== null){
-        const name = m[1].trim();
-        let title = m[2].trim();
-        // 앞뒤 불필요한 기호 제거
-        title = title.replace(/[—–\-]+$/, '').replace(/^[—–\-]+/, '').trim();
-        // 뒤쪽 (전화연결) 같은 괄호는 유지하되, 그 뒤 잡 텍스트는 제거
-        title = title.replace(/\s*\(([^)]+)\).*$/, ' ($1)');
-        if(!title) continue;
-        const key = name + '|' + title;
-        if(!seen.has(key)){
-          seen.add(key);
-          c.guests.push({name, title});
-        }
-      }
-      // fallback: 단일 "이름 | 직함" 
-      if(!c.guests.length){
-        const simple = line.match(/([가-힣]{2,4})\s*[|｜]\s*(.+?)(?:\s*[—–\-(]|\s*$)/);
-        if(simple){
-          const name = simple[1].trim();
-          const title = simple[2].trim();
-          const key = name + '|' + title;
-          if(title && !seen.has(key)){
-            seen.add(key);
-            c.guests.push({name, title});
-          }
-        }
-      }
-    }
-    c.guests = c.guests.slice(0, 4);
-  });
-  return corners;
-}
-
-function renderWdb(){
-  const text = document.getElementById('wdb-input').value;
-  const corners = parseWdb(text);
-  const box = document.getElementById('wdb-tabs-container');
-  if(!corners.length){
-    box.innerHTML = '';
-    return;
-  }
-  if(_wdbActiveTab >= corners.length) _wdbActiveTab = 0;
-  let html = '<div class="tab-bar" style="flex-wrap:wrap;">';
-  corners.forEach((c,i)=>{
-    html += '<button class="tab'+(i===_wdbActiveTab?' active':'')+'" onclick="wdbShowTab('+i+')">#'+c.number+' '+c.title+'</button>';
-  });
-  html += '</div>';
-  // 리치 툴바 + 에디터
-  html += '<div class="richtext-toolbar" data-target="wdb-tab-edit">';
-  html += '<button onclick="rtCmd(this,\'bold\')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>';
-  html += '<button onclick="rtCmd(this,\'italic\')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>';
-  html += '<button onclick="rtCmd(this,\'underline\')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>';
-  html += '<button onclick="rtCmd(this,\'strikeThrough\')" title="취소선"><s>S</s></button>';
-  html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtHighlight(this,\'#fff3a0\')" title="노란 하이라이트 (Cmd+Shift+Y)" style="background:#fff3a0;">H</button>';
-  html += '<button onclick="rtHighlight(this,\'#ffd6d6\')" title="분홍 하이라이트" style="background:#ffd6d6;">H</button>';
-  html += '<button onclick="rtHighlight(this,\'#d6f0ff\')" title="파랑 하이라이트" style="background:#d6f0ff;">H</button>';
-  html += '<button onclick="rtHighlight(this,\'transparent\')" title="하이라이트 제거" style="background:white;">✕</button>';
-  html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtColor(this,\'#d63031\')" title="빨간색 (Cmd+Shift+R)" style="color:#d63031;">A</button>';
-  html += '<button onclick="rtColor(this,\'#0984e3\')" title="파랑색" style="color:#0984e3;">A</button>';
-  html += '<button onclick="rtColor(this,\'#00b894\')" title="초록색" style="color:#00b894;">A</button>';
-  html += '<button onclick="rtColor(this,\'#2d3436\')" title="기본색">A</button>';
-  html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtSize(this,\'5\')" title="큰 글씨 (Cmd+Shift+L)" style="font-size:16px;">A⁺</button>';
-  html += '<button onclick="rtSize(this,\'3\')" title="기본 크기">A</button>';
-  html += '<button onclick="rtSize(this,\'2\')" title="작은 글씨" style="font-size:10px;">A⁻</button>';
-  html += '<span style="flex:1;"></span>';
-  html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>';
-  html += '</div>';
-  // 출연자 카드
-  const active = corners[_wdbActiveTab] || corners[0];
-  if(active.guests && active.guests.length){
-    html += '<div style="margin-bottom:10px;padding:10px 14px;background:linear-gradient(135deg,#fdfbf5,#fff);border-radius:10px;border:1.5px solid #e8b84b;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">';
-    html += '<span style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.05em;">👤 출연자</span>';
-    active.guests.forEach(g=>{
-      html += '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:white;border-radius:20px;border:1px solid #e8b84b;">';
-      html += '<span style="font-size:13px;font-weight:700;color:#1a1d23;">'+g.name+'</span>';
-      if(g.title){
-        html += '<span style="font-size:11px;color:#7a8099;">|</span>';
-        html += '<span style="font-size:12px;color:#636e72;">'+g.title+'</span>';
-      }
-      html += '</span>';
-    });
-    html += '</div>';
-  }
-  // 에디터
-  const activeText = (active.body || []).join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
-  // 이미 저장된 html이 있으면 복원
-  const savedHtml = _wdbTabHtml[_wdbActiveTab];
-  const initialHtml = savedHtml || activeText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-  html += '<div class="rich-editor" id="wdb-tab-edit" contenteditable="true" data-idx="'+_wdbActiveTab+'" '+
-    'style="min-height:240px;font-size:13px;line-height:1.7;border-left:3px solid #e8b84b;background:#fdfbf5;" '+
-    'oninput="onWdbTabEdit(this)" data-placeholder="이 코너 내용을 직접 편집하세요...">'+
-    initialHtml + '</div>';
-  box.innerHTML = html;
-}
-
-// 탭별 HTML 저장
-let _wdbTabHtml = {};
-
-function onWdbTabEdit(editor){
-  const idx = parseInt(editor.dataset.idx);
-  // HTML 저장
-  _wdbTabHtml[idx] = editor.innerHTML;
-  // 텍스트만 원본 textarea에 반영 (재파싱용)
-  const plain = editor.innerText;
-  const fullText = document.getElementById('wdb-input').value;
-  const corners = parseWdb(fullText);
-  if(!corners[idx]) return;
-  corners[idx].body = plain.split('\n');
-  const rebuilt = corners.map(c=>{
-    const header = c.number === '0' ? '' : '#'+c.number+' '+c.title;
-    const body = c.body.join('\n');
-    return header ? header+'\n'+body : body;
-  }).join('\n\n');
-  document.getElementById('wdb-input').value = rebuilt;
-  
-  // 자동 저장 (디바운스 — 입력 멈춘 후 2초 뒤)
-  if(window._wdbAutoSaveTimer) clearTimeout(window._wdbAutoSaveTimer);
-  window._wdbAutoSaveTimer = setTimeout(()=>{
-    saveWdaebon();
-  }, 2000);
-}
-
-function wdbShowTab(i){
-  _wdbActiveTab = i;
-  renderWdb();
-}
-
-async function saveWdaebon(){
-  const badge=document.getElementById('wdb-badge');
-  try{
-    // 현재 편집 중인 탭의 HTML도 저장
-    const currentEditor = document.getElementById('wdb-tab-edit');
-    if(currentEditor){
-      const idx = parseInt(currentEditor.dataset.idx);
-      _wdbTabHtml[idx] = currentEditor.innerHTML;
-    }
-    const payload = {
-      text: document.getElementById('wdb-input').value,
-      tabHtml: _wdbTabHtml
-    };
-    const payloadStr = JSON.stringify(payload);
-    
-    // 크기 체크 - 너무 크면 경고
-    if(payloadStr.length > 500000){
-      alert('⚠️ 데이터가 너무 커요 (' + Math.round(payloadStr.length/1024) + 'KB). 일부 내용을 줄이거나 분할 저장해주세요.');
-      return;
-    }
-    
-    const res = await fetch('/api/post/wdaebon',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({content:payloadStr,date:new Date().toISOString().slice(0,10)})
-    });
-    
-    if(!res.ok){
-      const errText = await res.text();
-      alert('❌ 저장 실패 (HTTP ' + res.status + ')\n' + errText.slice(0, 200));
-      return;
-    }
-    
-    badge.textContent = '✓ 저장됨 (' + new Date().toLocaleTimeString('ko-KR', {hour: '2-digit', minute: '2-digit', second: '2-digit'}) + ')';
-    badge.style.display='inline';
-    badge.style.color = '#00b894';
-    setTimeout(()=>badge.style.display='none', 4000);
-  }catch(e){
-    alert('❌ 저장 오류: ' + e.message);
-    badge.textContent = '❌ 저장 실패';
-    badge.style.color = '#d63031';
-    badge.style.display = 'inline';
-  }
-}
-
-async function clearWdaebon(){
-  if(!confirm('완대본 플로우 초기화할까요?'))return;
-  await fetch('/api/post/wdaebon',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:'',date:new Date().toISOString().slice(0,10)})
-  });
-  document.getElementById('wdb-input').value='';
-  document.getElementById('wdb-tabs-container').innerHTML='';
-  _wdbTabHtml = {};
-  _wdbActiveTab = 0;
-}
-
-async function loadWdaebon(){
-  try{
-    const d=await fetch('/api/post/wdaebon').then(r=>r.json());
-    if(d.content){
-      // JSON 형식이면 새 포맷, 아니면 구버전 plaintext
-      let text = d.content;
-      try{
-        const payload = JSON.parse(d.content);
-        if(payload && typeof payload === 'object' && payload.text !== undefined){
-          text = payload.text;
-          _wdbTabHtml = payload.tabHtml || {};
-        }
-      }catch(e){}
-      document.getElementById('wdb-input').value = text;
-      renderWdb();
-    }
-  }catch(e){}
-}
-
-async function loadCalendar(){
-  try{
-    const d=await fetch('/api/post/calendar').then(r=>r.json());
-    if(d.content){
-      const data=JSON.parse(d.content);
-      renderCalendar(data);
-    }
-  }catch(e){}
-}
-
-async function searchEncyclopedia(){
-  const q = document.getElementById('enc-input').value.trim();
-  if(!q) return;
-  const btn = document.getElementById('enc-btn');
-  const result = document.getElementById('enc-result');
-  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
-  result.innerHTML='<span class="content-empty">검색 중...</span>';
-  try{
-    const d = await fetch('/api/encyclopedia/search?q='+encodeURIComponent(q)).then(r=>r.json());
-    if(d.error){
-      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-      return;
-    }
-    if(!d.results || !d.results.length){
-      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
-      return;
-    }
-    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.results.length+'건 검색됨</div>';
-    d.results.forEach(row=>{
-      html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #0984e3;">';
-      const 상황 = row['상황'] || '';
-      const 주제 = row['주제(시장/섹터/종목)'] || row['주제'] || '';
-      const 표현 = row['표현'] || '';
-      if(상황) html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:4px;">📌 '+상황+(주제?' · '+주제:'')+'</div>';
-      if(표현) html += '<div style="font-size:14px;color:#1a1d23;line-height:1.7;">'+표현+'</div>';
-      html += '</div>';
-    });
-    result.innerHTML = html;
-  }catch(e){
-    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
-  }
-  btn.classList.remove('ls'); btn.innerHTML='검색';
-}
-
-// PDF functions
-async function uploadPDFs(input){
-  const files = Array.from(input.files);
-  for(const file of files){
-    const reader = new FileReader();
-    reader.onload = async(e)=>{
-      const base64 = e.target.result.split(',')[1];
-      await fetch('/api/pdf/upload',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name: file.name, data: base64})
-      });
-      loadPDFList();
-    };
-    reader.readAsDataURL(file);
-  }
-  input.value='';
-}
-
-async function loadPDFList(){
-  const d = await fetch('/api/pdf/list').then(r=>r.json());
-  const tabs = document.getElementById('pdf-tabs');
-  if(!d.pdfs||!d.pdfs.length){
-    tabs.innerHTML='';
-    document.getElementById('pdf-viewer').innerHTML='<span class="content-empty">PDF를 업로드해주세요</span>';
-    return;
-  }
-  tabs.innerHTML = d.pdfs.map((p,i)=>
-    '<div style="display:flex;align-items:center;gap:2px;">'+
-    '<button class="tab'+(i===0?' active':'')+'" onclick="showPDF('+p.id+',this)" id="pdf-tab-'+p.id+'">'+p.name.replace('.pdf','').slice(0,15)+'</button>'+
-    '<button onclick="deletePDF('+p.id+')" style="border:none;background:none;color:#b2bec3;cursor:pointer;font-size:12px;padding:0 2px;">✕</button>'+
-    '</div>'
-  ).join('');
-  if(d.pdfs.length) showPDF(d.pdfs[0].id, document.querySelector('#pdf-tabs .tab'));
-}
-
-async function showPDF(id, btn){
-  document.querySelectorAll('#pdf-tabs .tab').forEach(b=>b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
-  const viewer = document.getElementById('pdf-viewer');
-  viewer.innerHTML='<span class="content-empty">로딩 중...</span>';
-  const d = await fetch('/api/pdf/'+id).then(r=>r.json());
-  if(d.data){
-    viewer.innerHTML='<iframe src="data:application/pdf;base64,'+d.data+'" style="width:100%;height:500px;border:none;"></iframe>';
-  }
-}
-
-async function clearAllPDFs(){
-  if(!confirm('리포트 전체 삭제할까요?')) return;
-  const d = await fetch('/api/pdf/list').then(r=>r.json());
-  for(const p of (d.pdfs||[])){
-    await fetch('/api/pdf/'+p.id+'/delete',{method:'POST'});
-  }
-  loadPDFList();
-}
-
-async function deletePDF(id){
-  await fetch('/api/pdf/'+id+'/delete',{method:'POST'});
-  loadPDFList();
-}
-
-async function searchThemePrices(){
-  const q = document.getElementById('theme-input').value.trim();
-  if(!q) return;
-  const btn = document.getElementById('theme-price-btn');
-  const result = document.getElementById('theme-price-result');
-  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span> 조회 중...';
-  result.innerHTML='<span class="content-empty">시세 불러오는 중... (종목 수에 따라 10~20초 소요)</span>';
-  try{
-    const d = await fetch('/api/theme/prices?q='+encodeURIComponent(q)).then(r=>r.json());
-    if(d.error){
-      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-      return;
-    }
-    if(!d.stocks||!d.stocks.length){
-      result.innerHTML='<span class="content-empty">"'+q+'" 테마 종목이 없어요.</span>';
-      return;
-    }
-    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.query+' · '+d.count+'종목</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">';
-    d.stocks.forEach(s=>{
-      const color = s.up === true ? '#d63031' : s.up === false ? '#0984e3' : '#636e72';
-      html += '<div style="padding:10px 12px;background:#f8f9fa;border-radius:10px;border-top:3px solid '+color+';">';
-      html += '<div style="font-size:13px;font-weight:700;color:#1a1d23;margin-bottom:4px;">'+s.name+'</div>';
-      html += '<div style="font-size:16px;font-weight:700;color:#1a1d23;font-family:DM Mono,monospace;">'+s.price+'</div>';
-      html += '<div style="font-size:12px;color:'+color+';font-weight:600;">'+s.change+' ('+s.pct+')</div>';
-      html += '<a href="https://m.stock.naver.com/domestic/stock/'+s.code+'/chart" target="_blank" style="font-size:10px;color:#b2bec3;">차트 →</a>';
-      html += '</div>';
-    });
-    html += '</div>';
-    result.innerHTML = html;
-  }catch(e){
-    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
-  }
-  btn.classList.remove('ls'); btn.innerHTML='조회';
-}
-
-async function searchEncyc(){
-  const q = document.getElementById('encyc-input').value.trim();
-  if(!q) return;
-  const btn = document.getElementById('encyc-btn');
-  const result = document.getElementById('encyc-result');
-  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
-  result.innerHTML='<span class="content-empty">검색 중...</span>';
-  try{
-    const d = await fetch('/api/encyc/search?q='+encodeURIComponent(q)).then(r=>r.json());
-    if(d.error){
-      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-      return;
-    }
-    if(!d.results||!d.results.length){
-      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
-      return;
-    }
-    let html = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">'+d.results.length+'건</div>';
-    d.results.forEach(row=>{
-      html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #0984e3;">';
-      const situation = row['상황'] || '';
-      const topic = row['주제(시장/섹터/종목)'] || row['주제'] || '';
-      const expr = row['표현'] || '';
-      if(situation) html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:4px;">📌 '+situation+'</div>';
-      if(topic) html += '<div style="font-size:12px;color:#0984e3;font-weight:600;margin-bottom:6px;">'+topic+'</div>';
-      if(expr) html += '<div style="font-size:14px;color:#1a1d23;line-height:1.7;">'+expr+'</div>';
-      html += '</div>';
-    });
-    result.innerHTML = html;
-  }catch(e){
-    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
-  }
-  btn.classList.remove('ls'); btn.innerHTML='검색';
-}
-
-async function searchGuest(){
-  const q = document.getElementById('guest-input').value.trim();
-  if(!q) return;
-  const btn = document.getElementById('guest-btn');
-  const result = document.getElementById('guest-result');
-  btn.classList.add('ls'); btn.innerHTML='<span class="spinner"></span>';
-  result.innerHTML='<span class="content-empty">검색 중...</span>';
-  try{
-    const d = await fetch('/api/guest/search?q='+encodeURIComponent(q)).then(r=>r.json());
-    if(d.error){
-      result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-      return;
-    }
-    const sheets = Object.keys(d.results||{});
-    if(!sheets.length){
-      result.innerHTML='<span class="content-empty">검색 결과가 없어요.</span>';
-      return;
-    }
-    let html = '';
-    sheets.forEach(sheet=>{
-      const rows = d.results[sheet];
-      html += '<div style="margin-bottom:20px;">';
-      html += '<div style="font-size:11px;font-weight:700;color:#e8b84b;letter-spacing:.08em;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #e8b84b;">📋 '+sheet+' · '+rows.length+'건</div>';
-      rows.forEach(row=>{
-        html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #e8b84b;">';
-        const entries = Object.entries(row).filter(([k,v])=>v&&v.trim());
-        // 날짜, 이름, 코너 먼저
-        const priority = ['날짜','이름','코너'];
-        const header = priority.map(k=>{
-          const e = entries.find(([ek])=>ek===k);
-          return e ? '<span style="font-size:12px;font-weight:700;color:#1a1d23;">'+e[1]+'</span>' : '';
-        }).filter(Boolean).join(' · ');
-        if(header) html += '<div style="margin-bottom:6px;">'+header+'</div>';
-        // 나머지 내용
-        entries.forEach(([k,v])=>{
-          if(priority.includes(k)) return;
-          html += '<div style="margin-bottom:3px;">';
-          html += '<span style="font-size:11px;color:#7a8099;font-weight:700;margin-right:6px;">'+k+'</span>';
-          if(v.startsWith('http')){
-            html += '<a href="'+v+'" target="_blank" style="font-size:12px;color:#0984e3;">🔗 링크</a>';
-          } else {
-            html += '<span style="font-size:13px;color:#2d3436;">'+v+'</span>';
-          }
-          html += '</div>';
-        });
-        html += '</div>';
-      });
-      html += '</div>';
-    });
-    result.innerHTML = html;
-  }catch(e){
-    result.innerHTML='<span class="content-empty">네트워크 오류</span>';
-  }
-  btn.classList.remove('ls'); btn.innerHTML='검색';
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// 체크포인트 파싱
-const CP_SECTIONS = {
-  indicator: ['📌지표','📌 지표'],
-  sector: ['📌Sector','📌sector','📌 Sector','📌 sector','📌섹터','📌 섹터'],
-  kospi: ['📌코스피','📌 코스피'],
-  kosdaq: ['📌코스닥','📌 코스닥']
-};
-const CL_SECTIONS = {
-  figure: ['📌 마감수치','📌마감수치'],
-  factor: ['📌 지수 팩터','📌지수 팩터','📌 지수팩터','📌지수팩터'],
-  supply: ['📌 수급','📌수급'],
-  sector: ['📌 특징 업종','📌특징 업종','📌특징업종','📌 특징업종'],
-  stock: ['📌 특징주','📌특징주'],
-  schedule: ['📌 내일 일정','📌내일 일정','📌내일일정']
-};
-
-function parseSection(text, headers){
-  if(!text) return null;
-  const lines = text.split('\n');
-  let capturing = false, result = [];
-  for(let i=0;i<lines.length;i++){
-    const l = lines[i];
-    const isHeader = headers.some(h=>l.includes(h));
-    const isOtherHeader = l.match(/^📌/) && !isHeader;
-    if(isHeader){ capturing=true; result.push(l); continue; }
-    if(capturing){
-      if(isOtherHeader) break;
-      result.push(l);
-    }
-  }
-  return result.length ? result.join('\n') : null;
-}
-
-let _cpRaw = '', _clRaw = '';
-
-// 색상 결정 헬퍼
-function _pctColor(pctStr){
-  if(!pctStr) return '';
-  const num = parseFloat(pctStr.replace(/[^\d.\-+]/g,''));
-  if(isNaN(num)) return '';
-  if(num > 0) return '#A32D2D';
-  if(num < 0) return '#185FA5';
-  return 'var(--color-text-secondary)';
-}
-
-// 종목 줄에서 등락률 추출 → HTML로 색칠
-function _formatStockLine(line){
-  // "한화에어로(+2.1%⏰)" 또는 "한화에어로 +2.1%⏰" 패턴
-  const m = line.match(/^(.*?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*([⏰🌙]?)\s*[\)]?\s*(.*)$/);
-  if(m){
-    const [, name, pct, emoji, rest] = m;
-    const color = _pctColor(pct);
-    return name.trim() + ' <span style="color:'+color+';font-weight:500;">'+pct+'</span>' + (emoji||'') + (rest||'');
-  }
-  return line;
-}
-
-// 섹터 파싱 — ✔️ 단위로 카드 분리 (✔️ 로 새 섹터 시작)
-function _parseSectorCards(text){
-  const cards = [];
-  const lines = text.split('\n');
-  let cur = null;
-  for(const raw of lines){
-    let l = raw.trim();
-    if(!l) continue;
-    if(l.startsWith('📌')) continue;
-    // ✔️ 변형 모두 처리 — ✔️, ✔, ✓, ☑️, ☑, ✅
-    if(/^[✔️✔✓☑️☑✅]\s*/.test(l)){
-      if(cur) cards.push(cur);
-      const name = l.replace(/^[✔️✔✓☑️☑✅\s]+/,'').trim();
-      cur = {name: name, bullets:[], stocks:[]};
-      continue;
-    }
-    if(!cur) continue;
-    // "관련 종목:" 줄
-    if(l.includes('관련 종목') || l.includes('관련종목')){
-      const after = l.replace(/^.*?관련\s*종목\s*[:：—-]?\s*/,'').trim();
-      const parts = after.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
-      cur.stocks.push(...parts);
-      continue;
-    }
-    // 한 줄에 • 여러 개 있을 수도 ("• A • B • C")
-    const bulletParts = l.split(/\s+[•・]\s+/).map(s=>s.trim()).filter(Boolean);
-    if(bulletParts.length > 1){
-      bulletParts.forEach(p=>{
-        cur.bullets.push(p.replace(/^[-•・*]\s*/,''));
-      });
-    } else if(/^[-•・*]/.test(l)){
-      cur.bullets.push(l.replace(/^[-•・*]\s*/,''));
-    } else {
-      cur.bullets.push(l);
-    }
-  }
-  if(cur) cards.push(cur);
-  return cards;
-}
-
-// 종목 섹션 파싱 — 빈 줄도 종목 구분자로 사용
-function _parseStockCards(text){
-  const cards = [];
-  const lines = text.split('\n');
-  let cur = null;
-  // 노이즈 키워드 (구독, 광고, 기사 메뉴 등)
-  const noiseKeywords = ['많이 본 기사','기자 구독','구독하기','로그인','회원가입','글자크기','스크랩','광고'];
-  for(const raw of lines){
-    const l = raw.trim();
-    if(!l){
-      // 빈 줄 — 종목 구분자
-      if(cur && (cur.name || cur.bullets.length)){
-        cards.push(cur);
-        cur = null;
-      }
-      continue;
-    }
-    if(l.startsWith('📌')) continue;
-    // 노이즈 줄 제거
-    if(noiseKeywords.some(k => l.includes(k))) continue;
-    if(l.startsWith('-')||l.startsWith('•')){
-      if(!cur) cur = {name:'',bullets:[]};
-      cur.bullets.push(l.replace(/^[-•]\s*/,''));
-    } else {
-      // 새 종목 시작
-      if(cur) cards.push(cur);
-      cur = {name: l, bullets:[]};
-    }
-  }
-  if(cur && (cur.name || cur.bullets.length)) cards.push(cur);
-  return cards;
-}
-
-// 지표 파싱 — 한 줄당 한 카드
-function _parseIndicatorCards(text){
-  const cards = [];
-  const lines = text.split('\n');
-  for(const raw of lines){
-    const l = raw.trim();
-    if(!l) continue;
-    if(l.startsWith('📌')) continue;
-    // "SOX 7,773.13 (+1.34%)" 또는 "SOX +1.34%" 형태
-    const m = l.match(/^([A-Za-z가-힣0-9&·]+(?:\s+[A-Za-z가-힣0-9&·]+)?)\s+(.+)$/);
-    if(m){
-      const [, name, rest] = m;
-      const pctMatch = rest.match(/([+-]?\d+\.?\d*%)/);
-      const valMatch = rest.match(/([\d,]+\.?\d*)\s*(?=\(|$|\s)/);
-      cards.push({
-        name: name.trim(),
-        value: valMatch ? valMatch[1] : '',
-        pct: pctMatch ? pctMatch[1] : '',
-      });
-    } else {
-      cards.push({name:l, value:'', pct:''});
-    }
-  }
-  return cards;
-}
-
-// HTML 빌더들
-function _renderSectorCards(cards){
-  if(!cards.length) return '<span class="content-empty">섹터 정보가 없어요</span>';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
-    cards.map(c=>{
-      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">섹터</div>';
-      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">✔️ '+c.name+'</div>';
-      if(c.bullets.length){
-        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;margin-bottom:8px;">'+c.bullets.map(b=>'• '+b).join('<br>')+'</div>';
-      }
-      if(c.stocks.length){
-        html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-top:6px;">관련 종목</div>';
-        html += '<div style="font-size:12px;line-height:1.6;color:#2d3436;">'+c.stocks.map(_formatStockLine).join('<br>')+'</div>';
-      }
-      html += '</div>';
-      return html;
-    }).join('') + '</div>';
-}
-
-function _renderStockCards(cards, label){
-  if(!cards.length) return '<span class="content-empty">'+label+' 정보가 없어요</span>';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px;">' +
-    cards.map(c=>{
-      const nameHtml = _formatStockLine(c.name);
-      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+label+'</div>';
-      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">'+nameHtml+'</div>';
-      if(c.bullets.length){
-        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+b).join('<br>')+'</div>';
-      }
-      html += '</div>';
-      return html;
-    }).join('') + '</div>';
-}
-
-function _renderIndicatorCards(cards){
-  if(!cards.length) return '<span class="content-empty">지표가 없어요</span>';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">' +
-    cards.map(c=>{
-      const color = _pctColor(c.pct);
-      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:10px 12px;">';
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+c.name+'</div>';
-      if(c.value){
-        html += '<div style="font-size:15px;font-weight:600;color:#1a1d23;font-family:DM Mono,monospace;">'+c.value+'</div>';
-      }
-      if(c.pct){
-        html += '<div style="font-size:12px;color:'+color+';font-weight:500;">'+c.pct+'</div>';
-      }
-      html += '</div>';
-      return html;
-    }).join('') + '</div>';
-}
-
-function cpTab(btn, key){
-  document.querySelectorAll('#cp-tabs .tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  const el = document.getElementById('checkpoint-body');
-  if(!_cpRaw){ return; }
-  if(key==='all'){
-    // 전체는 모든 섹션을 카드로
-    let html = '';
-    const ind = parseSection(_cpRaw, CP_SECTIONS.indicator);
-    if(ind){
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:6px 0 4px;">📌 지표</div>';
-      html += _renderIndicatorCards(_parseIndicatorCards(ind));
-    }
-    const sec = parseSection(_cpRaw, CP_SECTIONS.sector);
-    if(sec){
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 섹터</div>';
-      html += _renderSectorCards(_parseSectorCards(sec));
-    }
-    const kp = parseSection(_cpRaw, CP_SECTIONS.kospi);
-    if(kp){
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 코스피</div>';
-      html += _renderStockCards(_parseStockCards(kp), '코스피');
-    }
-    const kd = parseSection(_cpRaw, CP_SECTIONS.kosdaq);
-    if(kd){
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 코스닥</div>';
-      html += _renderStockCards(_parseStockCards(kd), '코스닥');
-    }
-    if(!html){
-      // 카드가 하나도 안 뜨면 원본 텍스트로 fallback
-      html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
-        _cpRaw.replace(/</g,'&lt;')+'</pre>';
-    }
-    el.innerHTML = html;
-    return;
-  }
-  const sec = parseSection(_cpRaw, CP_SECTIONS[key]||[]);
-  if(!sec){ el.innerHTML = '<span class="content-empty">해당 섹션 없음</span>'; return; }
-  let html = '';
-  if(key==='indicator'){
-    html = _renderIndicatorCards(_parseIndicatorCards(sec));
-  } else if(key==='sector'){
-    html = _renderSectorCards(_parseSectorCards(sec));
-  } else if(key==='kospi'){
-    html = _renderStockCards(_parseStockCards(sec), '코스피');
-  } else if(key==='kosdaq'){
-    html = _renderStockCards(_parseStockCards(sec), '코스닥');
-  }
-  // 카드 빈 경우 원본 텍스트 보여주기
-  if(!html || html.includes('content-empty')){
-    html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
-      sec.replace(/</g,'&lt;')+'</pre>';
-  }
-  el.innerHTML = html;
-}
-
-// 마감일지용 일반 섹션 파서 — 마감수치/지수팩터/수급/내일일정 같은 단순 리스트
-function _parseGenericCards(text){
-  const cards = [];
-  const lines = text.split('\n');
-  let cur = null;
-  for(const raw of lines){
-    const l = raw.trim();
-    if(!l) continue;
-    if(l.startsWith('📌')) continue;
-    // ✔️/✓/☑️ 헤더로 새 카드
-    if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')||l.startsWith('☑️')||l.startsWith('☑')){
-      if(cur) cards.push(cur);
-      cur = {name: l.replace(/^[✔️✔✓☑️☑]\s*/,'').trim(), bullets:[]};
-    } else if(l.startsWith('-')||l.startsWith('•')){
-      if(!cur) cur = {name:'',bullets:[]};
-      cur.bullets.push(l.replace(/^[-•]\s*/,''));
-    } else {
-      // 새 항목 시작
-      if(cur) cards.push(cur);
-      cur = {name: l, bullets:[]};
-    }
-  }
-  if(cur) cards.push(cur);
-  return cards.filter(c=>c.name||c.bullets.length);
-}
-
-function _renderGenericCards(cards, label){
-  if(!cards.length) return '<span class="content-empty">정보가 없어요</span>';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
-    cards.map(c=>{
-      const nameHtml = c.name ? _formatStockLine(c.name) : '';
-      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
-      if(label){
-        html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+label+'</div>';
-      }
-      if(nameHtml){
-        html += '<div style="font-size:13px;font-weight:600;color:#1a1d23;margin-bottom:6px;">'+nameHtml+'</div>';
-      }
-      if(c.bullets.length){
-        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+_formatStockLine(b)).join('<br>')+'</div>';
-      }
-      html += '</div>';
-      return html;
-    }).join('') + '</div>';
-}
-
-// 마감일지 특징주 파싱 — "종목명 (등락률): 사유" 형식
-function _parseMarkerStockCards(text){
-  const cards = [];
-  const lines = text.split('\n');
-  for(const raw of lines){
-    const l = raw.trim();
-    if(!l) continue;
-    if(l.startsWith('📌')) continue;
-    let line = l.replace(/^[-•]\s*/,'');
-    // "종목명 (+5.5%): 사유" 또는 "종목명 +5.5% : 사유" 패턴
-    const m = line.match(/^(.+?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*[\)]?\s*[:：]\s*(.+)$/);
-    if(m){
-      const [, name, pct, reason] = m;
-      cards.push({name: name.trim(), pct: pct.trim(), reason: reason.trim()});
-    } else {
-      // 콜론 없이 그냥 한 줄 — 종목명만 또는 노이즈
-      cards.push({name: line, pct: '', reason: ''});
-    }
-  }
-  return cards;
-}
-
-function _renderMarkerStockCards(cards){
-  if(!cards.length) return '<span class="content-empty">특징주 정보가 없어요</span>';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px;">' +
-    cards.map(c=>{
-      const color = _pctColor(c.pct);
-      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">특징주</div>';
-      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:6px;">'+c.name;
-      if(c.pct) html += ' <span style="color:'+color+';font-size:12px;font-weight:500;">'+c.pct+'</span>';
-      html += '</div>';
-      if(c.reason){
-        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.reason+'</div>';
-      }
-      html += '</div>';
-      return html;
-    }).join('') + '</div>';
-}
-
-function clTab(btn, key){
-  document.querySelectorAll('#cl-tabs .tab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  const el = document.getElementById('closing-body');
-  if(!_clRaw){ return; }
-  if(key==='all'){
-    let html = '';
-    const labels = {figure:'마감수치',factor:'지수 팩터',supply:'수급',sector:'특징 업종',stock:'특징주',schedule:'내일 일정'};
-    for(const k of ['figure','factor','supply','sector','stock','schedule']){
-      const sec = parseSection(_clRaw, CL_SECTIONS[k]||[]);
-      if(sec){
-        html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:'+(html?'14px':'6px')+' 0 4px;">📌 '+labels[k]+'</div>';
-        if(k==='sector') html += _renderGenericCards(_parseGenericCards(sec), '특징 업종');
-        else if(k==='stock') html += _renderMarkerStockCards(_parseMarkerStockCards(sec));
-        else html += _renderGenericCards(_parseGenericCards(sec), '');
-      }
-    }
-    if(!html){
-      html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
-        _clRaw.replace(/</g,'&lt;')+'</pre>';
-    }
-    el.innerHTML = html;
-    return;
-  }
-  const sec = parseSection(_clRaw, CL_SECTIONS[key]||[]);
-  if(!sec){ el.innerHTML = '<span class="content-empty">해당 섹션 없음</span>'; return; }
-  let html = '';
-  if(key==='sector'){
-    html = _renderGenericCards(_parseGenericCards(sec), '특징 업종');
-  } else if(key==='stock'){
-    html = _renderMarkerStockCards(_parseMarkerStockCards(sec));
-  } else {
-    html = _renderGenericCards(_parseGenericCards(sec), '');
-  }
-  if(!html || html.includes('content-empty')){
-    html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
-      sec.replace(/</g,'&lt;')+'</pre>';
-  }
-  el.innerHTML = html;
-}
-
-function mapTab(btn, key){
-  document.querySelectorAll('#tab-map-kospi,#tab-map-kosdaq').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  const isKospi = key==='kospi';
-  document.getElementById('map-frame').src = isKospi
-    ? 'https://markets.hankyung.com/marketmap/kospi'
-    : 'https://markets.hankyung.com/marketmap/kosdaq';
-  document.getElementById('map-link-kospi').style.display = isKospi ? 'inline-flex' : 'none';
-  document.getElementById('map-link-kosdaq').style.display = isKospi ? 'none' : 'inline-flex';
-}
-
-function sectorTab(btn, key){
-  document.querySelectorAll('#tab-sector-top,#tab-sector-bot').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('sector-top').style.display = key==='top' ? 'block' : 'none';
-  document.getElementById('sector-bot').style.display = key==='bot' ? 'block' : 'none';
-}
-
-async function loadNews(){
-  const el = document.getElementById('news-list');
-  if(!el) return;
-  el.innerHTML = '<span class="content-empty">로딩 중...</span>';
-  try{
-    const d = await fetch('/api/news').then(r=>r.json());
-    if(!d.items || !d.items.length){
-      el.innerHTML='<span class="content-empty">뉴스를 불러오지 못했어요.</span>';
-      return;
-    }
-    el.innerHTML = d.items.map(item=>`
-      <div style="padding:8px 0;border-bottom:1px solid #f0f2f5;">
-        <div style="font-size:10px;color:#b2bec3;margin-bottom:3px;">${item.source}</div>
-        <a href="${item.link}" target="_blank" style="font-size:12px;color:#2d3436;line-height:1.5;text-decoration:none;font-weight:500;">${item.title}</a>
-      </div>`).join('');
-  }catch(e){
-    el.innerHTML='<span class="content-empty">오류가 발생했어요.</span>';
-  }
-}
-
-async function loadAll(){
-  const btn=document.getElementById('refresh-btn');
-  if(btn)btn.innerHTML='<span class="spinner"></span>';
-  await Promise.all([loadMarket(),loadSector()]);
-  if(btn)btn.innerHTML='<span>↻</span> 새로고침';
-}
-
-// 초기 로드
-loadAll();
-loadFutures();
-loadAutoFutures();
-loadReport();
-loadNote();
-loadTodo();
-loadMemo();
-loadNews();
-loadCalendar();
-loadPDFList();
-loadWdaebon();
-loadPost('checkpoint','checkpoint-body','checkpoint-date');
-loadPost('closing','closing-body','closing-date');
-loadPost('briefing','briefing-body','briefing-date');
-setInterval(loadAll,5*60*1000);
-// 체크포인트/마감일지/특징리포트 자동 새로고침 (30초)
-setInterval(()=>{
-  loadPost('checkpoint','checkpoint-body','checkpoint-date');
-  loadPost('closing','closing-body','closing-date');
-  loadPost('briefing','briefing-body','briefing-date');
-},30*1000);
-</script>
-<script>
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/service-worker.js');
-}
-</script>
-</body>
-</html>"""
+def main():
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    logger.info(f"🚀 CheckPoint Bot 시작! 대시보드: {'ON' if DASHBOARD_URL else 'OFF'}")
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    main()
