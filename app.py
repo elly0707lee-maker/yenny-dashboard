@@ -369,6 +369,30 @@ def api_get_post(pt):
     return jsonify(get_latest_post(pt) or {})
 
 
+@app.route("/debug/<pt>")
+@requires_auth
+def debug_post(pt):
+    """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
+    valid = ("checkpoint", "closing", "briefing", "wdaebon")
+    if pt not in valid:
+        return Response("invalid", 400)
+    data = get_latest_post(pt) or {}
+    content = data.get("content", "")
+    date = data.get("date", "")
+    # 보이지 않는 문자도 확인 가능하도록
+    import json as _json
+    return Response(
+        f"<html><head><meta charset='utf-8'><title>{pt} debug</title></head><body style='font-family:monospace;padding:20px;'>"
+        f"<h2>{pt} (date: {date})</h2>"
+        f"<p>길이: {len(content)} chars</p>"
+        f"<pre style='background:#f5f5f5;padding:15px;border:1px solid #ddd;white-space:pre-wrap;'>{content.replace('<','&lt;')}</pre>"
+        f"<h3>JSON encoded (특수문자 확인용)</h3>"
+        f"<pre style='background:#fff5f5;padding:15px;border:1px solid #ddd;white-space:pre-wrap;font-size:11px;'>{_json.dumps(content, ensure_ascii=False)}</pre>"
+        f"</body></html>",
+        mimetype="text/html"
+    )
+
+
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
     valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
@@ -2535,32 +2559,40 @@ function _formatStockLine(line){
   return line;
 }
 
-// 섹터 파싱 — ✔️ 단위로 카드 분리 (✔️ 또는 빈 줄로 새 섹터 시작)
+// 섹터 파싱 — ✔️ 단위로 카드 분리 (✔️ 로 새 섹터 시작)
 function _parseSectorCards(text){
   const cards = [];
   const lines = text.split('\n');
   let cur = null;
   for(const raw of lines){
-    const l = raw.trim();
-    if(!l){
-      // 빈 줄로 섹터 끝
+    let l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    // ✔️ 변형 모두 처리 — ✔️, ✔, ✓, ☑️, ☑, ✅
+    if(/^[✔️✔✓☑️☑✅]\s*/.test(l)){
+      if(cur) cards.push(cur);
+      const name = l.replace(/^[✔️✔✓☑️☑✅\s]+/,'').trim();
+      cur = {name: name, bullets:[], stocks:[]};
       continue;
     }
-    if(l.startsWith('📌')) continue;
-    if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')){
-      if(cur) cards.push(cur);
-      cur = {name: l.replace(/^[✔️✔✓]\s*/,'').trim(), bullets:[], stocks:[]};
-    } else if(cur){
-      // "관련 종목:" 줄
-      if(l.includes('관련 종목') || l.includes('관련종목')){
-        const after = l.split(/[:：]/).slice(1).join(':').trim() || l.split('—').slice(1).join('—').trim() || '';
-        const parts = after.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
-        cur.stocks.push(...parts);
-      } else if(l.startsWith('-')||l.startsWith('•')) {
-        cur.bullets.push(l.replace(/^[-•]\s*/,''));
-      } else {
-        cur.bullets.push(l);
-      }
+    if(!cur) continue;
+    // "관련 종목:" 줄
+    if(l.includes('관련 종목') || l.includes('관련종목')){
+      const after = l.replace(/^.*?관련\s*종목\s*[:：—-]?\s*/,'').trim();
+      const parts = after.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+      cur.stocks.push(...parts);
+      continue;
+    }
+    // 한 줄에 • 여러 개 있을 수도 ("• A • B • C")
+    const bulletParts = l.split(/\s+[•・]\s+/).map(s=>s.trim()).filter(Boolean);
+    if(bulletParts.length > 1){
+      bulletParts.forEach(p=>{
+        cur.bullets.push(p.replace(/^[-•・*]\s*/,''));
+      });
+    } else if(/^[-•・*]/.test(l)){
+      cur.bullets.push(l.replace(/^[-•・*]\s*/,''));
+    } else {
+      cur.bullets.push(l);
     }
   }
   if(cur) cards.push(cur);
