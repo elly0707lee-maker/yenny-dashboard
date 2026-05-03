@@ -2480,18 +2480,18 @@ async function searchGuest(){
 
 // 체크포인트 파싱
 const CP_SECTIONS = {
-  indicator: ['📌지표'],
-  sector: ['📌Sector','📌sector'],
-  kospi: ['📌코스피'],
-  kosdaq: ['📌코스닥']
+  indicator: ['📌지표','📌 지표'],
+  sector: ['📌Sector','📌sector','📌 Sector','📌 sector','📌섹터','📌 섹터'],
+  kospi: ['📌코스피','📌 코스피'],
+  kosdaq: ['📌코스닥','📌 코스닥']
 };
 const CL_SECTIONS = {
   figure: ['📌 마감수치','📌마감수치'],
-  factor: ['📌 지수 팩터','📌지수 팩터','📌 지수팩터'],
+  factor: ['📌 지수 팩터','📌지수 팩터','📌 지수팩터','📌지수팩터'],
   supply: ['📌 수급','📌수급'],
-  sector: ['📌 특징 업종','📌특징 업종'],
+  sector: ['📌 특징 업종','📌특징 업종','📌특징업종','📌 특징업종'],
   stock: ['📌 특징주','📌특징주'],
-  schedule: ['📌 내일 일정','📌내일 일정']
+  schedule: ['📌 내일 일정','📌내일 일정','📌내일일정']
 };
 
 function parseSection(text, headers){
@@ -2535,27 +2535,29 @@ function _formatStockLine(line){
   return line;
 }
 
-// 섹터 파싱 — ✔️ 단위로 카드 분리
+// 섹터 파싱 — ✔️ 단위로 카드 분리 (✔️ 또는 빈 줄로 새 섹터 시작)
 function _parseSectorCards(text){
   const cards = [];
   const lines = text.split('\n');
   let cur = null;
   for(const raw of lines){
     const l = raw.trim();
-    if(!l) continue;
+    if(!l){
+      // 빈 줄로 섹터 끝
+      continue;
+    }
     if(l.startsWith('📌')) continue;
-    if(l.startsWith('✔️')||l.startsWith('✔')){
+    if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')){
       if(cur) cards.push(cur);
-      cur = {name: l.replace(/^[✔️✔]\s*/,'').trim(), bullets:[], stocks:[]};
+      cur = {name: l.replace(/^[✔️✔✓]\s*/,'').trim(), bullets:[], stocks:[]};
     } else if(cur){
-      // 관련 종목: 줄
+      // "관련 종목:" 줄
       if(l.includes('관련 종목') || l.includes('관련종목')){
-        const after = l.split(':')[1] || l.split('—')[1] || '';
-        // 콤마로 분리
+        const after = l.split(/[:：]/).slice(1).join(':').trim() || l.split('—').slice(1).join('—').trim() || '';
         const parts = after.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
         cur.stocks.push(...parts);
-      } else if(l.startsWith('-')) {
-        cur.bullets.push(l.replace(/^-\s*/,''));
+      } else if(l.startsWith('-')||l.startsWith('•')) {
+        cur.bullets.push(l.replace(/^[-•]\s*/,''));
       } else {
         cur.bullets.push(l);
       }
@@ -2565,24 +2567,36 @@ function _parseSectorCards(text){
   return cards;
 }
 
-// 종목 섹션 파싱 — 종목명 + bullets 단위로 카드
+// 종목 섹션 파싱 — 빈 줄도 종목 구분자로 사용
 function _parseStockCards(text){
   const cards = [];
   const lines = text.split('\n');
   let cur = null;
+  // 노이즈 키워드 (구독, 광고, 기사 메뉴 등)
+  const noiseKeywords = ['많이 본 기사','기자 구독','구독하기','로그인','회원가입','글자크기','스크랩','광고'];
   for(const raw of lines){
     const l = raw.trim();
-    if(!l) continue;
+    if(!l){
+      // 빈 줄 — 종목 구분자
+      if(cur && (cur.name || cur.bullets.length)){
+        cards.push(cur);
+        cur = null;
+      }
+      continue;
+    }
     if(l.startsWith('📌')) continue;
-    if(l.startsWith('-')){
-      if(cur) cur.bullets.push(l.replace(/^-\s*/,''));
+    // 노이즈 줄 제거
+    if(noiseKeywords.some(k => l.includes(k))) continue;
+    if(l.startsWith('-')||l.startsWith('•')){
+      if(!cur) cur = {name:'',bullets:[]};
+      cur.bullets.push(l.replace(/^[-•]\s*/,''));
     } else {
       // 새 종목 시작
       if(cur) cards.push(cur);
       cur = {name: l, bullets:[]};
     }
   }
-  if(cur) cards.push(cur);
+  if(cur && (cur.name || cur.bullets.length)) cards.push(cur);
   return cards;
 }
 
@@ -2694,26 +2708,119 @@ function cpTab(btn, key){
       html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 코스닥</div>';
       html += _renderStockCards(_parseStockCards(kd), '코스닥');
     }
-    el.innerHTML = html || '<span class="content-empty">데이터 없음</span>';
+    if(!html){
+      // 카드가 하나도 안 뜨면 원본 텍스트로 fallback
+      html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
+        _cpRaw.replace(/</g,'&lt;')+'</pre>';
+    }
+    el.innerHTML = html;
     return;
   }
   const sec = parseSection(_cpRaw, CP_SECTIONS[key]||[]);
   if(!sec){ el.innerHTML = '<span class="content-empty">해당 섹션 없음</span>'; return; }
+  let html = '';
   if(key==='indicator'){
-    el.innerHTML = _renderIndicatorCards(_parseIndicatorCards(sec));
+    html = _renderIndicatorCards(_parseIndicatorCards(sec));
   } else if(key==='sector'){
-    el.innerHTML = _renderSectorCards(_parseSectorCards(sec));
+    html = _renderSectorCards(_parseSectorCards(sec));
   } else if(key==='kospi'){
-    el.innerHTML = _renderStockCards(_parseStockCards(sec), '코스피');
+    html = _renderStockCards(_parseStockCards(sec), '코스피');
   } else if(key==='kosdaq'){
-    el.innerHTML = _renderStockCards(_parseStockCards(sec), '코스닥');
-  } else {
-    el.textContent = sec;
+    html = _renderStockCards(_parseStockCards(sec), '코스닥');
   }
+  // 카드 빈 경우 원본 텍스트 보여주기
+  if(!html || html.includes('content-empty')){
+    html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
+      sec.replace(/</g,'&lt;')+'</pre>';
+  }
+  el.innerHTML = html;
 }
 
-// 마감일지용 일반 섹션 파서 (한 줄 = bullets, 종목명/지표는 자동 감지)
+// 마감일지용 일반 섹션 파서 — 마감수치/지수팩터/수급/내일일정 같은 단순 리스트
 function _parseGenericCards(text){
+  const cards = [];
+  const lines = text.split('\n');
+  let cur = null;
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    // ✔️/✓/☑️ 헤더로 새 카드
+    if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')||l.startsWith('☑️')||l.startsWith('☑')){
+      if(cur) cards.push(cur);
+      cur = {name: l.replace(/^[✔️✔✓☑️☑]\s*/,'').trim(), bullets:[]};
+    } else if(l.startsWith('-')||l.startsWith('•')){
+      if(!cur) cur = {name:'',bullets:[]};
+      cur.bullets.push(l.replace(/^[-•]\s*/,''));
+    } else {
+      // 새 항목 시작
+      if(cur) cards.push(cur);
+      cur = {name: l, bullets:[]};
+    }
+  }
+  if(cur) cards.push(cur);
+  return cards.filter(c=>c.name||c.bullets.length);
+}
+
+function _renderGenericCards(cards, label){
+  if(!cards.length) return '<span class="content-empty">정보가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
+    cards.map(c=>{
+      const nameHtml = c.name ? _formatStockLine(c.name) : '';
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
+      if(label){
+        html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+label+'</div>';
+      }
+      if(nameHtml){
+        html += '<div style="font-size:13px;font-weight:600;color:#1a1d23;margin-bottom:6px;">'+nameHtml+'</div>';
+      }
+      if(c.bullets.length){
+        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+_formatStockLine(b)).join('<br>')+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
+}
+
+// 마감일지 특징주 파싱 — "종목명 (등락률): 사유" 형식
+function _parseMarkerStockCards(text){
+  const cards = [];
+  const lines = text.split('\n');
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    let line = l.replace(/^[-•]\s*/,'');
+    // "종목명 (+5.5%): 사유" 또는 "종목명 +5.5% : 사유" 패턴
+    const m = line.match(/^(.+?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*[\)]?\s*[:：]\s*(.+)$/);
+    if(m){
+      const [, name, pct, reason] = m;
+      cards.push({name: name.trim(), pct: pct.trim(), reason: reason.trim()});
+    } else {
+      // 콜론 없이 그냥 한 줄 — 종목명만 또는 노이즈
+      cards.push({name: line, pct: '', reason: ''});
+    }
+  }
+  return cards;
+}
+
+function _renderMarkerStockCards(cards){
+  if(!cards.length) return '<span class="content-empty">특징주 정보가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px;">' +
+    cards.map(c=>{
+      const color = _pctColor(c.pct);
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">특징주</div>';
+      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:6px;">'+c.name;
+      if(c.pct) html += ' <span style="color:'+color+';font-size:12px;font-weight:500;">'+c.pct+'</span>';
+      html += '</div>';
+      if(c.reason){
+        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.reason+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
+}
   const cards = [];
   const lines = text.split('\n');
   let cur = null;
@@ -2770,23 +2877,33 @@ function clTab(btn, key){
       const sec = parseSection(_clRaw, CL_SECTIONS[k]||[]);
       if(sec){
         html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:'+(html?'14px':'6px')+' 0 4px;">📌 '+labels[k]+'</div>';
-        if(k==='sector') html += _renderSectorCards(_parseSectorCards(sec));
-        else if(k==='stock') html += _renderStockCards(_parseStockCards(sec), '특징주');
+        if(k==='sector') html += _renderGenericCards(_parseGenericCards(sec), '특징 업종');
+        else if(k==='stock') html += _renderMarkerStockCards(_parseMarkerStockCards(sec));
         else html += _renderGenericCards(_parseGenericCards(sec), '');
       }
     }
-    el.innerHTML = html || '<span class="content-empty">데이터 없음</span>';
+    if(!html){
+      html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
+        _clRaw.replace(/</g,'&lt;')+'</pre>';
+    }
+    el.innerHTML = html;
     return;
   }
   const sec = parseSection(_clRaw, CL_SECTIONS[key]||[]);
   if(!sec){ el.innerHTML = '<span class="content-empty">해당 섹션 없음</span>'; return; }
+  let html = '';
   if(key==='sector'){
-    el.innerHTML = _renderSectorCards(_parseSectorCards(sec));
+    html = _renderGenericCards(_parseGenericCards(sec), '특징 업종');
   } else if(key==='stock'){
-    el.innerHTML = _renderStockCards(_parseStockCards(sec), '특징주');
+    html = _renderMarkerStockCards(_parseMarkerStockCards(sec));
   } else {
-    el.innerHTML = _renderGenericCards(_parseGenericCards(sec), '');
+    html = _renderGenericCards(_parseGenericCards(sec), '');
   }
+  if(!html || html.includes('content-empty')){
+    html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
+      sec.replace(/</g,'&lt;')+'</pre>';
+  }
+  el.innerHTML = html;
 }
 
 function mapTab(btn, key){
