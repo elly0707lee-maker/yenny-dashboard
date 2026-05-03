@@ -1471,18 +1471,24 @@ async function loadPost(type,bid,did){
           }
         }
         // 데이터 업데이트
-        b.textContent=d.content;
         if(type==='checkpoint') _cpRaw=d.content;
         if(type==='closing') _clRaw=d.content;
-        // 탭 복원
-        if(activeTabKey && activeTabKey !== 'all'){
-          if(type==='checkpoint'){
-            const targetBtn = document.querySelector('#cp-tabs .tab[onclick*="\''+activeTabKey+'\'"]');
-            if(targetBtn) cpTab(targetBtn, activeTabKey);
-          } else if(type==='closing'){
-            const targetBtn = document.querySelector('#cl-tabs .tab[onclick*="\''+activeTabKey+'\'"]');
-            if(targetBtn) clTab(targetBtn, activeTabKey);
-          }
+        // 탭 복원 또는 기본 'all' 카드 렌더
+        let restoredKey = activeTabKey || 'all';
+        if(type==='checkpoint'){
+          const targetBtn = document.querySelector('#cp-tabs .tab[onclick*="\''+restoredKey+'\'"]') 
+            || document.querySelector('#cp-tabs .tab.active')
+            || document.querySelector('#cp-tabs .tab');
+          if(targetBtn) cpTab(targetBtn, restoredKey);
+          else b.textContent = d.content;
+        } else if(type==='closing'){
+          const targetBtn = document.querySelector('#cl-tabs .tab[onclick*="\''+restoredKey+'\'"]') 
+            || document.querySelector('#cl-tabs .tab.active')
+            || document.querySelector('#cl-tabs .tab');
+          if(targetBtn) clTab(targetBtn, restoredKey);
+          else b.textContent = d.content;
+        } else {
+          b.textContent = d.content;
         }
       }
     }
@@ -2507,14 +2513,249 @@ function parseSection(text, headers){
 
 let _cpRaw = '', _clRaw = '';
 
+// 색상 결정 헬퍼
+function _pctColor(pctStr){
+  if(!pctStr) return '';
+  const num = parseFloat(pctStr.replace(/[^\d.\-+]/g,''));
+  if(isNaN(num)) return '';
+  if(num > 0) return '#A32D2D';
+  if(num < 0) return '#185FA5';
+  return 'var(--color-text-secondary)';
+}
+
+// 종목 줄에서 등락률 추출 → HTML로 색칠
+function _formatStockLine(line){
+  // "한화에어로(+2.1%⏰)" 또는 "한화에어로 +2.1%⏰" 패턴
+  const m = line.match(/^(.*?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*([⏰🌙]?)\s*[\)]?\s*(.*)$/);
+  if(m){
+    const [, name, pct, emoji, rest] = m;
+    const color = _pctColor(pct);
+    return name.trim() + ' <span style="color:'+color+';font-weight:500;">'+pct+'</span>' + (emoji||'') + (rest||'');
+  }
+  return line;
+}
+
+// 섹터 파싱 — ✔️ 단위로 카드 분리
+function _parseSectorCards(text){
+  const cards = [];
+  const lines = text.split('\n');
+  let cur = null;
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    if(l.startsWith('✔️')||l.startsWith('✔')){
+      if(cur) cards.push(cur);
+      cur = {name: l.replace(/^[✔️✔]\s*/,'').trim(), bullets:[], stocks:[]};
+    } else if(cur){
+      // 관련 종목: 줄
+      if(l.includes('관련 종목') || l.includes('관련종목')){
+        const after = l.split(':')[1] || l.split('—')[1] || '';
+        // 콤마로 분리
+        const parts = after.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+        cur.stocks.push(...parts);
+      } else if(l.startsWith('-')) {
+        cur.bullets.push(l.replace(/^-\s*/,''));
+      } else {
+        cur.bullets.push(l);
+      }
+    }
+  }
+  if(cur) cards.push(cur);
+  return cards;
+}
+
+// 종목 섹션 파싱 — 종목명 + bullets 단위로 카드
+function _parseStockCards(text){
+  const cards = [];
+  const lines = text.split('\n');
+  let cur = null;
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    if(l.startsWith('-')){
+      if(cur) cur.bullets.push(l.replace(/^-\s*/,''));
+    } else {
+      // 새 종목 시작
+      if(cur) cards.push(cur);
+      cur = {name: l, bullets:[]};
+    }
+  }
+  if(cur) cards.push(cur);
+  return cards;
+}
+
+// 지표 파싱 — 한 줄당 한 카드
+function _parseIndicatorCards(text){
+  const cards = [];
+  const lines = text.split('\n');
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    // "SOX 7,773.13 (+1.34%)" 또는 "SOX +1.34%" 형태
+    const m = l.match(/^([A-Za-z가-힣0-9&·]+(?:\s+[A-Za-z가-힣0-9&·]+)?)\s+(.+)$/);
+    if(m){
+      const [, name, rest] = m;
+      const pctMatch = rest.match(/([+-]?\d+\.?\d*%)/);
+      const valMatch = rest.match(/([\d,]+\.?\d*)\s*(?=\(|$|\s)/);
+      cards.push({
+        name: name.trim(),
+        value: valMatch ? valMatch[1] : '',
+        pct: pctMatch ? pctMatch[1] : '',
+      });
+    } else {
+      cards.push({name:l, value:'', pct:''});
+    }
+  }
+  return cards;
+}
+
+// HTML 빌더들
+function _renderSectorCards(cards){
+  if(!cards.length) return '<span class="content-empty">섹터 정보가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
+    cards.map(c=>{
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">섹터</div>';
+      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">✔️ '+c.name+'</div>';
+      if(c.bullets.length){
+        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;margin-bottom:8px;">'+c.bullets.map(b=>'• '+b).join('<br>')+'</div>';
+      }
+      if(c.stocks.length){
+        html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-top:6px;">관련 종목</div>';
+        html += '<div style="font-size:12px;line-height:1.6;color:#2d3436;">'+c.stocks.map(_formatStockLine).join('<br>')+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
+}
+
+function _renderStockCards(cards, label){
+  if(!cards.length) return '<span class="content-empty">'+label+' 정보가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px;">' +
+    cards.map(c=>{
+      const nameHtml = _formatStockLine(c.name);
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+label+'</div>';
+      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">'+nameHtml+'</div>';
+      if(c.bullets.length){
+        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+b).join('<br>')+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
+}
+
+function _renderIndicatorCards(cards){
+  if(!cards.length) return '<span class="content-empty">지표가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:8px;">' +
+    cards.map(c=>{
+      const color = _pctColor(c.pct);
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:10px 12px;">';
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+c.name+'</div>';
+      if(c.value){
+        html += '<div style="font-size:15px;font-weight:600;color:#1a1d23;font-family:DM Mono,monospace;">'+c.value+'</div>';
+      }
+      if(c.pct){
+        html += '<div style="font-size:12px;color:'+color+';font-weight:500;">'+c.pct+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
+}
+
 function cpTab(btn, key){
   document.querySelectorAll('#cp-tabs .tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   const el = document.getElementById('checkpoint-body');
   if(!_cpRaw){ return; }
-  if(key==='all'){ el.textContent=_cpRaw; return; }
+  if(key==='all'){
+    // 전체는 모든 섹션을 카드로
+    let html = '';
+    const ind = parseSection(_cpRaw, CP_SECTIONS.indicator);
+    if(ind){
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:6px 0 4px;">📌 지표</div>';
+      html += _renderIndicatorCards(_parseIndicatorCards(ind));
+    }
+    const sec = parseSection(_cpRaw, CP_SECTIONS.sector);
+    if(sec){
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 섹터</div>';
+      html += _renderSectorCards(_parseSectorCards(sec));
+    }
+    const kp = parseSection(_cpRaw, CP_SECTIONS.kospi);
+    if(kp){
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 코스피</div>';
+      html += _renderStockCards(_parseStockCards(kp), '코스피');
+    }
+    const kd = parseSection(_cpRaw, CP_SECTIONS.kosdaq);
+    if(kd){
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📌 코스닥</div>';
+      html += _renderStockCards(_parseStockCards(kd), '코스닥');
+    }
+    el.innerHTML = html || '<span class="content-empty">데이터 없음</span>';
+    return;
+  }
   const sec = parseSection(_cpRaw, CP_SECTIONS[key]||[]);
-  el.textContent = sec || '해당 섹션 없음';
+  if(!sec){ el.innerHTML = '<span class="content-empty">해당 섹션 없음</span>'; return; }
+  if(key==='indicator'){
+    el.innerHTML = _renderIndicatorCards(_parseIndicatorCards(sec));
+  } else if(key==='sector'){
+    el.innerHTML = _renderSectorCards(_parseSectorCards(sec));
+  } else if(key==='kospi'){
+    el.innerHTML = _renderStockCards(_parseStockCards(sec), '코스피');
+  } else if(key==='kosdaq'){
+    el.innerHTML = _renderStockCards(_parseStockCards(sec), '코스닥');
+  } else {
+    el.textContent = sec;
+  }
+}
+
+// 마감일지용 일반 섹션 파서 (한 줄 = bullets, 종목명/지표는 자동 감지)
+function _parseGenericCards(text){
+  const cards = [];
+  const lines = text.split('\n');
+  let cur = null;
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l) continue;
+    if(l.startsWith('📌')) continue;
+    // ✔️/✓ 헤더 또는 종목명/항목명 (불릿 아닌 줄)
+    if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')){
+      if(cur) cards.push(cur);
+      cur = {name: l.replace(/^[✔️✔✓]\s*/,'').trim(), bullets:[]};
+    } else if(l.startsWith('-')||l.startsWith('•')){
+      if(cur) cur.bullets.push(l.replace(/^[-•]\s*/,''));
+      else { cur = {name: '', bullets:[l.replace(/^[-•]\s*/,'')]}; }
+    } else {
+      // 새 항목 시작
+      if(cur) cards.push(cur);
+      cur = {name: l, bullets:[]};
+    }
+  }
+  if(cur) cards.push(cur);
+  return cards.filter(c=>c.name||c.bullets.length);
+}
+
+function _renderGenericCards(cards, label){
+  if(!cards.length) return '<span class="content-empty">'+label+' 정보가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
+    cards.map(c=>{
+      const nameHtml = c.name ? _formatStockLine(c.name) : '';
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
+      if(label){
+        html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">'+label+'</div>';
+      }
+      if(nameHtml){
+        html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">'+nameHtml+'</div>';
+      }
+      if(c.bullets.length){
+        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+_formatStockLine(b)).join('<br>')+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
 }
 
 function clTab(btn, key){
@@ -2522,9 +2763,30 @@ function clTab(btn, key){
   btn.classList.add('active');
   const el = document.getElementById('closing-body');
   if(!_clRaw){ return; }
-  if(key==='all'){ el.textContent=_clRaw; return; }
+  if(key==='all'){
+    let html = '';
+    const labels = {figure:'마감수치',factor:'지수 팩터',supply:'수급',sector:'특징 업종',stock:'특징주',schedule:'내일 일정'};
+    for(const k of ['figure','factor','supply','sector','stock','schedule']){
+      const sec = parseSection(_clRaw, CL_SECTIONS[k]||[]);
+      if(sec){
+        html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:'+(html?'14px':'6px')+' 0 4px;">📌 '+labels[k]+'</div>';
+        if(k==='sector') html += _renderSectorCards(_parseSectorCards(sec));
+        else if(k==='stock') html += _renderStockCards(_parseStockCards(sec), '특징주');
+        else html += _renderGenericCards(_parseGenericCards(sec), '');
+      }
+    }
+    el.innerHTML = html || '<span class="content-empty">데이터 없음</span>';
+    return;
+  }
   const sec = parseSection(_clRaw, CL_SECTIONS[key]||[]);
-  el.textContent = sec || '해당 섹션 없음';
+  if(!sec){ el.innerHTML = '<span class="content-empty">해당 섹션 없음</span>'; return; }
+  if(key==='sector'){
+    el.innerHTML = _renderSectorCards(_parseSectorCards(sec));
+  } else if(key==='stock'){
+    el.innerHTML = _renderStockCards(_parseStockCards(sec), '특징주');
+  } else {
+    el.innerHTML = _renderGenericCards(_parseGenericCards(sec), '');
+  }
 }
 
 function mapTab(btn, key){
