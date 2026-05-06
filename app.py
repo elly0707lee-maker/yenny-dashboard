@@ -540,116 +540,113 @@ def kstock_search():
         res.encoding = "utf-8"
         data = list(csv.DictReader(_io.StringIO(res.text)))
 
+        # 정확 일치 종목명 검색 우선, 없으면 테마 부분 매칭
         stock_hits = [r for r in data if r.get("종목명", "").strip() == query.strip()]
-        # 종목 검색 결과 있으면 테마 검색 생략 (삼성전자 검색 시 삼성전자향 등 안 나오게)
         if stock_hits:
             theme_hits = []
         else:
             theme_hits = [r for r in data if query in r.get("테마", "")]
 
-        lines = []
+        def fetch_price(code):
+            """네이버 모바일 API 가격 조회"""
+            if not code:
+                return None
+            try:
+                pr = requests.get(
+                    f"https://m.stock.naver.com/api/stock/{code}/basic",
+                    headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                pd = pr.json()
+                price = pd.get("closePrice") or pd.get("currentPrice", "")
+                change = pd.get("compareToPreviousClosePrice", "")
+                pct = pd.get("fluctuationsRatio", "")
+                if not price:
+                    return None
+                pct_f = float(str(pct).replace(",", "") or 0)
+                change_i = int(str(change).replace(",", "") or 0)
+                price_i = int(str(price).replace(",", "") or 0)
+                sign = "+" if pct_f >= 0 else ""
+                return {
+                    "price": f"{price_i:,}",
+                    "change": f"{sign}{change_i:,}",
+                    "pct": f"{sign}{pct_f:.2f}",
+                    "up": pct_f >= 0
+                }
+            except:
+                return None
 
+        # 종목 카드 (정확 일치 → 같은 종목명 그룹화 후 테마 여러 개 묶음)
+        stock_cards = []
         if stock_hits:
             from collections import OrderedDict
             grouped = OrderedDict()
             for r in stock_hits:
-                name = r.get("종목명", "")
-                if name not in grouped:
-                    grouped[name] = []
-                grouped[name].append(r)
+                name = r.get("종목명", "").strip()
+                grouped.setdefault(name, []).append(r)
 
             for name, rows in grouped.items():
-                lines.append(f"📌 [{name}]")
-                for r in rows:
-                    theme = r.get("테마", "")
-                    desc = r.get("특징", "").strip()
-                    lines.append(f"☑️ {theme}")
-                    if desc:
-                        lines.append(f"➡️ {desc}")
-                    lines.append("")
-
                 code = rows[0].get("종목코드", "").strip()
-                if code:
-                    try:
-                        pr = requests.get(
-                            f"https://m.stock.naver.com/api/stock/{code}/basic",
-                            headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-                        pd = pr.json()
-                        price = pd.get("closePrice") or pd.get("currentPrice", "")
-                        change = pd.get("compareToPreviousClosePrice", "")
-                        pct = pd.get("fluctuationsRatio", "")
-                        if price:
-                            arrow = "▲" if float(str(change).replace(",","") or 0) >= 0 else "▼"
-                            lines.append(f"📊 {int(str(price).replace(',','')):,}원 {arrow} {pct}%")
-                    except:
-                        pass
-                    lines.append(f"🔗 https://m.stock.naver.com/domestic/stock/{code}/total")
-                lines.append("")
+                themes = [
+                    {"theme": r.get("테마", "").strip(), "desc": r.get("특징", "").strip()}
+                    for r in rows
+                ]
+                stock_cards.append({
+                    "name": name,
+                    "code": code,
+                    "themes": themes,
+                    "price_info": fetch_price(code),
+                    "naver_url": f"https://m.stock.naver.com/domestic/stock/{code}/total" if code else "",
+                    "chart_url": f"https://m.stock.naver.com/domestic/stock/{code}/chart" if code else ""
+                })
 
-        if theme_hits:
-            if stock_hits:
-                lines.append("─" * 20)
-            lines.append(f"🗂 [{query}] 관련 종목")
-            for i, r in enumerate(theme_hits, 1):
-                name = r.get("종목명", "")
-                theme = r.get("테마", "")
-                desc = r.get("특징", "").strip()
-                line = f"{i}. {name}  ({theme})"
-                if desc:
-                    line += f"\n   ➡️ {desc}"
-                lines.append(line)
-            lines.append("")
+        # 테마 카드 (테마 부분 매칭 시 — 가격은 X, 종목 리스트만)
+        theme_cards = []
+        for r in theme_hits:
+            theme_cards.append({
+                "name": r.get("종목명", "").strip(),
+                "code": r.get("종목코드", "").strip(),
+                "theme": r.get("테마", "").strip(),
+                "desc": r.get("특징", "").strip()
+            })
 
+        # 뉴스 (네이버 검색 API)
+        news_latest = []
+        news_relevant = []
         if NAVER_ID and (stock_hits or theme_hits):
             try:
                 import re as _re
-                def clean(t): return _re.sub(r"<[^>]+>","",t)
+                def clean(t): return _re.sub(r"<[^>]+>", "", t or "")
                 nr_date = requests.get(
                     "https://openapi.naver.com/v1/search/news.json",
                     headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
                     params={"query": query, "display": 3, "sort": "date"}, timeout=8)
-                news_date = nr_date.json().get("items", [])
+                date_items = nr_date.json().get("items", [])
                 nr_sim = requests.get(
                     "https://openapi.naver.com/v1/search/news.json",
                     headers={"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET},
                     params={"query": query, "display": 5, "sort": "sim"}, timeout=8)
-                news_sim = nr_sim.json().get("items", [])
-                date_links = {item["link"] for item in news_date}
-                news_sim_unique = [n for n in news_sim if n["link"] not in date_links][:2]
-                if news_date or news_sim_unique:
-                    lines.append(f"📰 뉴스 ({query})")
-                    lines.append("")
-                    if news_date:
-                        lines.append("🕐 최신순")
-                        for i, item in enumerate(news_date, 1):
-                            lines.append(f"{i}. {clean(item['title'])}")
-                            lines.append(f"   🔗 {item['link']}")
-                    if news_sim_unique:
-                        lines.append("")
-                        lines.append("🎯 관련도순")
-                        for i, item in enumerate(news_sim_unique, 1):
-                            lines.append(f"{i}. {clean(item['title'])}")
-                            lines.append(f"   🔗 {item['link']}")
+                sim_items = nr_sim.json().get("items", [])
+                date_links = {it.get("link") for it in date_items}
+                sim_unique = [n for n in sim_items if n.get("link") not in date_links][:2]
+
+                news_latest = [
+                    {"title": clean(it.get("title", "")), "link": it.get("link", ""), "pub": it.get("pubDate", "")}
+                    for it in date_items
+                ]
+                news_relevant = [
+                    {"title": clean(it.get("title", "")), "link": it.get("link", "")}
+                    for it in sim_unique
+                ]
             except:
                 pass
 
-        if not stock_hits and not theme_hits:
-            lines.append(f"❓ '{query}' — 등록된 종목/테마가 없어요.")
-
-        # Get first stock code for chart (TradingView KRX format)
-        first_code = None
-        if stock_hits:
-            from collections import OrderedDict
-            raw_code = stock_hits[0].get("종목코드", "").strip()
-            if raw_code:
-                first_code = "KRX:" + raw_code
-        # Extract price line for display
-        price_display = None
-        for line in lines:
-            if "원" in line and ("▲" in line or "▼" in line):
-                price_display = line.replace("📊 ", "")
-                break
-        return jsonify({"result": "\n".join(lines), "found": bool(stock_hits or theme_hits), "code": first_code, "price": price_display})
+        return jsonify({
+            "query": query,
+            "found": bool(stock_hits or theme_hits),
+            "stock_cards": stock_cards,
+            "theme_cards": theme_cards,
+            "news_latest": news_latest,
+            "news_relevant": news_relevant
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1194,17 +1191,15 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <div class="content-card">
     <div class="content-header">
       <span class="content-title">🔍 K-Stock 검색</span>
-      <span style="font-size:11px;color:#b2bec3;">종목명 또는 테마명 입력</span>
+      <span style="font-size:11px;color:#b2bec3;">종목명 또는 테마명 · DB 직접 조회</span>
     </div>
     <div class="input-row">
       <input class="input-line" id="kstock-input" placeholder="예) 삼성전자 / 방산 / 2차전지" style="flex:1;" onkeydown="if(event.key==='Enter')searchKstock()"/>
       <button class="btn btn-primary" onclick="searchKstock()" id="kstock-btn">검색</button>
     </div>
-    <div class="grid2" style="margin-top:14px;">
+    <div class="grid2" style="margin-top:14px;align-items:start;">
       <div id="kstock-result"></div>
-      <div id="kstock-chart" style="display:none;">
-        <iframe id="kstock-chart-frame" src="" style="width:100%;height:400px;border:none;border-radius:10px;"></iframe>
-      </div>
+      <div id="kstock-news"></div>
     </div>
   </div>
 
@@ -1618,28 +1613,107 @@ async function searchKstock(){
   if(!q)return;
   const btn=document.getElementById('kstock-btn');
   const result=document.getElementById('kstock-result');
+  const newsDiv=document.getElementById('kstock-news');
   btn.classList.add('ls');btn.innerHTML='<span class="spinner"></span>';
   result.innerHTML='<span class="content-empty">검색 중...</span>';
+  if(newsDiv) newsDiv.innerHTML='';
   try{
     const d=await fetch('/api/kstock/search?q='+encodeURIComponent(q)).then(r=>r.json());
     if(d.error){
       result.innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
-    }else{
-      result.innerHTML='<div class="content-body" style="max-height:400px;">'+d.result.replace(/\n/g,'<br>').replace(/🔗 (https?:\/\/[^\s<]+)/g,'🔗 <a href="$1" target="_blank" style="color:#0984e3;word-break:break-all;">$1</a>')+'</div>';
-      const chartDiv=document.getElementById('kstock-chart');
-      if(d.code && chartDiv){
-        chartDiv.style.display='block';
-        const rawCode = d.code.replace('KRX:','');
-        chartDiv.style.display='block';
-        const priceHtml = d.price ? '<div style=\"padding:14px 16px;background:#f8f9fa;border-radius:10px;margin-bottom:10px;\">'+
-          '<div style=\"font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;margin-bottom:4px;\">현재가</div>'+
-          '<div style=\"font-size:24px;font-weight:700;color:#1a1d23;\">'+d.price+'</div>'+
-          '</div>' : '';
-        chartDiv.innerHTML=priceHtml+
-          '<a href=\"https://m.stock.naver.com/domestic/stock/'+rawCode+'/chart\" target=\"_blank\" class=\"btn btn-primary\" style=\"width:100%;justify-content:center;font-size:14px;padding:16px;margin-bottom:8px;display:flex;\">📈 네이버 증권 차트 →</a>'+
-          '';
-      } else if(chartDiv){ chartDiv.style.display='none'; }
+      btn.classList.remove('ls');btn.innerHTML='검색';
+      return;
     }
+    if(!d.found){
+      result.innerHTML='<span class="content-empty">❓ \''+q+'\' — 등록된 종목/테마가 없어요.</span>';
+      btn.classList.remove('ls');btn.innerHTML='검색';
+      return;
+    }
+
+    let html='';
+
+    // 종목 카드 (정확 일치)
+    (d.stock_cards||[]).forEach(card=>{
+      const p=card.price_info;
+      const priceHtml = p
+        ? '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap;">'+
+            '<span style="font-size:22px;font-weight:700;color:#1a1d23;letter-spacing:-0.5px;">'+p.price+'<span style="font-size:14px;font-weight:500;color:#7a8099;">원</span></span>'+
+            '<span style="font-size:13px;font-weight:600;color:'+(p.up?'#d63031':'#0984e3')+';">'+(p.up?'▲':'▼')+' '+p.change+' ('+p.pct+'%)</span>'+
+          '</div>'
+        : '';
+      html += '<div style="padding:14px 16px;background:#f8f9fa;border-radius:10px;margin-bottom:10px;border-left:3px solid #e8b84b;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">';
+      html += '<span style="font-size:15px;font-weight:700;color:#1a1d23;">📌 '+card.name+'</span>';
+      if(card.code){
+        html += '<a href="'+card.naver_url+'" target="_blank" style="font-size:11px;color:#7a8099;font-family:monospace;text-decoration:none;background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #dfe6e9;">'+card.code+'</a>';
+      }
+      html += '</div>';
+      html += priceHtml;
+      // 테마별 특징 묶음
+      (card.themes||[]).forEach(t=>{
+        html += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #dfe6e9;">';
+        html += '<div style="display:inline-block;font-size:11px;font-weight:700;color:#fff;background:#1a1d23;padding:3px 9px;border-radius:5px;margin-bottom:5px;">'+t.theme+'</div>';
+        if(t.desc) html += '<div style="font-size:12.5px;color:#2d3436;line-height:1.55;">'+t.desc+'</div>';
+        html += '</div>';
+      });
+      // 차트/네이버 링크
+      if(card.chart_url){
+        html += '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">';
+        html += '<a href="'+card.chart_url+'" target="_blank" style="font-size:12px;color:#0984e3;font-weight:600;text-decoration:none;">📈 네이버 차트 →</a>';
+        html += '</div>';
+      }
+      html += '</div>';
+    });
+
+    // 테마 카드 (테마 부분 매칭) — 헤더 + 종목 리스트
+    if(d.theme_cards && d.theme_cards.length){
+      html += '<div style="font-size:12px;font-weight:700;color:#7a8099;letter-spacing:.05em;margin:6px 0 10px;padding-bottom:6px;border-bottom:1px solid #dfe6e9;">🗂 \''+q+'\' 관련 종목 · '+d.theme_cards.length+'건</div>';
+      d.theme_cards.forEach((card,i)=>{
+        html += '<div style="padding:11px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:7px;border-left:3px solid #e8b84b;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;">';
+        html += '<span style="font-size:13px;font-weight:700;color:#1a1d23;">'+(i+1)+'. '+card.name+'</span>';
+        if(card.code){
+          html += '<a href="https://m.stock.naver.com/domestic/stock/'+card.code+'/total" target="_blank" style="font-size:11px;color:#7a8099;font-family:monospace;text-decoration:none;background:#fff;padding:2px 7px;border-radius:4px;border:1px solid #dfe6e9;">'+card.code+'</a>';
+        }
+        html += '</div>';
+        if(card.theme){
+          html += '<div style="display:inline-block;font-size:10px;font-weight:700;color:#fff;background:#636e72;padding:2px 7px;border-radius:4px;margin-bottom:4px;">'+card.theme+'</div>';
+        }
+        if(card.desc){
+          html += '<div style="font-size:12px;color:#2d3436;line-height:1.5;margin-top:3px;">'+card.desc+'</div>';
+        }
+        html += '</div>';
+      });
+    }
+
+    result.innerHTML = html || '<span class="content-empty">결과 없음</span>';
+
+    // 뉴스 섹션
+    let newsHtml='';
+    const hasNews = (d.news_latest && d.news_latest.length) || (d.news_relevant && d.news_relevant.length);
+    if(hasNews){
+      newsHtml += '<div style="font-size:12px;font-weight:700;color:#7a8099;letter-spacing:.05em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #dfe6e9;">📰 \''+q+'\' 관련 뉴스</div>';
+      if(d.news_latest && d.news_latest.length){
+        newsHtml += '<div style="font-size:11px;font-weight:700;color:#e8b84b;margin-bottom:6px;">🕐 최신순</div>';
+        d.news_latest.forEach((n,i)=>{
+          newsHtml += '<a href="'+n.link+'" target="_blank" style="display:block;padding:9px 11px;background:#f8f9fa;border-radius:8px;margin-bottom:5px;text-decoration:none;border-left:2px solid #e8b84b;">';
+          newsHtml += '<div style="font-size:12.5px;font-weight:600;color:#1a1d23;line-height:1.4;">'+(i+1)+'. '+n.title+'</div>';
+          newsHtml += '</a>';
+        });
+      }
+      if(d.news_relevant && d.news_relevant.length){
+        newsHtml += '<div style="font-size:11px;font-weight:700;color:#636e72;margin-top:14px;margin-bottom:6px;">🎯 관련도순</div>';
+        d.news_relevant.forEach((n,i)=>{
+          newsHtml += '<a href="'+n.link+'" target="_blank" style="display:block;padding:9px 11px;background:#f8f9fa;border-radius:8px;margin-bottom:5px;text-decoration:none;border-left:2px solid #636e72;">';
+          newsHtml += '<div style="font-size:12.5px;font-weight:600;color:#1a1d23;line-height:1.4;">'+(i+1)+'. '+n.title+'</div>';
+          newsHtml += '</a>';
+        });
+      }
+    } else {
+      newsHtml = '<span class="content-empty">관련 뉴스가 없어요.</span>';
+    }
+    if(newsDiv) newsDiv.innerHTML = newsHtml;
+
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
   btn.classList.remove('ls');btn.innerHTML='검색';
 }
