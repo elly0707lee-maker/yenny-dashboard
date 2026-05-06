@@ -1632,15 +1632,8 @@ async function searchKstock(){
 
     let html='';
 
-    // 종목 카드 (정확 일치)
+    // 종목 카드 (정확 일치) — 좌측에는 종목정보+테마+특징만
     (d.stock_cards||[]).forEach(card=>{
-      const p=card.price_info;
-      const priceHtml = p
-        ? '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap;">'+
-            '<span style="font-size:22px;font-weight:700;color:#1a1d23;letter-spacing:-0.5px;">'+p.price+'<span style="font-size:14px;font-weight:500;color:#7a8099;">원</span></span>'+
-            '<span style="font-size:13px;font-weight:600;color:'+(p.up?'#d63031':'#0984e3')+';">'+(p.up?'▲':'▼')+' '+p.change+' ('+p.pct+'%)</span>'+
-          '</div>'
-        : '';
       html += '<div style="padding:14px 16px;background:#f8f9fa;border-radius:10px;margin-bottom:10px;border-left:3px solid #e8b84b;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">';
       html += '<span style="font-size:15px;font-weight:700;color:#1a1d23;">📌 '+card.name+'</span>';
@@ -1648,7 +1641,6 @@ async function searchKstock(){
         html += '<a href="'+card.naver_url+'" target="_blank" style="font-size:11px;color:#7a8099;font-family:monospace;text-decoration:none;background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #dfe6e9;">'+card.code+'</a>';
       }
       html += '</div>';
-      html += priceHtml;
       // 테마별 특징 묶음
       (card.themes||[]).forEach(t=>{
         html += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #dfe6e9;">';
@@ -1656,12 +1648,6 @@ async function searchKstock(){
         if(t.desc) html += '<div style="font-size:12.5px;color:#2d3436;line-height:1.55;">'+t.desc+'</div>';
         html += '</div>';
       });
-      // 차트/네이버 링크
-      if(card.chart_url){
-        html += '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">';
-        html += '<a href="'+card.chart_url+'" target="_blank" style="font-size:12px;color:#0984e3;font-weight:600;text-decoration:none;">📈 네이버 차트 →</a>';
-        html += '</div>';
-      }
       html += '</div>';
     });
 
@@ -1688,31 +1674,50 @@ async function searchKstock(){
 
     result.innerHTML = html || '<span class="content-empty">결과 없음</span>';
 
-    // 뉴스 섹션
-    let newsHtml='';
+    // 우측 영역: 시세 카드 → 뉴스 순서
+    let sideHtml='';
+
+    // 시세 카드 (종목 정확 일치 시만)
+    (d.stock_cards||[]).forEach(card=>{
+      if(!card.price_info) return;
+      const p=card.price_info;
+      const accent = p.up ? '#d63031' : '#0984e3';
+      sideHtml += '<div style="padding:18px 20px;background:#f8f9fa;border-radius:12px;margin-bottom:12px;border-left:3px solid '+accent+';">';
+      sideHtml += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">';
+      sideHtml += '<span style="font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.08em;">📊 현재가</span>';
+      sideHtml += '<span style="font-size:11px;color:#7a8099;font-family:monospace;">'+card.name+(card.code?' · '+card.code:'')+'</span>';
+      sideHtml += '</div>';
+      sideHtml += '<div style="font-size:30px;font-weight:700;color:#1a1d23;letter-spacing:-0.5px;line-height:1.1;">'+p.price+'<span style="font-size:16px;font-weight:500;color:#7a8099;margin-left:2px;">원</span></div>';
+      sideHtml += '<div style="margin-top:6px;font-size:14px;font-weight:600;color:'+accent+';">'+(p.up?'▲':'▼')+' '+p.change+' ('+p.pct+'%)</div>';
+      if(card.chart_url){
+        sideHtml += '<a href="'+card.chart_url+'" target="_blank" style="display:inline-block;margin-top:12px;font-size:12px;color:#0984e3;font-weight:600;text-decoration:none;background:#fff;padding:6px 12px;border-radius:6px;border:1px solid #dfe6e9;">📈 네이버 차트 →</a>';
+      }
+      sideHtml += '</div>';
+    });
+
+    // 뉴스
     const hasNews = (d.news_latest && d.news_latest.length) || (d.news_relevant && d.news_relevant.length);
     if(hasNews){
-      newsHtml += '<div style="font-size:12px;font-weight:700;color:#7a8099;letter-spacing:.05em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #dfe6e9;">📰 \''+q+'\' 관련 뉴스</div>';
+      sideHtml += '<div style="font-size:12px;font-weight:700;color:#7a8099;letter-spacing:.05em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #dfe6e9;">📰 \''+q+'\' 관련 뉴스</div>';
       if(d.news_latest && d.news_latest.length){
-        newsHtml += '<div style="font-size:11px;font-weight:700;color:#e8b84b;margin-bottom:6px;">🕐 최신순</div>';
+        sideHtml += '<div style="font-size:11px;font-weight:700;color:#e8b84b;margin-bottom:6px;">🕐 최신순</div>';
         d.news_latest.forEach((n,i)=>{
-          newsHtml += '<a href="'+n.link+'" target="_blank" style="display:block;padding:9px 11px;background:#f8f9fa;border-radius:8px;margin-bottom:5px;text-decoration:none;border-left:2px solid #e8b84b;">';
-          newsHtml += '<div style="font-size:12.5px;font-weight:600;color:#1a1d23;line-height:1.4;">'+(i+1)+'. '+n.title+'</div>';
-          newsHtml += '</a>';
+          sideHtml += '<a href="'+n.link+'" target="_blank" style="display:block;padding:9px 11px;background:#f8f9fa;border-radius:8px;margin-bottom:5px;text-decoration:none;border-left:2px solid #e8b84b;">';
+          sideHtml += '<div style="font-size:12.5px;font-weight:600;color:#1a1d23;line-height:1.4;">'+(i+1)+'. '+n.title+'</div>';
+          sideHtml += '</a>';
         });
       }
       if(d.news_relevant && d.news_relevant.length){
-        newsHtml += '<div style="font-size:11px;font-weight:700;color:#636e72;margin-top:14px;margin-bottom:6px;">🎯 관련도순</div>';
+        sideHtml += '<div style="font-size:11px;font-weight:700;color:#636e72;margin-top:14px;margin-bottom:6px;">🎯 관련도순</div>';
         d.news_relevant.forEach((n,i)=>{
-          newsHtml += '<a href="'+n.link+'" target="_blank" style="display:block;padding:9px 11px;background:#f8f9fa;border-radius:8px;margin-bottom:5px;text-decoration:none;border-left:2px solid #636e72;">';
-          newsHtml += '<div style="font-size:12.5px;font-weight:600;color:#1a1d23;line-height:1.4;">'+(i+1)+'. '+n.title+'</div>';
-          newsHtml += '</a>';
+          sideHtml += '<a href="'+n.link+'" target="_blank" style="display:block;padding:9px 11px;background:#f8f9fa;border-radius:8px;margin-bottom:5px;text-decoration:none;border-left:2px solid #636e72;">';
+          sideHtml += '<div style="font-size:12.5px;font-weight:600;color:#1a1d23;line-height:1.4;">'+(i+1)+'. '+n.title+'</div>';
+          sideHtml += '</a>';
         });
       }
-    } else {
-      newsHtml = '<span class="content-empty">관련 뉴스가 없어요.</span>';
     }
-    if(newsDiv) newsDiv.innerHTML = newsHtml;
+
+    if(newsDiv) newsDiv.innerHTML = sideHtml || '<span class="content-empty">관련 정보 없음</span>';
 
   }catch(e){result.innerHTML='<span class="content-empty">네트워크 오류</span>';}
   btn.classList.remove('ls');btn.innerHTML='검색';
