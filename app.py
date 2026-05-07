@@ -1276,7 +1276,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button onclick="rtHighlight(this,'#d6f0ff')" title="파란색 하이라이트" style="background:#d6f0ff;">H</button>
         <button onclick="rtHighlight(this,'transparent')" title="하이라이트 제거" style="background:white;">✕</button>
         <span class="rt-sep"></span>
-        <button onclick="rtColor(this,'#d63031')" title="빨간 글자 (Cmd/Ctrl+Shift+R)" style="color:#d63031;">A</button>
+        <button onclick="rtColor(this,'#d63031')" title="빨간 글자" style="color:#d63031;">A</button>
         <button onclick="rtColor(this,'#0984e3')" title="파란 글자 (Cmd/Ctrl+Shift+B)" style="color:#0984e3;">A</button>
         <button onclick="rtColor(this,'#00b894')" title="초록 글자 (Cmd/Ctrl+Shift+G)" style="color:#00b894;">A</button>
         <button onclick="rtColor(this,'#2d3436')" title="기본색">A</button>
@@ -1285,9 +1285,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button onclick="rtSize(this,'3')" title="기본 크기">A</button>
         <button onclick="rtSize(this,'2')" title="작은 글씨" style="font-size:10px;">A⁻</button>
         <span class="rt-sep"></span>
-        <button onclick="rtBox(this)" title="강조 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">박스</button>
+        <button onclick="rtBox(this,'pink')" title="분홍 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">분홍</button>
+        <button onclick="rtBox(this,'blue')" title="파랑 박스 (Cmd/Ctrl+Shift+E)" style="background:#E6F1FB;color:#185FA5;width:auto;padding:0 8px;font-size:10px;font-weight:700;">파랑</button>
         <span style="flex:1;"></span>
-        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록) ⇧+K(박스)</span>
+        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+B(파랑) ⇧+G(초록) ⇧+K(분홍박스) ⇧+E(파랑박스)</span>
       </div>
       <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="flex:1;min-height:400px;"></div>
     </div>
@@ -1874,7 +1875,7 @@ function rtSize(btn, size){
   el.focus();
   document.execCommand('fontSize', false, size);
 }
-function rtBox(btn){
+function rtBox(btn, color){
   const el = rtGetTarget(btn);
   el.focus();
   const sel = window.getSelection();
@@ -1888,14 +1889,20 @@ function rtBox(btn){
     tmp.appendChild(range.cloneContents());
     inner = tmp.innerHTML;
   }
-  const html = '<div style="background:#FBEAF0;color:#4B1528;padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
+  const styles = {
+    pink: 'background:#FBEAF0;color:#4B1528;',
+    blue: 'background:#E6F1FB;color:#0C447C;'
+  };
+  const style = styles[color] || styles.pink;
+  const html = '<div style="' + style + 'padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
   document.execCommand('insertHTML', false, html);
 }
 
-// 단축키 등록
+// 단축키 등록 (Cmd+Shift+R 빨강은 Chrome 강제 새로고침과 충돌로 제외 — 빨강은 버튼 클릭)
 document.addEventListener('keydown', function(e){
   const active = document.activeElement;
-  if(!active || !active.classList.contains('rich-editor')) return;
+  if(!active) return;
+  if(!active.classList.contains('rich-editor') && !active.classList.contains('q-body')) return;
   const mod = e.metaKey || e.ctrlKey;
   if(!mod || !e.shiftKey) return;
   const key = e.key.toLowerCase();
@@ -1908,11 +1915,6 @@ document.addEventListener('keydown', function(e){
   else if(key === 'l'){
     e.preventDefault();
     document.execCommand('fontSize', false, '5');
-  }
-  // Cmd+Shift+R = 빨간 글자
-  else if(key === 'r'){
-    e.preventDefault();
-    document.execCommand('foreColor', false, '#d63031');
   }
   // Cmd+Shift+B = 파란 글자
   else if(key === 'b'){
@@ -1939,6 +1941,23 @@ document.addEventListener('keydown', function(e){
       inner = tmp.innerHTML;
     }
     const html = '<div style="background:#FBEAF0;color:#4B1528;padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
+    document.execCommand('insertHTML', false, html);
+  }
+  // Cmd+Shift+E = 파란 박스 추가
+  else if(key === 'e'){
+    e.preventDefault();
+    const sel = window.getSelection();
+    if(!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    let inner;
+    if(range.collapsed){
+      inner = '내용 입력...';
+    } else {
+      const tmp = document.createElement('div');
+      tmp.appendChild(range.cloneContents());
+      inner = tmp.innerHTML;
+    }
+    const html = '<div style="background:#E6F1FB;color:#0C447C;padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
     document.execCommand('insertHTML', false, html);
   }
 }, true);
@@ -2231,7 +2250,7 @@ function parseQuestions(bodyLines){
   for(const line of (bodyLines||[])){
     if(qHeaderRe.test(line)){
       if(current) qs.push(current);
-      current = {header: line.trim(), qNum:'', qType:'', qTitle:'', qGuest:'', intent:'', dbLinks:[], body:[]};
+      current = {header: line.trim(), qNum:'', qType:'', qTitle:'', qGuest:'', body:[]};
       // 헤더 파싱
       const m = line.trim().match(/^(Q[\d-]+)\s*\.\s*(?:\[([^\]]+?)\])?\s*([^\[]+?)(?:\s*\[([^\]]+?)\])?\s*$/);
       if(m){
@@ -2244,14 +2263,8 @@ function parseQuestions(bodyLines){
         current.qTitle = line.replace(/^\s*Q[\d-]+\s*\.\s*/, '').trim();
       }
     } else if(current){
-      const trimmed = line.trim();
-      if(trimmed.startsWith('🎯')){
-        current.intent = trimmed.replace(/^🎯\s*/, '').replace(/^질문\s*의도\s*[:：]\s*/, '');
-      } else if(trimmed.startsWith('▶')){
-        current.dbLinks.push(trimmed.replace(/^▶\s*/, ''));
-      } else {
-        current.body.push(line);
-      }
+      // 의도(🎯), DB연결(▶) 라인도 본문에 그대로 포함 → 사용자가 편집 가능
+      current.body.push(line);
     }
   }
   if(current) qs.push(current);
@@ -2262,10 +2275,14 @@ function parseQuestions(bodyLines){
   });
   return qs;
 }
-// 카드 본문 편집 시 textarea 반영
+// 카드 본문 편집 시 textarea 반영 + HTML 캐시
 function onQCardEdit(editor){
   const tabIdx = parseInt(editor.dataset.tabIdx);
-  if(isNaN(tabIdx)) return;
+  const qIdx = parseInt(editor.dataset.qIdx);
+  if(isNaN(tabIdx) || isNaN(qIdx)) return;
+  // HTML 캐시 (박스/색깔/하이라이트 등 시각 요소 보존용)
+  if(!_wdbCardHtml[tabIdx]) _wdbCardHtml[tabIdx] = {};
+  _wdbCardHtml[tabIdx][qIdx] = editor.innerHTML;
   const grid = document.getElementById('wdb-q-grid');
   if(!grid) return;
   const cards = grid.querySelectorAll('.q-card');
@@ -2273,17 +2290,13 @@ function onQCardEdit(editor){
   const newBodyLines = [];
   cards.forEach(card=>{
     const header = card.dataset.rawHeader || '';
-    const intent = card.dataset.rawIntent || '';
-    const dbLinks = (card.dataset.rawDbLinks||'').split('||').filter(s=>s);
     const bodyEl = card.querySelector('.q-body');
     const bodyText = bodyEl ? bodyEl.innerText : '';
     if(header) newBodyLines.push(header);
-    if(intent) newBodyLines.push('🎯 ' + intent);
-    dbLinks.forEach(dl=>newBodyLines.push('▶ ' + dl));
     bodyText.split('\n').forEach(l=>newBodyLines.push(l));
     newBodyLines.push('');  // 카드 사이 빈 줄
   });
-  // textarea 재구성
+  // textarea 재구성 (.value 직접 설정 — input 이벤트 미발동 → 캐시 안전)
   const fullText = document.getElementById('wdb-input').value;
   const corners = parseWdb(fullText);
   if(!corners[tabIdx]) return;
@@ -2320,23 +2333,24 @@ function renderWdb(){
   html += '<button onclick="rtCmd(this,\'underline\')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>';
   html += '<button onclick="rtCmd(this,\'strikeThrough\')" title="취소선"><s>S</s></button>';
   html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtHighlight(this,\'#fff3a0\')" title="노란 하이라이트 (Cmd+Shift+Y)" style="background:#fff3a0;">H</button>';
+  html += '<button onclick="rtHighlight(this,\'#fff3a0\')" title="노란 하이라이트 (Cmd/Ctrl+Shift+H)" style="background:#fff3a0;">H</button>';
   html += '<button onclick="rtHighlight(this,\'#ffd6d6\')" title="분홍 하이라이트" style="background:#ffd6d6;">H</button>';
   html += '<button onclick="rtHighlight(this,\'#d6f0ff\')" title="파랑 하이라이트" style="background:#d6f0ff;">H</button>';
   html += '<button onclick="rtHighlight(this,\'transparent\')" title="하이라이트 제거" style="background:white;">✕</button>';
   html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtColor(this,\'#d63031\')" title="빨간색 (Cmd+Shift+R)" style="color:#d63031;">A</button>';
-  html += '<button onclick="rtColor(this,\'#0984e3\')" title="파랑색" style="color:#0984e3;">A</button>';
-  html += '<button onclick="rtColor(this,\'#00b894\')" title="초록색" style="color:#00b894;">A</button>';
+  html += '<button onclick="rtColor(this,\'#d63031\')" title="빨간색 (단축키 없음 — 클릭)" style="color:#d63031;">A</button>';
+  html += '<button onclick="rtColor(this,\'#0984e3\')" title="파랑색 (Cmd/Ctrl+Shift+B)" style="color:#0984e3;">A</button>';
+  html += '<button onclick="rtColor(this,\'#00b894\')" title="초록색 (Cmd/Ctrl+Shift+G)" style="color:#00b894;">A</button>';
   html += '<button onclick="rtColor(this,\'#2d3436\')" title="기본색">A</button>';
   html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtSize(this,\'5\')" title="큰 글씨 (Cmd+Shift+L)" style="font-size:16px;">A⁺</button>';
+  html += '<button onclick="rtSize(this,\'5\')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>';
   html += '<button onclick="rtSize(this,\'3\')" title="기본 크기">A</button>';
   html += '<button onclick="rtSize(this,\'2\')" title="작은 글씨" style="font-size:10px;">A⁻</button>';
   html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtBox(this)" title="강조 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">박스</button>';
+  html += '<button onclick="rtBox(this,\'pink\')" title="분홍 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">분홍</button>';
+  html += '<button onclick="rtBox(this,\'blue\')" title="파랑 박스 (Cmd/Ctrl+Shift+E)" style="background:#E6F1FB;color:#185FA5;width:auto;padding:0 8px;font-size:10px;font-weight:700;">파랑</button>';
   html += '<span style="flex:1;"></span>';
-  html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록) ⇧+K(박스)</span>';
+  html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+B(파랑) ⇧+G(초록) ⇧+K(분홍박스) ⇧+E(파랑박스)</span>';
   html += '</div>';
   // 출연자 카드
   const active = corners[_wdbActiveTab] || corners[0];
@@ -2365,9 +2379,7 @@ function renderWdb(){
       const typeTagCls = typeCls === 'qt-trust' ? 't-trust' : typeCls === 'qt-connect' ? 't-connect' : typeCls === 'qt-impact' ? 't-impact' : '';
       html += '<div class="q-card '+typeCls+'"'
         + ' data-q-idx="'+qIdx+'"'
-        + ' data-raw-header="'+escapeAttr(q.header)+'"'
-        + ' data-raw-intent="'+escapeAttr(q.intent)+'"'
-        + ' data-raw-db-links="'+escapeAttr((q.dbLinks||[]).join('||'))+'">';
+        + ' data-raw-header="'+escapeAttr(q.header)+'">';
       // 헤더 row
       html += '<div class="q-card-head">';
       if(q.qNum) html += '<span class="q-num">'+escapeHtml(q.qNum)+'</span>';
@@ -2376,14 +2388,25 @@ function renderWdb(){
       html += '</div>';
       // 제목
       if(q.qTitle) html += '<div class="q-title">'+escapeHtml(q.qTitle)+'</div>';
-      // 메타라인 (의도 / DB연결)
-      if(q.intent) html += '<div class="q-meta"><span class="q-meta-icon">🎯</span>'+escapeHtml(q.intent)+'</div>';
-      (q.dbLinks||[]).forEach(dl=>{
-        html += '<div class="q-meta"><span class="q-meta-icon">▶</span>'+escapeHtml(dl)+'</div>';
-      });
-      // 본문 (contenteditable)
+      // 본문 (contenteditable) — 의도/DB연결도 본문에 포함되어 자유 편집 가능
       const bodyText = (q.body||[]).join('\n');
-      const bodyHtml = escapeHtml(bodyText).replace(/\n/g,'<br>');
+      const cachedHtml = (_wdbCardHtml[_wdbActiveTab] || {})[qIdx];
+      let bodyHtml;
+      if(cachedHtml !== undefined){
+        // 캐시 검증: 캐시 텍스트가 현재 plain text와 대략 일치할 때만 사용 (textarea 직접 수정 케이스 방어)
+        const tmp = document.createElement('div');
+        tmp.innerHTML = cachedHtml;
+        const cachedText = (tmp.innerText||'').replace(/\s+/g,'').trim();
+        const currentText = bodyText.replace(/\s+/g,'').trim();
+        if(cachedText === currentText){
+          bodyHtml = cachedHtml;
+        } else {
+          bodyHtml = escapeHtml(bodyText).replace(/\n/g,'<br>');
+          delete _wdbCardHtml[_wdbActiveTab][qIdx];
+        }
+      } else {
+        bodyHtml = escapeHtml(bodyText).replace(/\n/g,'<br>');
+      }
       html += '<div class="q-body" contenteditable="true"'
         + ' data-q-idx="'+qIdx+'" data-tab-idx="'+_wdbActiveTab+'"'
         + ' oninput="onQCardEdit(this)"'
@@ -2406,6 +2429,7 @@ function renderWdb(){
 
 // 탭별 HTML 저장
 let _wdbTabHtml = {};
+let _wdbCardHtml = {};  // {tabIdx: {qIdx: innerHTML}} — Q카드 본문 HTML 캐시 (박스/색깔 보존용)
 
 function onWdbTabEdit(editor){
   const idx = parseInt(editor.dataset.idx);
@@ -2447,7 +2471,8 @@ async function saveWdaebon(){
     }
     const payload = {
       text: document.getElementById('wdb-input').value,
-      tabHtml: _wdbTabHtml
+      tabHtml: _wdbTabHtml,
+      cardHtml: _wdbCardHtml
     };
     const payloadStr = JSON.stringify(payload);
     
@@ -2490,6 +2515,7 @@ async function clearWdaebon(){
   document.getElementById('wdb-input').value='';
   document.getElementById('wdb-tabs-container').innerHTML='';
   _wdbTabHtml = {};
+  _wdbCardHtml = {};
   _wdbActiveTab = 0;
 }
 
@@ -2504,6 +2530,7 @@ async function loadWdaebon(){
         if(payload && typeof payload === 'object' && payload.text !== undefined){
           text = payload.text;
           _wdbTabHtml = payload.tabHtml || {};
+          _wdbCardHtml = payload.cardHtml || {};
         }
       }catch(e){}
       document.getElementById('wdb-input').value = text;
