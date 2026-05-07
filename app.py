@@ -1050,6 +1050,25 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 .tab.active{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
 .tab:hover:not(.active){background:#fff;color:#1a1d23}
 .futures-val{font-size:28px;font-weight:700;color:#1a1d23;font-family:'DM Mono',monospace;margin-bottom:12px}
+.q-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-top:10px}
+.q-card{background:#fff;border:0.5px solid #dfe6e9;border-left:3px solid #888;border-radius:0;padding:13px 15px;display:flex;flex-direction:column;gap:9px}
+.q-card.qt-2dan{border-left-color:#888}
+.q-card.qt-trust{border-left-color:#185FA5}
+.q-card.qt-connect{border-left-color:#534AB7}
+.q-card.qt-impact{border-left-color:#D85A30}
+.q-card-head{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.q-num{font-size:11px;font-weight:500;background:#1a1d23;color:#fff;padding:2px 8px;border-radius:4px;font-family:'DM Mono',monospace}
+.q-type{font-size:11px;padding:2px 8px;border-radius:4px;background:#f1efe8;color:#444}
+.q-type.t-trust{background:#E6F1FB;color:#0C447C}
+.q-type.t-connect{background:#EEEDFE;color:#3C3489}
+.q-type.t-impact{background:#FAECE7;color:#712B13}
+.q-guest{font-size:11px;padding:2px 8px;border-radius:999px;background:#fdfbf5;border:0.5px solid #e8b84b;color:#1a1d23}
+.q-title{font-size:13px;font-weight:600;color:#1a1d23;line-height:1.45}
+.q-meta{font-size:11px;color:#636e72;line-height:1.5}
+.q-meta-icon{color:#999;margin-right:3px}
+.q-body{font-size:12px;color:#2d3436;line-height:1.65;padding:9px 11px;background:#f8f9fa;border-radius:7px;outline:none;cursor:text;min-height:50px;white-space:pre-wrap}
+.q-body:focus{background:#fff;box-shadow:inset 0 0 0 1.5px #e8b84b}
+.q-body:empty::before{content:attr(data-placeholder);color:#b2bec3;font-style:italic}
 </style>
 </head>
 <body>
@@ -2188,6 +2207,98 @@ function parseWdb(text){
   return corners;
 }
 
+// === Q 카드 관련 헬퍼 ===
+function escapeHtml(s){
+  return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escapeAttr(s){
+  return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function hasQPattern(bodyLines){
+  return (bodyLines||[]).some(l=>/^\s*Q[\d-]+\s*\.\s*/.test(l));
+}
+function getQTypeClass(type){
+  if(!type) return 'qt-2dan';
+  if(type.indexOf('신뢰형')>=0 || type.indexOf('🅰')>=0) return 'qt-trust';
+  if(type.indexOf('연결형')>=0 || type.indexOf('🅱')>=0) return 'qt-connect';
+  if(type.indexOf('임팩트형')>=0 || type.indexOf('🅵')>=0) return 'qt-impact';
+  return 'qt-2dan';
+}
+function parseQuestions(bodyLines){
+  const qs = [];
+  let current = null;
+  const qHeaderRe = /^\s*Q[\d-]+\s*\.\s*/;
+  for(const line of (bodyLines||[])){
+    if(qHeaderRe.test(line)){
+      if(current) qs.push(current);
+      current = {header: line.trim(), qNum:'', qType:'', qTitle:'', qGuest:'', intent:'', dbLinks:[], body:[]};
+      // 헤더 파싱
+      const m = line.trim().match(/^(Q[\d-]+)\s*\.\s*(?:\[([^\]]+?)\])?\s*([^\[]+?)(?:\s*\[([^\]]+?)\])?\s*$/);
+      if(m){
+        current.qNum = (m[1]||'').trim();
+        current.qType = (m[2]||'').trim();
+        current.qTitle = (m[3]||'').trim();
+        current.qGuest = (m[4]||'').trim();
+      } else {
+        current.qNum = (line.match(/Q[\d-]+/)||[''])[0];
+        current.qTitle = line.replace(/^\s*Q[\d-]+\s*\.\s*/, '').trim();
+      }
+    } else if(current){
+      const trimmed = line.trim();
+      if(trimmed.startsWith('🎯')){
+        current.intent = trimmed.replace(/^🎯\s*/, '').replace(/^질문\s*의도\s*[:：]\s*/, '');
+      } else if(trimmed.startsWith('▶')){
+        current.dbLinks.push(trimmed.replace(/^▶\s*/, ''));
+      } else {
+        current.body.push(line);
+      }
+    }
+  }
+  if(current) qs.push(current);
+  // body 양끝 빈 줄 정리
+  qs.forEach(q=>{
+    while(q.body.length && !q.body[0].trim()) q.body.shift();
+    while(q.body.length && !q.body[q.body.length-1].trim()) q.body.pop();
+  });
+  return qs;
+}
+// 카드 본문 편집 시 textarea 반영
+function onQCardEdit(editor){
+  const tabIdx = parseInt(editor.dataset.tabIdx);
+  if(isNaN(tabIdx)) return;
+  const grid = document.getElementById('wdb-q-grid');
+  if(!grid) return;
+  const cards = grid.querySelectorAll('.q-card');
+  // 활성 코너의 body를 카드들로 재구성
+  const newBodyLines = [];
+  cards.forEach(card=>{
+    const header = card.dataset.rawHeader || '';
+    const intent = card.dataset.rawIntent || '';
+    const dbLinks = (card.dataset.rawDbLinks||'').split('||').filter(s=>s);
+    const bodyEl = card.querySelector('.q-body');
+    const bodyText = bodyEl ? bodyEl.innerText : '';
+    if(header) newBodyLines.push(header);
+    if(intent) newBodyLines.push('🎯 ' + intent);
+    dbLinks.forEach(dl=>newBodyLines.push('▶ ' + dl));
+    bodyText.split('\n').forEach(l=>newBodyLines.push(l));
+    newBodyLines.push('');  // 카드 사이 빈 줄
+  });
+  // textarea 재구성
+  const fullText = document.getElementById('wdb-input').value;
+  const corners = parseWdb(fullText);
+  if(!corners[tabIdx]) return;
+  corners[tabIdx].body = newBodyLines;
+  const rebuilt = corners.map(c=>{
+    const header = c.number === '0' ? '' : '#'+c.number+' '+c.title;
+    const body = (c.body||[]).join('\n');
+    return header ? header+'\n'+body : body;
+  }).join('\n\n');
+  document.getElementById('wdb-input').value = rebuilt;
+  // 자동 저장 (디바운스)
+  if(window._wdbAutoSaveTimer) clearTimeout(window._wdbAutoSaveTimer);
+  window._wdbAutoSaveTimer = setTimeout(()=>{ saveWdaebon(); }, 2000);
+}
+
 function renderWdb(){
   const text = document.getElementById('wdb-input').value;
   const corners = parseWdb(text);
@@ -2243,15 +2354,53 @@ function renderWdb(){
     });
     html += '</div>';
   }
-  // 에디터
-  const activeText = (active.body || []).join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
-  // 이미 저장된 html이 있으면 복원
-  const savedHtml = _wdbTabHtml[_wdbActiveTab];
-  const initialHtml = savedHtml || activeText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-  html += '<div class="rich-editor" id="wdb-tab-edit" contenteditable="true" data-idx="'+_wdbActiveTab+'" '+
+  // 에디터 영역: Q 패턴 있으면 카드 그리드, 없으면 기존 rich-editor
+  const activeBody = active.body || [];
+  if(hasQPattern(activeBody)){
+    // Q 카드 그리드 모드
+    const questions = parseQuestions(activeBody);
+    html += '<div class="q-grid" id="wdb-q-grid">';
+    questions.forEach((q, qIdx)=>{
+      const typeCls = getQTypeClass(q.qType);
+      const typeTagCls = typeCls === 'qt-trust' ? 't-trust' : typeCls === 'qt-connect' ? 't-connect' : typeCls === 'qt-impact' ? 't-impact' : '';
+      html += '<div class="q-card '+typeCls+'"'
+        + ' data-q-idx="'+qIdx+'"'
+        + ' data-raw-header="'+escapeAttr(q.header)+'"'
+        + ' data-raw-intent="'+escapeAttr(q.intent)+'"'
+        + ' data-raw-db-links="'+escapeAttr((q.dbLinks||[]).join('||'))+'">';
+      // 헤더 row
+      html += '<div class="q-card-head">';
+      if(q.qNum) html += '<span class="q-num">'+escapeHtml(q.qNum)+'</span>';
+      if(q.qType) html += '<span class="q-type '+typeTagCls+'">'+escapeHtml(q.qType)+'</span>';
+      if(q.qGuest) html += '<span class="q-guest">'+escapeHtml(q.qGuest)+'</span>';
+      html += '</div>';
+      // 제목
+      if(q.qTitle) html += '<div class="q-title">'+escapeHtml(q.qTitle)+'</div>';
+      // 메타라인 (의도 / DB연결)
+      if(q.intent) html += '<div class="q-meta"><span class="q-meta-icon">🎯</span>'+escapeHtml(q.intent)+'</div>';
+      (q.dbLinks||[]).forEach(dl=>{
+        html += '<div class="q-meta"><span class="q-meta-icon">▶</span>'+escapeHtml(dl)+'</div>';
+      });
+      // 본문 (contenteditable)
+      const bodyText = (q.body||[]).join('\n');
+      const bodyHtml = escapeHtml(bodyText).replace(/\n/g,'<br>');
+      html += '<div class="q-body" contenteditable="true"'
+        + ' data-q-idx="'+qIdx+'" data-tab-idx="'+_wdbActiveTab+'"'
+        + ' oninput="onQCardEdit(this)"'
+        + ' data-placeholder="본문을 입력하세요...">'+ bodyHtml +'</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    // 기존 rich-editor 모드
+    const activeText = activeBody.join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
+    const savedHtml = _wdbTabHtml[_wdbActiveTab];
+    const initialHtml = savedHtml || activeText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    html += '<div class="rich-editor" id="wdb-tab-edit" contenteditable="true" data-idx="'+_wdbActiveTab+'" '+
     'style="min-height:240px;font-size:13px;line-height:1.7;border-left:3px solid #e8b84b;background:#fdfbf5;" '+
     'oninput="onWdbTabEdit(this)" data-placeholder="이 코너 내용을 직접 편집하세요...">'+
     initialHtml + '</div>';
+  }
   box.innerHTML = html;
 }
 
