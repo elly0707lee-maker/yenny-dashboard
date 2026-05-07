@@ -1265,8 +1265,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button onclick="rtSize(this,'5')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>
         <button onclick="rtSize(this,'3')" title="기본 크기">A</button>
         <button onclick="rtSize(this,'2')" title="작은 글씨" style="font-size:10px;">A⁻</button>
+        <span class="rt-sep"></span>
+        <button onclick="rtBox(this)" title="강조 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">박스</button>
         <span style="flex:1;"></span>
-        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>
+        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록) ⇧+K(박스)</span>
       </div>
       <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="flex:1;min-height:400px;"></div>
     </div>
@@ -1853,6 +1855,23 @@ function rtSize(btn, size){
   el.focus();
   document.execCommand('fontSize', false, size);
 }
+function rtBox(btn){
+  const el = rtGetTarget(btn);
+  el.focus();
+  const sel = window.getSelection();
+  if(!sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  let inner;
+  if(range.collapsed){
+    inner = '내용 입력...';
+  } else {
+    const tmp = document.createElement('div');
+    tmp.appendChild(range.cloneContents());
+    inner = tmp.innerHTML;
+  }
+  const html = '<div style="background:#FBEAF0;color:#4B1528;padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
+  document.execCommand('insertHTML', false, html);
+}
 
 // 단축키 등록
 document.addEventListener('keydown', function(e){
@@ -1885,6 +1904,23 @@ document.addEventListener('keydown', function(e){
   else if(key === 'g'){
     e.preventDefault();
     document.execCommand('foreColor', false, '#00b894');
+  }
+  // Cmd+Shift+K = 분홍 박스 추가
+  else if(key === 'k'){
+    e.preventDefault();
+    const sel = window.getSelection();
+    if(!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    let inner;
+    if(range.collapsed){
+      inner = '내용 입력...';
+    } else {
+      const tmp = document.createElement('div');
+      tmp.appendChild(range.cloneContents());
+      inner = tmp.innerHTML;
+    }
+    const html = '<div style="background:#FBEAF0;color:#4B1528;padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
+    document.execCommand('insertHTML', false, html);
   }
 }, true);
 
@@ -2186,8 +2222,10 @@ function renderWdb(){
   html += '<button onclick="rtSize(this,\'5\')" title="큰 글씨 (Cmd+Shift+L)" style="font-size:16px;">A⁺</button>';
   html += '<button onclick="rtSize(this,\'3\')" title="기본 크기">A</button>';
   html += '<button onclick="rtSize(this,\'2\')" title="작은 글씨" style="font-size:10px;">A⁻</button>';
+  html += '<span class="rt-sep"></span>';
+  html += '<button onclick="rtBox(this)" title="강조 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">박스</button>';
   html += '<span style="flex:1;"></span>';
-  html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록)</span>';
+  html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+R(빨강) ⇧+B(파랑) ⇧+G(초록) ⇧+K(박스)</span>';
   html += '</div>';
   // 출연자 카드
   const active = corners[_wdbActiveTab] || corners[0];
