@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 import anthropic
 import pg8000.native
+from mindmap import get_mindmap_html
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -133,8 +134,6 @@ button:hover{background:#2d3436}
 def logout():
     session.clear()
     return redirect(url_for('login'))
-
-
 def get_kis_token():
     import time
     if _kis_token_cache["token"] and time.time() < _kis_token_cache["expires"]:
@@ -240,7 +239,6 @@ def get_korean_market():
     return result
 
 
-# 코스피 업종 코드 → 이름
 # 코스피 업종 ETF (Yahoo Finance 심볼)
 SECTOR_ETFS = [
     ("반도체",   "091160.KS"),
@@ -346,6 +344,15 @@ def index():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/mindmap")
+@requires_auth
+def mindmap_page():
+    html = get_mindmap_html()
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
 @app.route("/api/market")
 @requires_auth
 def api_market():
@@ -363,7 +370,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -373,7 +380,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -395,7 +402,7 @@ def debug_post(pt):
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -407,11 +414,11 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        return jsonify({"error": "content required"}), 400
+        # mindmap은 빈 콘텐츠 저장 허용 (초기화용)
+        if pt != "mindmap":
+            return jsonify({"error": "content required"}), 400
     save_post(pt, content, date)
     return jsonify({"ok": True})
-
-
 @app.route("/api/news")
 @requires_auth
 def api_news():
@@ -442,7 +449,6 @@ def api_news():
                     items.append({"title": title, "link": link, "pub": pub, "source": source})
         except Exception as e:
             pass
-    # Sort by pub date roughly (string sort works for RFC 2822)
     items.sort(key=lambda x: x["pub"], reverse=True)
     return jsonify({"items": items[:25]})
 
@@ -467,7 +473,6 @@ def theme_prices():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    # 테마 포함 종목 (중복 제거)
     seen = set()
     stocks = []
     for r in data:
@@ -482,7 +487,6 @@ def theme_prices():
     if not stocks:
         return jsonify({"stocks": [], "query": query})
 
-    # 시세 일괄 조회
     results = []
     for s in stocks:
         try:
@@ -514,7 +518,6 @@ def theme_prices():
         except:
             results.append({"code": s["code"], "name": s["name"], "theme": s["theme"], "price": "—", "change": "", "pct": "", "up": None})
 
-    # 등락률 내림차순 정렬
     results.sort(key=lambda x: float(x["pct"].replace("%","").replace("+","") or 0), reverse=True)
     return jsonify({"stocks": results, "query": query, "count": len(results)})
 
@@ -540,7 +543,6 @@ def kstock_search():
         res.encoding = "utf-8"
         data = list(csv.DictReader(_io.StringIO(res.text)))
 
-        # 정확 일치 종목명 검색 우선, 없으면 테마 부분 매칭
         stock_hits = [r for r in data if r.get("종목명", "").strip() == query.strip()]
         if stock_hits:
             theme_hits = []
@@ -548,7 +550,6 @@ def kstock_search():
             theme_hits = [r for r in data if query in r.get("테마", "")]
 
         def fetch_price(code):
-            """네이버 모바일 API 가격 조회"""
             if not code:
                 return None
             try:
@@ -574,7 +575,6 @@ def kstock_search():
             except:
                 return None
 
-        # 종목 카드 (정확 일치 → 같은 종목명 그룹화 후 테마 여러 개 묶음)
         stock_cards = []
         if stock_hits:
             from collections import OrderedDict
@@ -598,7 +598,6 @@ def kstock_search():
                     "chart_url": f"https://m.stock.naver.com/domestic/stock/{code}/chart" if code else ""
                 })
 
-        # 테마 카드 (테마 부분 매칭 시 — 가격은 X, 종목 리스트만)
         theme_cards = []
         for r in theme_hits:
             theme_cards.append({
@@ -608,7 +607,6 @@ def kstock_search():
                 "desc": r.get("특징", "").strip()
             })
 
-        # 뉴스 (네이버 검색 API)
         news_latest = []
         news_relevant = []
         if NAVER_ID and (stock_hits or theme_hits):
@@ -778,7 +776,6 @@ def guest_search():
     import csv, io as _io
     base_url = f"https://docs.google.com/spreadsheets/d/{GUEST_SHEET_ID}/export?format=csv&gid="
 
-    # Sheet GIDs - 탭 순서대로
     sheets = [
         ("Master", "437534302"),
         ("History", "1633570539"),
@@ -786,7 +783,6 @@ def guest_search():
         ("오늘장전략", "1283113183"),
     ]
 
-    # 공백이나 /로 구분된 복수 검색어 → AND 조건
     import re
     terms = [t.strip() for t in re.split(r'[/,\s]+', query) if t.strip()]
 
@@ -802,7 +798,6 @@ def guest_search():
                 if all(term in row_text for term in terms):
                     matched.append(row)
             if matched:
-                # 날짜 기준 최신순 정렬
                 def get_date_key(row):
                     date_val = row.get("날짜", "") or row.get("date", "")
                     return str(date_val)
@@ -892,8 +887,6 @@ def clear_report():
     return jsonify({"ok": True})
 
 
-
-
 @app.route("/api/briefing/generate", methods=["POST"])
 @requires_auth
 def generate_briefing():
@@ -916,11 +909,6 @@ def generate_briefing():
         return jsonify({"content": content, "date": date})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-
-
-
 def get_html():
     return r"""<!DOCTYPE html>
 <html lang="ko">
@@ -949,37 +937,24 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .grid-futures-todo{display:grid;grid-template-columns:1fr 2fr;gap:10px}
 .grid-todo-memo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid-domestic{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-/* 미국·글로벌: PC 4열 × 3행 기본 순서 유지 */
 .grid-us{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 @media(max-width:680px){
-  /* 국내 시장 2열 (4개 카드를 2x2로) */
   .grid-domestic{grid-template-columns:1fr 1fr!important;gap:8px}
-  /* 미국·글로벌 3열 + 순서 재배치 */
   .grid-us{grid-template-columns:1fr 1fr 1fr!important;gap:6px}
-  /* 행1: 다우(1), S&P(2), 나스닥(3) - 그대로 */
-  /* 행2: 10년물(5), DXY(6), VIX(7) - 그대로 */
-  /* 행3: WTI(9), 브렌트(10), 금(11) - 그대로 */
-  /* 행4: EWY(4→12), 필반(8→13), DRAM(12→14) */
   .us-4{order:12}
   .us-8{order:13}
   .us-12{order:14}
   .container{padding:12px;padding-top:max(12px, env(safe-area-inset-top));padding-bottom:max(12px, env(safe-area-inset-bottom))}
-  /* 국내 시장은 2열 (코스피/코스닥/원달러) */
   .grid3{grid-template-columns:1fr 1fr!important;gap:8px}
-  /* 미국·글로벌은 3열 유지 */
   .grid4{grid-template-columns:1fr 1fr 1fr!important;gap:6px}
-  /* 2분할은 여전히 1열 (노트/체크포인트 같은 큰 카드는) */
   .grid2{grid-template-columns:1fr!important;gap:8px}
-  /* 야간선물+투두/메모는 1열 */
   .grid-futures-todo, .grid-todo-memo{grid-template-columns:1fr!important;gap:8px}
-  /* inline style 2fr / 1fr 1fr 중첩 처리 */
   [style*="grid-template-columns:1fr 2fr"],
   [style*="grid-template-columns: 1fr 2fr"]{grid-template-columns:1fr!important}
   [style*="display:grid"][style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}
   .section-label{margin:18px 0 8px;font-size:10px}
   .content-card{padding:12px 14px}
   .card{padding:12px 10px}
-  /* 미국 3분할일 때 글씨 더 작게 */
   .grid4 .metric-val, .grid-us .metric-val{font-size:16px!important;letter-spacing:-0.3px}
   .grid4 .metric-label, .grid-us .metric-label{font-size:9px!important}
   .grid4 .metric-chg, .grid-us .metric-chg{font-size:11px}
@@ -1016,10 +991,12 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .content-date{font-size:11px;color:#b2bec3;font-family:'DM Mono',monospace}
 .content-body{font-size:14px;color:#2d3436;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto}
 .content-empty{font-size:13px;color:#b2bec3;font-style:italic}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:1.5px solid #dfe6e9;background:#fff;color:#636e72;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:1.5px solid #dfe6e9;background:#fff;color:#636e72;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none}
 .btn:hover{background:#f0f2f5;color:#1a1d23;border-color:#b2bec3}
 .btn-primary{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
 .btn-primary:hover{background:#2d3436;border-color:#2d3436}
+.btn-mindmap{background:#1a1d23;border-color:#1a1d23;color:#e8b84b}
+.btn-mindmap:hover{background:#2d3436;color:#fff}
 .btn-green{background:#00b894;border-color:#00b894;color:#fff}
 .btn-green:hover{background:#00a381}
 .btn.ls{opacity:.5;pointer-events:none}
@@ -1033,7 +1010,6 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .etf-chg{font-weight:700;font-family:'DM Mono',monospace}
 textarea.input-area{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;resize:vertical;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7}
 textarea.input-area:focus{outline:none;border-color:#e8b84b;background:#fff}
-/* 리치 에디터 */
 .rich-editor{width:100%;background:#f8f9fa;border:1.5px solid #dfe6e9;border-radius:10px;color:#2d3436;font-size:14px;padding:12px 14px;min-height:100px;font-family:'Noto Sans KR',sans-serif;line-height:1.7;overflow-y:auto;outline:none}
 .rich-editor:focus{border-color:#e8b84b;background:#fff}
 .rich-editor:empty::before{content:attr(data-placeholder);color:#b2bec3;pointer-events:none}
@@ -1118,7 +1094,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   <!-- 투두리스트 + 메모 -->
   <div class="grid-todo-memo" style="margin-top:10px;">
-      <!-- 투두리스트 -->
       <div class="content-card" style="margin-bottom:0;">
         <div class="content-header">
           <span class="content-title">✅ 투두리스트</span>
@@ -1131,7 +1106,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
           <button class="btn btn-green" onclick="addTodoItem()" style="padding:8px 12px;">+</button>
         </div>
       </div>
-      <!-- 메모 -->
       <div class="content-card" style="margin-bottom:0;">
         <div class="content-header">
           <span class="content-title">📝 메모</span>
@@ -1240,7 +1214,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <!-- 체크포인트 + 노트 2분할 -->
   <div class="section-label">체크포인트 / 노트</div>
   <div class="grid2" style="align-items:stretch;margin-bottom:10px;">
-    <!-- 왼쪽: 체크포인트 -->
     <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">☑ 오늘 체크포인트</span>
@@ -1255,7 +1228,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       </div>
       <div class="content-body" id="checkpoint-body" style="flex:1;min-height:400px;"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
     </div>
-    <!-- 오른쪽: 노트 -->
     <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">📓 오늘의 노트</span>
@@ -1294,13 +1266,14 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- 완대본 플로우 -->
+  <!-- 완대본 플로우 + 마인드맵 진입 -->
   <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card">
     <div class="content-header">
       <span class="content-title">🎙️ ON AIR</span>
       <div style="display:flex;gap:6px;align-items:center;">
         <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
+        <a href="/mindmap" target="_blank" class="btn btn-mindmap">🗺️ 마인드맵 열기</a>
         <button class="btn btn-green" onclick="saveWdaebon()">저장</button>
         <button class="btn" onclick="clearWdaebon()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
       </div>
@@ -1323,7 +1296,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
   <div class="grid2" style="align-items:start;">
-    <!-- 왼쪽: 마감일지 -->
     <div class="content-card" style="margin-bottom:0;">
     <div class="content-header">
       <span class="content-title">📋 마감일지</span>
@@ -1340,7 +1312,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
     <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
     </div>
-    <!-- 오른쪽: PDF 뷰어 -->
     <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">📄 리서치 리포트</span>
@@ -1389,7 +1360,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="guest-result" style="margin-top:14px;"></div>
   </div>
 
-<!-- 표현 사전 -->
+  <!-- 표현 사전 -->
   <div class="section-label">📖 Encyclopedia</div>
   <div class="content-card">
     <div class="content-header">
@@ -1406,7 +1377,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
     <div style="height:32px;"></div>
 </div>
-
 <script>
 function updateClock(){
   const kst=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));
@@ -1452,7 +1422,6 @@ async function loadMarket(){
     renderM('brent-val','brent-chg',d.brent?.value,d.brent?.change);
     renderM('vix-val','vix-chg',d.vix?.value,d.vix?.change);
     renderM('sox-val','sox-chg',d.sox?.value,d.sox?.change);
-    // 10년물은 소수점 2자리
     const tnxEl=document.getElementById('tnx-val');
     const tnxChgEl=document.getElementById('tnx-chg');
     if(tnxEl&&d.tnx?.value!==null){
@@ -1496,7 +1465,6 @@ async function loadPost(type,bid,did){
       const b=document.getElementById(bid),dt=document.getElementById(did);
       if(dt)dt.textContent=d.date||'';
       if(b){
-        // 현재 선택된 탭 기억
         let activeTabKey = null;
         if(type==='checkpoint'){
           const activeTab = document.querySelector('#cp-tabs .tab.active');
@@ -1511,10 +1479,8 @@ async function loadPost(type,bid,did){
             if(m) activeTabKey = m[1];
           }
         }
-        // 데이터 업데이트
         if(type==='checkpoint') _cpRaw=d.content;
         if(type==='closing') _clRaw=d.content;
-        // 탭 복원 또는 기본 'all' 카드 렌더
         let restoredKey = activeTabKey || 'all';
         if(type==='checkpoint'){
           const targetBtn = document.querySelector('#cp-tabs .tab[onclick*="\''+restoredKey+'\'"]') 
@@ -1584,12 +1550,6 @@ async function saveFutures(){
   setTimeout(()=>badge.style.display='none',2000);
 }
 
-
-
-
-
-
-
 let _reportTab = 'up';
 
 function reportTab(btn, key){
@@ -1654,7 +1614,6 @@ async function searchKstock(){
 
     let html='';
 
-    // 종목 카드 (정확 일치) — 좌측에는 종목정보+테마+특징만
     (d.stock_cards||[]).forEach(card=>{
       html += '<div style="padding:14px 16px;background:#f8f9fa;border-radius:10px;margin-bottom:10px;border-left:3px solid #e8b84b;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">';
@@ -1663,7 +1622,6 @@ async function searchKstock(){
         html += '<a href="'+card.naver_url+'" target="_blank" style="font-size:11px;color:#7a8099;font-family:monospace;text-decoration:none;background:#fff;padding:2px 8px;border-radius:4px;border:1px solid #dfe6e9;">'+card.code+'</a>';
       }
       html += '</div>';
-      // 테마별 특징 묶음
       (card.themes||[]).forEach(t=>{
         html += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #dfe6e9;">';
         html += '<div style="display:inline-block;font-size:11px;font-weight:700;color:#fff;background:#1a1d23;padding:3px 9px;border-radius:5px;margin-bottom:5px;">'+t.theme+'</div>';
@@ -1673,7 +1631,6 @@ async function searchKstock(){
       html += '</div>';
     });
 
-    // 테마 카드 (테마 부분 매칭) — 헤더 + 종목 리스트
     if(d.theme_cards && d.theme_cards.length){
       html += '<div style="font-size:12px;font-weight:700;color:#7a8099;letter-spacing:.05em;margin:6px 0 10px;padding-bottom:6px;border-bottom:1px solid #dfe6e9;">🗂 \''+q+'\' 관련 종목 · '+d.theme_cards.length+'건</div>';
       d.theme_cards.forEach((card,i)=>{
@@ -1696,10 +1653,7 @@ async function searchKstock(){
 
     result.innerHTML = html || '<span class="content-empty">결과 없음</span>';
 
-    // 우측 영역: 시세 카드 → 뉴스 순서
     let sideHtml='';
-
-    // 시세 카드 (종목 정확 일치 시만)
     (d.stock_cards||[]).forEach(card=>{
       if(!card.price_info) return;
       const p=card.price_info;
@@ -1717,7 +1671,6 @@ async function searchKstock(){
       sideHtml += '</div>';
     });
 
-    // 뉴스
     const hasNews = (d.news_latest && d.news_latest.length) || (d.news_relevant && d.news_relevant.length);
     if(hasNews){
       sideHtml += '<div style="font-size:12px;font-weight:700;color:#7a8099;letter-spacing:.05em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #dfe6e9;">📰 \''+q+'\' 관련 뉴스</div>';
@@ -1745,7 +1698,6 @@ async function searchKstock(){
   btn.classList.remove('ls');btn.innerHTML='검색';
 }
 
-// 투두리스트
 let _todos = [];
 
 function renderTodos(){
@@ -1812,7 +1764,6 @@ async function loadTodo(){
   }catch(e){ renderTodos(); }
 }
 
-// 메모
 async function saveMemo(){
   const val=document.getElementById('memo-input').value.trim();
   await fetch('/api/post/memo',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1831,7 +1782,6 @@ async function loadMemo(){
     if(d.content) document.getElementById('memo-input').value=d.content;
   }catch(e){}
 }
-// 모든 fetch 호출에 credentials + X-API-Secret 자동 추가 (PWA 인증 안정화)
 const _origFetch = window.fetch;
 window.fetch = function(url, options){
   options = options || {};
@@ -1839,7 +1789,6 @@ window.fetch = function(url, options){
     options.credentials = options.credentials || 'include';
     options.headers = options.headers || {};
     if(window._API_SECRET){
-      // Headers 객체와 일반 객체 둘 다 처리
       if(options.headers instanceof Headers){
         options.headers.set('X-API-Secret', window._API_SECRET);
       } else {
@@ -1850,7 +1799,6 @@ window.fetch = function(url, options){
   return _origFetch(url, options);
 };
 
-// 리치 텍스트 편집 명령
 function rtGetTarget(btn){
   const tb = btn.closest('.richtext-toolbar');
   return document.getElementById(tb.dataset.target);
@@ -1898,7 +1846,6 @@ function rtBox(btn, color){
   document.execCommand('insertHTML', false, html);
 }
 
-// 단축키 등록 (Cmd+Shift+R 빨강은 Chrome 강제 새로고침과 충돌로 제외 — 빨강은 버튼 클릭)
 document.addEventListener('keydown', function(e){
   const active = document.activeElement;
   if(!active) return;
@@ -1906,27 +1853,22 @@ document.addEventListener('keydown', function(e){
   const mod = e.metaKey || e.ctrlKey;
   if(!mod || !e.shiftKey) return;
   const key = e.key.toLowerCase();
-  // Cmd+Shift+H = 노란 하이라이트
   if(key === 'h'){
     e.preventDefault();
     document.execCommand('backColor', false, '#fff3a0');
   }
-  // Cmd+Shift+L = 큰 글자
   else if(key === 'l'){
     e.preventDefault();
     document.execCommand('fontSize', false, '5');
   }
-  // Cmd+Shift+B = 파란 글자
   else if(key === 'b'){
     e.preventDefault();
     document.execCommand('foreColor', false, '#0984e3');
   }
-  // Cmd+Shift+G = 초록 글자
   else if(key === 'g'){
     e.preventDefault();
     document.execCommand('foreColor', false, '#00b894');
   }
-  // Cmd+Shift+K = 분홍 박스 추가
   else if(key === 'k'){
     e.preventDefault();
     const sel = window.getSelection();
@@ -1943,7 +1885,6 @@ document.addEventListener('keydown', function(e){
     const html = '<div style="background:#FBEAF0;color:#4B1528;padding:8px 12px;border-radius:7px;margin:6px 0;">' + inner + '</div><br>';
     document.execCommand('insertHTML', false, html);
   }
-  // Cmd+Shift+E = 파란 박스 추가
   else if(key === 'e'){
     e.preventDefault();
     const sel = window.getSelection();
@@ -1987,7 +1928,6 @@ async function loadNote(){
     }
   }catch(e){}
 }
-
 let _calData = null;
 
 async function saveCalendarDB(){
@@ -2025,7 +1965,6 @@ function renderCalendar(data){
     html += '<div id="cal-day-' + i + '" style="display:' + display + ';">';
     html += '<div style="font-size:13px;font-weight:700;color:#2d3436;margin-bottom:8px;">' + day.date + '</div>';
 
-    // Items
     html += '<div id="cal-items-' + i + '">';
     (day.items||[]).forEach(function(item,j){
       const safeItem = item.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -2037,13 +1976,11 @@ function renderCalendar(data){
     });
     html += '</div>';
 
-    // Add item
     html += '<div style="margin-top:8px;">';
     html += '<input id="cal-new-' + i + '" class="input-area" placeholder="+ 일정 추가..." style="min-height:auto;padding:6px 10px;font-size:13px;" onkeydown="if(event.key===\'Enter\'){addCalItem(' + i + ');event.preventDefault();}"/>';
     html += '<button class="btn" onclick="addCalItem(' + i + ')" style="margin-top:4px;font-size:12px;padding:5px 10px;">+ 추가</button>';
     html += '</div>';
 
-    // Guests
     html += '<div style="margin-top:12px;border-top:1px solid #f0f2f5;padding-top:10px;">';
     html += '<div style="font-size:11px;font-weight:700;color:#7a8099;margin-bottom:6px;">👤 출연자</div>';
     html += '<div id="cal-guests-' + i + '">';
@@ -2132,7 +2069,6 @@ async function parseCalendar(){
     if(d.error){
       document.getElementById('cal-result').innerHTML='<span class="content-empty">오류: '+d.error+'</span>';
     } else {
-      // Merge with existing data if exists
       if(_calData && _calData.days){
         d.days.forEach(newDay => {
           const existing = _calData.days.find(d2 => d2.day_key === newDay.day_key);
@@ -2160,12 +2096,10 @@ async function clearCalendar(){
   document.getElementById('cal-result').innerHTML='';
 }
 
-// 완대본 플로우 (텍스트 붙여넣기 → 탭 자동 분리)
 let _wdbActiveTab = 0;
 
 function parseWdb(text){
   if(!text||!text.trim()) return [];
-  // #1 제목, #2 제목 형식으로 분리
   const lines = text.split('\n');
   const corners = [];
   let current = null;
@@ -2183,22 +2117,17 @@ function parseWdb(text){
   }
   if(current) corners.push(current);
   
-  // 각 코너에서 출연자 추출 ("이름 | 직함" 형식) - 제목 + body 둘 다 검사
   corners.forEach(c=>{
     const seen = new Set();
     c.guests = [];
-    // 검사 대상: title 줄 + body 전체
     const searchLines = [c.title, ...(c.body || [])];
     for(const line of searchLines){
-      // 한 줄에 여러 명이 있을 수도 있으니 global 매칭
       const re = /([가-힣]{2,4})\s*[|｜]\s*([^|｜\n]+?)(?=(?:\s*[+＋]|\s*,|\s*\/|\s*$|\s{2,}))/g;
       let m;
       while((m = re.exec(line)) !== null){
         const name = m[1].trim();
         let title = m[2].trim();
-        // 앞뒤 불필요한 기호 제거
         title = title.replace(/[—–\-]+$/, '').replace(/^[—–\-]+/, '').trim();
-        // 뒤쪽 (전화연결) 같은 괄호는 유지하되, 그 뒤 잡 텍스트는 제거
         title = title.replace(/\s*\(([^)]+)\).*$/, ' ($1)');
         if(!title) continue;
         const key = name + '|' + title;
@@ -2207,7 +2136,6 @@ function parseWdb(text){
           c.guests.push({name, title});
         }
       }
-      // fallback: 단일 "이름 | 직함" 
       if(!c.guests.length){
         const simple = line.match(/([가-힣]{2,4})\s*[|｜]\s*(.+?)(?:\s*[—–\-(]|\s*$)/);
         if(simple){
@@ -2226,7 +2154,6 @@ function parseWdb(text){
   return corners;
 }
 
-// === Q 카드 관련 헬퍼 ===
 function escapeHtml(s){
   return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -2251,7 +2178,6 @@ function parseQuestions(bodyLines){
     if(qHeaderRe.test(line)){
       if(current) qs.push(current);
       current = {header: line.trim(), qNum:'', qType:'', qTitle:'', qGuest:'', body:[]};
-      // 헤더 파싱
       const m = line.trim().match(/^(Q[\d-]+)\s*\.\s*(?:\[([^\]]+?)\])?\s*([^\[]+?)(?:\s*\[([^\]]+?)\])?\s*$/);
       if(m){
         current.qNum = (m[1]||'').trim();
@@ -2263,30 +2189,26 @@ function parseQuestions(bodyLines){
         current.qTitle = line.replace(/^\s*Q[\d-]+\s*\.\s*/, '').trim();
       }
     } else if(current){
-      // 의도(🎯), DB연결(▶) 라인도 본문에 그대로 포함 → 사용자가 편집 가능
       current.body.push(line);
     }
   }
   if(current) qs.push(current);
-  // body 양끝 빈 줄 정리
   qs.forEach(q=>{
     while(q.body.length && !q.body[0].trim()) q.body.shift();
     while(q.body.length && !q.body[q.body.length-1].trim()) q.body.pop();
   });
   return qs;
 }
-// 카드 본문 편집 시 textarea 반영 + HTML 캐시
+
 function onQCardEdit(editor){
   const tabIdx = parseInt(editor.dataset.tabIdx);
   const qIdx = parseInt(editor.dataset.qIdx);
   if(isNaN(tabIdx) || isNaN(qIdx)) return;
-  // HTML 캐시 (박스/색깔/하이라이트 등 시각 요소 보존용)
   if(!_wdbCardHtml[tabIdx]) _wdbCardHtml[tabIdx] = {};
   _wdbCardHtml[tabIdx][qIdx] = editor.innerHTML;
   const grid = document.getElementById('wdb-q-grid');
   if(!grid) return;
   const cards = grid.querySelectorAll('.q-card');
-  // 활성 코너의 body를 카드들로 재구성
   const newBodyLines = [];
   cards.forEach(card=>{
     const header = card.dataset.rawHeader || '';
@@ -2294,9 +2216,8 @@ function onQCardEdit(editor){
     const bodyText = bodyEl ? bodyEl.innerText : '';
     if(header) newBodyLines.push(header);
     bodyText.split('\n').forEach(l=>newBodyLines.push(l));
-    newBodyLines.push('');  // 카드 사이 빈 줄
+    newBodyLines.push('');
   });
-  // textarea 재구성 (.value 직접 설정 — input 이벤트 미발동 → 캐시 안전)
   const fullText = document.getElementById('wdb-input').value;
   const corners = parseWdb(fullText);
   if(!corners[tabIdx]) return;
@@ -2307,7 +2228,6 @@ function onQCardEdit(editor){
     return header ? header+'\n'+body : body;
   }).join('\n\n');
   document.getElementById('wdb-input').value = rebuilt;
-  // 자동 저장 (디바운스)
   if(window._wdbAutoSaveTimer) clearTimeout(window._wdbAutoSaveTimer);
   window._wdbAutoSaveTimer = setTimeout(()=>{ saveWdaebon(); }, 2000);
 }
@@ -2326,7 +2246,6 @@ function renderWdb(){
     html += '<button class="tab'+(i===_wdbActiveTab?' active':'')+'" onclick="wdbShowTab('+i+')">#'+c.number+' '+c.title+'</button>';
   });
   html += '</div>';
-  // 리치 툴바 + 에디터
   html += '<div class="richtext-toolbar" data-target="wdb-tab-edit">';
   html += '<button onclick="rtCmd(this,\'bold\')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>';
   html += '<button onclick="rtCmd(this,\'italic\')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>';
@@ -2338,7 +2257,7 @@ function renderWdb(){
   html += '<button onclick="rtHighlight(this,\'#d6f0ff\')" title="파랑 하이라이트" style="background:#d6f0ff;">H</button>';
   html += '<button onclick="rtHighlight(this,\'transparent\')" title="하이라이트 제거" style="background:white;">✕</button>';
   html += '<span class="rt-sep"></span>';
-  html += '<button onclick="rtColor(this,\'#d63031\')" title="빨간색 (단축키 없음 — 클릭)" style="color:#d63031;">A</button>';
+  html += '<button onclick="rtColor(this,\'#d63031\')" title="빨간색" style="color:#d63031;">A</button>';
   html += '<button onclick="rtColor(this,\'#0984e3\')" title="파랑색 (Cmd/Ctrl+Shift+B)" style="color:#0984e3;">A</button>';
   html += '<button onclick="rtColor(this,\'#00b894\')" title="초록색 (Cmd/Ctrl+Shift+G)" style="color:#00b894;">A</button>';
   html += '<button onclick="rtColor(this,\'#2d3436\')" title="기본색">A</button>';
@@ -2352,7 +2271,6 @@ function renderWdb(){
   html += '<span style="flex:1;"></span>';
   html += '<span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+B(파랑) ⇧+G(초록) ⇧+K(분홍박스) ⇧+E(파랑박스)</span>';
   html += '</div>';
-  // 출연자 카드
   const active = corners[_wdbActiveTab] || corners[0];
   if(active.guests && active.guests.length){
     html += '<div style="margin-bottom:10px;padding:10px 14px;background:linear-gradient(135deg,#fdfbf5,#fff);border-radius:10px;border:1.5px solid #e8b84b;display:flex;flex-wrap:wrap;gap:10px;align-items:center;">';
@@ -2368,10 +2286,8 @@ function renderWdb(){
     });
     html += '</div>';
   }
-  // 에디터 영역: Q 패턴 있으면 카드 그리드, 없으면 기존 rich-editor
   const activeBody = active.body || [];
   if(hasQPattern(activeBody)){
-    // Q 카드 그리드 모드
     const questions = parseQuestions(activeBody);
     html += '<div class="q-grid" id="wdb-q-grid">';
     questions.forEach((q, qIdx)=>{
@@ -2380,20 +2296,16 @@ function renderWdb(){
       html += '<div class="q-card '+typeCls+'"'
         + ' data-q-idx="'+qIdx+'"'
         + ' data-raw-header="'+escapeAttr(q.header)+'">';
-      // 헤더 row
       html += '<div class="q-card-head">';
       if(q.qNum) html += '<span class="q-num">'+escapeHtml(q.qNum)+'</span>';
       if(q.qType) html += '<span class="q-type '+typeTagCls+'">'+escapeHtml(q.qType)+'</span>';
       if(q.qGuest) html += '<span class="q-guest">'+escapeHtml(q.qGuest)+'</span>';
       html += '</div>';
-      // 제목
       if(q.qTitle) html += '<div class="q-title">'+escapeHtml(q.qTitle)+'</div>';
-      // 본문 (contenteditable) — 의도/DB연결도 본문에 포함되어 자유 편집 가능
       const bodyText = (q.body||[]).join('\n');
       const cachedHtml = (_wdbCardHtml[_wdbActiveTab] || {})[qIdx];
       let bodyHtml;
       if(cachedHtml !== undefined){
-        // 캐시 검증: 캐시 텍스트가 현재 plain text와 대략 일치할 때만 사용 (textarea 직접 수정 케이스 방어)
         const tmp = document.createElement('div');
         tmp.innerHTML = cachedHtml;
         const cachedText = (tmp.innerText||'').replace(/\s+/g,'').trim();
@@ -2415,7 +2327,6 @@ function renderWdb(){
     });
     html += '</div>';
   } else {
-    // 기존 rich-editor 모드
     const activeText = activeBody.join('\n').replace(/^\s*\n|\n\s*$/g,'') || '';
     const savedHtml = _wdbTabHtml[_wdbActiveTab];
     const initialHtml = savedHtml || activeText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
@@ -2427,15 +2338,12 @@ function renderWdb(){
   box.innerHTML = html;
 }
 
-// 탭별 HTML 저장
 let _wdbTabHtml = {};
-let _wdbCardHtml = {};  // {tabIdx: {qIdx: innerHTML}} — Q카드 본문 HTML 캐시 (박스/색깔 보존용)
+let _wdbCardHtml = {};
 
 function onWdbTabEdit(editor){
   const idx = parseInt(editor.dataset.idx);
-  // HTML 저장
   _wdbTabHtml[idx] = editor.innerHTML;
-  // 텍스트만 원본 textarea에 반영 (재파싱용)
   const plain = editor.innerText;
   const fullText = document.getElementById('wdb-input').value;
   const corners = parseWdb(fullText);
@@ -2448,7 +2356,6 @@ function onWdbTabEdit(editor){
   }).join('\n\n');
   document.getElementById('wdb-input').value = rebuilt;
   
-  // 자동 저장 (디바운스 — 입력 멈춘 후 2초 뒤)
   if(window._wdbAutoSaveTimer) clearTimeout(window._wdbAutoSaveTimer);
   window._wdbAutoSaveTimer = setTimeout(()=>{
     saveWdaebon();
@@ -2463,7 +2370,6 @@ function wdbShowTab(i){
 async function saveWdaebon(){
   const badge=document.getElementById('wdb-badge');
   try{
-    // 현재 편집 중인 탭의 HTML도 저장
     const currentEditor = document.getElementById('wdb-tab-edit');
     if(currentEditor){
       const idx = parseInt(currentEditor.dataset.idx);
@@ -2476,7 +2382,6 @@ async function saveWdaebon(){
     };
     const payloadStr = JSON.stringify(payload);
     
-    // 크기 체크 - 너무 크면 경고
     if(payloadStr.length > 500000){
       alert('⚠️ 데이터가 너무 커요 (' + Math.round(payloadStr.length/1024) + 'KB). 일부 내용을 줄이거나 분할 저장해주세요.');
       return;
@@ -2523,7 +2428,6 @@ async function loadWdaebon(){
   try{
     const d=await fetch('/api/post/wdaebon').then(r=>r.json());
     if(d.content){
-      // JSON 형식이면 새 포맷, 아니면 구버전 plaintext
       let text = d.content;
       try{
         const payload = JSON.parse(d.content);
@@ -2583,7 +2487,6 @@ async function searchEncyclopedia(){
   btn.classList.remove('ls'); btn.innerHTML='검색';
 }
 
-// PDF functions
 async function uploadPDFs(input){
   const files = Array.from(input.files);
   for(const file of files){
@@ -2741,14 +2644,12 @@ async function searchGuest(){
       rows.forEach(row=>{
         html += '<div style="padding:12px 14px;background:#f8f9fa;border-radius:10px;margin-bottom:8px;border-left:3px solid #e8b84b;">';
         const entries = Object.entries(row).filter(([k,v])=>v&&v.trim());
-        // 날짜, 이름, 코너 먼저
         const priority = ['날짜','이름','코너'];
         const header = priority.map(k=>{
           const e = entries.find(([ek])=>ek===k);
           return e ? '<span style="font-size:12px;font-weight:700;color:#1a1d23;">'+e[1]+'</span>' : '';
         }).filter(Boolean).join(' · ');
         if(header) html += '<div style="margin-bottom:6px;">'+header+'</div>';
-        // 나머지 내용
         entries.forEach(([k,v])=>{
           if(priority.includes(k)) return;
           html += '<div style="margin-bottom:3px;">';
@@ -2770,32 +2671,6 @@ async function searchGuest(){
   }
   btn.classList.remove('ls'); btn.innerHTML='검색';
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// 체크포인트 파싱
 const CP_SECTIONS = {
   indicator: ['📌지표','📌 지표'],
   sector: ['📌Sector','📌sector','📌 Sector','📌 sector','📌섹터','📌 섹터'],
@@ -2830,7 +2705,6 @@ function parseSection(text, headers){
 
 let _cpRaw = '', _clRaw = '';
 
-// 색상 결정 헬퍼
 function _pctColor(pctStr){
   if(!pctStr) return '';
   const num = parseFloat(pctStr.replace(/[^\d.\-+]/g,''));
@@ -2840,9 +2714,7 @@ function _pctColor(pctStr){
   return 'var(--color-text-secondary)';
 }
 
-// 종목 줄에서 등락률 추출 → HTML로 색칠
 function _formatStockLine(line){
-  // "한화에어로(+2.1%⏰)" 또는 "한화에어로 +2.1%⏰" 패턴
   const m = line.match(/^(.*?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*([⏰🌙]?)\s*[\)]?\s*(.*)$/);
   if(m){
     const [, name, pct, emoji, rest] = m;
@@ -2852,7 +2724,6 @@ function _formatStockLine(line){
   return line;
 }
 
-// 섹터 파싱 — ✔️ 단위로 카드 분리 (✔️ 로 새 섹터 시작)
 function _parseSectorCards(text){
   const cards = [];
   const lines = text.split('\n');
@@ -2861,7 +2732,6 @@ function _parseSectorCards(text){
     let l = raw.trim();
     if(!l) continue;
     if(l.startsWith('📌')) continue;
-    // ✔️ 변형 모두 처리 — ✔️, ✔, ✓, ☑️, ☑, ✅
     if(/^[✔️✔✓☑️☑✅]\s*/.test(l)){
       if(cur) cards.push(cur);
       const name = l.replace(/^[✔️✔✓☑️☑✅\s]+/,'').trim();
@@ -2869,14 +2739,12 @@ function _parseSectorCards(text){
       continue;
     }
     if(!cur) continue;
-    // "관련 종목:" 줄
     if(l.includes('관련 종목') || l.includes('관련종목')){
       const after = l.replace(/^.*?관련\s*종목\s*[:：—-]?\s*/,'').trim();
       const parts = after.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
       cur.stocks.push(...parts);
       continue;
     }
-    // 한 줄에 • 여러 개 있을 수도 ("• A • B • C")
     const bulletParts = l.split(/\s+[•・]\s+/).map(s=>s.trim()).filter(Boolean);
     if(bulletParts.length > 1){
       bulletParts.forEach(p=>{
@@ -2892,17 +2760,14 @@ function _parseSectorCards(text){
   return cards;
 }
 
-// 종목 섹션 파싱 — 빈 줄도 종목 구분자로 사용
 function _parseStockCards(text){
   const cards = [];
   const lines = text.split('\n');
   let cur = null;
-  // 노이즈 키워드 (구독, 광고, 기사 메뉴 등)
   const noiseKeywords = ['많이 본 기사','기자 구독','구독하기','로그인','회원가입','글자크기','스크랩','광고'];
   for(const raw of lines){
     const l = raw.trim();
     if(!l){
-      // 빈 줄 — 종목 구분자
       if(cur && (cur.name || cur.bullets.length)){
         cards.push(cur);
         cur = null;
@@ -2910,13 +2775,11 @@ function _parseStockCards(text){
       continue;
     }
     if(l.startsWith('📌')) continue;
-    // 노이즈 줄 제거
     if(noiseKeywords.some(k => l.includes(k))) continue;
     if(l.startsWith('-')||l.startsWith('•')){
       if(!cur) cur = {name:'',bullets:[]};
       cur.bullets.push(l.replace(/^[-•]\s*/,''));
     } else {
-      // 새 종목 시작
       if(cur) cards.push(cur);
       cur = {name: l, bullets:[]};
     }
@@ -2925,7 +2788,6 @@ function _parseStockCards(text){
   return cards;
 }
 
-// 지표 파싱 — 한 줄당 한 카드
 function _parseIndicatorCards(text){
   const cards = [];
   const lines = text.split('\n');
@@ -2933,7 +2795,6 @@ function _parseIndicatorCards(text){
     const l = raw.trim();
     if(!l) continue;
     if(l.startsWith('📌')) continue;
-    // "SOX 7,773.13 (+1.34%)" 또는 "SOX +1.34%" 형태
     const m = l.match(/^([A-Za-z가-힣0-9&·]+(?:\s+[A-Za-z가-힣0-9&·]+)?)\s+(.+)$/);
     if(m){
       const [, name, rest] = m;
@@ -2951,7 +2812,6 @@ function _parseIndicatorCards(text){
   return cards;
 }
 
-// HTML 빌더들
 function _renderSectorCards(cards){
   if(!cards.length) return '<span class="content-empty">섹터 정보가 없어요</span>';
   return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
@@ -3011,7 +2871,6 @@ function cpTab(btn, key){
   const el = document.getElementById('checkpoint-body');
   if(!_cpRaw){ return; }
   if(key==='all'){
-    // 전체는 모든 섹션을 카드로
     let html = '';
     const ind = parseSection(_cpRaw, CP_SECTIONS.indicator);
     if(ind){
@@ -3034,7 +2893,6 @@ function cpTab(btn, key){
       html += _renderStockCards(_parseStockCards(kd), '코스닥');
     }
     if(!html){
-      // 카드가 하나도 안 뜨면 원본 텍스트로 fallback
       html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
         _cpRaw.replace(/</g,'&lt;')+'</pre>';
     }
@@ -3053,7 +2911,6 @@ function cpTab(btn, key){
   } else if(key==='kosdaq'){
     html = _renderStockCards(_parseStockCards(sec), '코스닥');
   }
-  // 카드 빈 경우 원본 텍스트 보여주기
   if(!html || html.includes('content-empty')){
     html = '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:#2d3436;line-height:1.6;margin:0;">'+
       sec.replace(/</g,'&lt;')+'</pre>';
@@ -3061,7 +2918,6 @@ function cpTab(btn, key){
   el.innerHTML = html;
 }
 
-// 마감일지용 일반 섹션 파서 — 마감수치/지수팩터/수급/내일일정 같은 단순 리스트
 function _parseGenericCards(text){
   const cards = [];
   const lines = text.split('\n');
@@ -3070,7 +2926,6 @@ function _parseGenericCards(text){
     const l = raw.trim();
     if(!l) continue;
     if(l.startsWith('📌')) continue;
-    // ✔️/✓/☑️ 헤더로 새 카드
     if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')||l.startsWith('☑️')||l.startsWith('☑')){
       if(cur) cards.push(cur);
       cur = {name: l.replace(/^[✔️✔✓☑️☑]\s*/,'').trim(), bullets:[]};
@@ -3078,7 +2933,6 @@ function _parseGenericCards(text){
       if(!cur) cur = {name:'',bullets:[]};
       cur.bullets.push(l.replace(/^[-•]\s*/,''));
     } else {
-      // 새 항목 시작
       if(cur) cards.push(cur);
       cur = {name: l, bullets:[]};
     }
@@ -3107,7 +2961,6 @@ function _renderGenericCards(cards, label){
     }).join('') + '</div>';
 }
 
-// 마감일지 특징주 파싱 — "종목명 (등락률): 사유" 형식
 function _parseMarkerStockCards(text){
   const cards = [];
   const lines = text.split('\n');
@@ -3116,13 +2969,11 @@ function _parseMarkerStockCards(text){
     if(!l) continue;
     if(l.startsWith('📌')) continue;
     let line = l.replace(/^[-•]\s*/,'');
-    // "종목명 (+5.5%): 사유" 또는 "종목명 +5.5% : 사유" 패턴
     const m = line.match(/^(.+?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*[\)]?\s*[:：]\s*(.+)$/);
     if(m){
       const [, name, pct, reason] = m;
       cards.push({name: name.trim(), pct: pct.trim(), reason: reason.trim()});
     } else {
-      // 콜론 없이 그냥 한 줄 — 종목명만 또는 노이즈
       cards.push({name: line, pct: '', reason: ''});
     }
   }
@@ -3233,7 +3084,6 @@ async function loadAll(){
   if(btn)btn.innerHTML='<span>↻</span> 새로고침';
 }
 
-// 초기 로드
 loadAll();
 loadFutures();
 loadAutoFutures();
@@ -3249,7 +3099,6 @@ loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
 setInterval(loadAll,5*60*1000);
-// 체크포인트/마감일지/특징리포트 자동 새로고침 (30초)
 setInterval(()=>{
   loadPost('checkpoint','checkpoint-body','checkpoint-date');
   loadPost('closing','closing-body','closing-date');
