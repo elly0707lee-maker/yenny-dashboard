@@ -143,6 +143,18 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .empty-state{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#A8A6A0;font-size:13px;line-height:1.7;pointer-events:none}
 .empty-state b{color:#888780;font-size:14px}
 
+.import-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:linear-gradient(135deg,#fdfbf5,#fff);border:0.5px solid #e8b84b;border-radius:10px;margin-bottom:12px}
+.import-bar[hidden]{display:none}
+.import-bar .label{font-size:11px;color:#888780;font-weight:500;letter-spacing:0.3px;font-family:'DM Mono',monospace;flex-shrink:0}
+.import-bar .corner-name{font-size:12px;font-weight:600;color:#1a1d23}
+.import-btn{padding:5px 11px;background:#fff;border:0.5px solid #e8b84b;color:#1a1d23;border-radius:5px;cursor:pointer;font-size:11px;font-weight:500;letter-spacing:0.2px;transition:all 0.15s;display:inline-flex;align-items:center;gap:4px}
+.import-btn:hover{background:#e8b84b;color:#1a1d23;border-color:#1a1d23}
+.import-btn .num{font-family:'DM Mono',monospace;font-size:10px;color:#888780;font-weight:500}
+.import-btn:hover .num{color:#1a1d23}
+.import-btn.dim{opacity:0.55}
+.import-refresh{margin-left:auto;padding:4px 10px;background:transparent;border:0.5px solid #B4B2A9;color:#888780;border-radius:5px;cursor:pointer;font-size:10px;font-family:'DM Mono',monospace}
+.import-refresh:hover{background:#fff;color:#1a1d23;border-color:#1a1d23}
+
 @media(max-width:780px){
   .wrap{padding:10px}
   .mm{flex-direction:column;min-height:auto}
@@ -166,6 +178,12 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 </div>
 
 <div class="wrap">
+
+<div class="import-bar" id="import-bar" hidden>
+  <span class="label">📥 ON AIR에서:</span>
+  <span id="corner-buttons"></span>
+  <button class="import-refresh" onclick="loadOnAirCorners()" title="ON AIR 데이터 다시 불러오기">↻</button>
+</div>
 
 <div class="mm">
 
@@ -524,7 +542,254 @@ window.parseBulk=function(){
   scheduleSave();
 };
 
-// === 자동 저장 ===
+// === ON AIR 데이터 가져오기 ===
+let _onAirCorners = [];
+
+function escapeHtml(s){
+  return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function parseOnAirText(text){
+  if(!text || !text.trim()) return [];
+  const lines = text.split('\n');
+  const corners = [];
+  let current = null;
+  for(const line of lines){
+    const m = line.match(/^\s*#(\d+)\s*\.?\s*(.*)/);
+    if(m){
+      if(current) corners.push(current);
+      current = {number:m[1], title:m[2].trim()||'코너'+m[1], body:[]};
+    } else if(current){
+      current.body.push(line);
+    }
+  }
+  if(current) corners.push(current);
+  return corners;
+}
+
+function parseQuestionsFromBody(bodyLines){
+  const qs = [];
+  let current = null;
+  const qHeaderRe = /^\s*Q[\d-]+\s*\.\s*/;
+  for(const line of bodyLines){
+    if(qHeaderRe.test(line)){
+      if(current) qs.push(current);
+      current = {header: line.trim(), body: []};
+    } else if(current){
+      current.body.push(line);
+    }
+  }
+  if(current) qs.push(current);
+  qs.forEach(q=>{
+    while(q.body.length && !q.body[0].trim()) q.body.shift();
+    while(q.body.length && !q.body[q.body.length-1].trim()) q.body.pop();
+  });
+  return qs;
+}
+
+function parseBlocksFromBody(bodyText){
+  const blocks = {intent:'', callback:'', situation:'', question:'', extras:[]};
+  if(!bodyText) return blocks;
+  const lines = bodyText.split('\n');
+  let current = null;
+  let buffer = [];
+  function flush(){
+    if(current && buffer.length){
+      const text = buffer.join(' ').trim();
+      if(current === 'extras') blocks.extras.push(text);
+      else blocks[current] = (blocks[current] ? blocks[current]+'\n' : '') + text;
+    }
+    buffer = [];
+  }
+  for(const raw of lines){
+    const trimmed = raw.trim();
+    if(!trimmed){ continue; }
+    if(/^(🎯|\[의도\]|의도\s*[:：])/.test(trimmed)){
+      flush(); current = 'intent';
+      buffer.push(trimmed.replace(/^(🎯|\[의도\]|의도\s*[:：])\s*/, ''));
+    } else if(/^(\[콜백\]|콜백\s*[:：])/.test(trimmed)){
+      flush(); current = 'callback';
+      buffer.push(trimmed.replace(/^(\[콜백\]|콜백\s*[:：])\s*/, ''));
+    } else if(/^▶/.test(trimmed)){
+      flush(); current = 'extras';
+      buffer.push(trimmed);
+    } else if(/^(\[상황\]|상황\s*[:：]|\[배경\]|배경\s*[:：])/.test(trimmed)){
+      flush(); current = 'situation';
+      buffer.push(trimmed.replace(/^(\[상황\]|상황\s*[:：]|\[배경\]|배경\s*[:：])\s*/, ''));
+    } else if(/^(\[질문\]|질문\s*[:：]|❓)/.test(trimmed)){
+      flush(); current = 'question';
+      buffer.push(trimmed.replace(/^(\[질문\]|질문\s*[:：]|❓)\s*/, ''));
+    } else if(current){
+      buffer.push(trimmed);
+    } else {
+      // 마커 없으면 첫 줄은 question
+      current = 'question';
+      buffer.push(trimmed);
+    }
+  }
+  flush();
+  return blocks;
+}
+
+function createCardFromQ(q, baseTopY, leftX){
+  // 헤더 파싱
+  let qNum = '', qTitle = '';
+  const m = q.header.match(/^(Q[\d-]+)\s*\.\s*(.+?)$/);
+  if(m){
+    qNum = m[1];
+    qTitle = m[2].trim();
+  } else {
+    qNum = (q.header.match(/Q[\d-]+/)||['Q?'])[0];
+    qTitle = q.header;
+  }
+  // [신뢰형] 같은 분류 마커는 제거
+  qTitle = qTitle.replace(/\[[^\]]+\]/g, '').trim();
+  
+  const bodyText = q.body.join('\n').trim();
+  const blocks = parseBlocksFromBody(bodyText);
+  
+  qCounter++;
+  const id = 'g'+Date.now()+'_'+qCounter;
+  const colorIdx = ((qCounter-1) % 5) + 1;
+  const colorClass = 'q'+colorIdx;
+  
+  // 블록 HTML 빌드
+  let blocksHtml = '';
+  if(blocks.intent){
+    blocksHtml += '<div class="blk b-int"><span class="lbl">🎯 의도</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.intent)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
+  }
+  if(blocks.callback){
+    blocksHtml += '<div class="blk b-cb"><span class="lbl">[콜백]</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.callback)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
+  }
+  if(blocks.situation){
+    blocksHtml += '<div class="blk b-st"><span class="lbl">[상황]</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.situation)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
+  }
+  if(blocks.question){
+    blocksHtml += '<div class="blk b-q"><span class="lbl">[질문]</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.question)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
+  }
+  // 분류 안 된 경우 — body 통째로 [질문] 블록에
+  if(!blocksHtml){
+    blocksHtml = '<div class="blk b-q"><span class="lbl">[질문]</span><span class="blk-text" contenteditable="true">'+escapeHtml(bodyText || qTitle)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
+  }
+  
+  // 메모 (▶ DB 연결 등 extras → 메모로)
+  let memosHtml = '';
+  (blocks.extras || []).forEach(ext=>{
+    memosHtml += '<div class="memo"><span class="memo-icon">💭</span><span class="memo-text" contenteditable="true">'+escapeHtml(ext)+'</span><button class="memo-x" onclick="rmEl(this)">✕</button></div>';
+  });
+  
+  const html = '<div class="qgroup" id="'+id+'" style="top:'+baseTopY+'px;left:'+leftX+'px">'+
+    '<div class="qc '+colorClass+'">'+
+      '<div class="qhead">'+
+        '<span class="qnum">'+escapeHtml(qNum)+'</span>'+
+        '<span class="qlbl" contenteditable="true">'+escapeHtml(qTitle || '(제목)')+'</span>'+
+        '<button class="qc-x" onclick="rmQ(this)" title="질문 삭제">✕</button>'+
+      '</div>'+
+      blocksHtml +
+      '<div class="add-blk-row">'+
+        '<button class="add-blk" onclick="addBlk(this,\'int\')">＋ 의도</button>'+
+        '<button class="add-blk" onclick="addBlk(this,\'cb\')">＋ 콜백</button>'+
+        '<button class="add-blk" onclick="addBlk(this,\'st\')">＋ 상황</button>'+
+        '<button class="add-blk" onclick="addBlk(this,\'q\')">＋ 질문</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="memo-col" id="m_'+id+'">'+
+      '<div class="memos">'+memosHtml+'</div>'+
+      '<button class="add-memo" onclick="addMemo(\'m_'+id+'\')">＋ MORE IDEAS?</button>'+
+    '</div>'+
+  '</div>';
+  
+  const canvas = document.getElementById('canvas');
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const newGroup = tmp.firstElementChild;
+  canvas.appendChild(newGroup);
+  makeDraggable(newGroup);
+  return newGroup;
+}
+
+window.importCorner = function(idx){
+  const corner = _onAirCorners[idx];
+  if(!corner) return;
+  const qs = parseQuestionsFromBody(corner.body);
+  if(!qs.length){
+    alert('이 코너에 Q1, Q2 같은 질문 카드가 없어요.\n\nON AIR 텍스트에서 "Q1." 형식으로 질문을 정리해주세요.');
+    return;
+  }
+  // 기존 카드 아래에 떨어뜨리기
+  const groups = document.querySelectorAll('.qgroup');
+  let topY = 10;
+  if(groups.length){
+    let maxBottom = 0;
+    groups.forEach(g=>{
+      const t = parseInt(g.style.top)||0;
+      const h = g.offsetHeight;
+      maxBottom = Math.max(maxBottom, t+h);
+    });
+    topY = maxBottom + 24;
+  }
+  // 코너 그룹 라벨처럼 가로로 펼치기 (각 카드 280px + 메모 156px + 간격)
+  const cardWidth = 460;  // qc + memo-col + gap
+  qs.forEach((q, i)=>{
+    createCardFromQ(q, topY, 8 + i * cardWidth);
+  });
+  setTimeout(refreshAll, 50);
+  scheduleSave();
+  // 시각 피드백
+  const btn = document.querySelectorAll('#corner-buttons .import-btn')[idx];
+  if(btn){
+    btn.classList.add('dim');
+    btn.innerHTML = '✓ ' + btn.innerHTML;
+    setTimeout(()=>{
+      btn.classList.remove('dim');
+      btn.innerHTML = btn.innerHTML.replace(/^✓\s*/, '');
+    }, 2500);
+  }
+};
+
+function renderCornerImportBar(corners){
+  const bar = document.getElementById('import-bar');
+  const buttonsEl = document.getElementById('corner-buttons');
+  if(!bar || !buttonsEl) return;
+  if(!corners.length){
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  buttonsEl.innerHTML = corners.map((c,i)=>{
+    const qCount = parseQuestionsFromBody(c.body).length;
+    const qLabel = qCount > 0 ? ' · Q'+qCount : '';
+    return '<button class="import-btn" onclick="importCorner('+i+')" title="이 코너의 Q 카드들을 마인드맵으로 가져오기">'+
+      '<span class="num">#'+escapeHtml(c.number)+'</span>'+
+      '<span class="corner-name">'+escapeHtml(c.title)+'</span>'+
+      '<span style="font-size:9.5px;color:#888780;font-family:DM Mono,monospace;">'+qLabel+'</span>'+
+      '</button>';
+  }).join(' ');
+}
+
+window.loadOnAirCorners = async function(){
+  try{
+    const d = await fetch('/api/post/wdaebon').then(r=>r.json());
+    if(!d || !d.content){
+      _onAirCorners = [];
+      renderCornerImportBar([]);
+      return;
+    }
+    let text = d.content;
+    try{
+      const payload = JSON.parse(d.content);
+      if(payload && typeof payload === 'object' && payload.text !== undefined){
+        text = payload.text;
+      }
+    }catch(e){}
+    _onAirCorners = parseOnAirText(text);
+    renderCornerImportBar(_onAirCorners);
+  }catch(e){
+    console.error('Load ON AIR error:', e);
+  }
+};
+
+
 function serialize(){
   const groups=[...document.querySelectorAll('.qgroup')].map(g=>g.outerHTML);
   const cgItems=[...document.querySelectorAll('#cg-list .cg-item')].map(i=>i.outerHTML);
@@ -616,6 +881,7 @@ window.addEventListener('beforeunload',(e)=>{
 
 // 초기 로드
 loadMindmap();
+loadOnAirCorners();
 </script>
 
 </body>
