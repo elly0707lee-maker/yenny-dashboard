@@ -200,6 +200,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 
       <div class="canvas-toolbar">
         <button class="tool-btn primary" onclick="addQuestion()">＋ NEW Q</button>
+        <button class="tool-btn" onclick="clearAll()" style="color:#A32D2D;border-color:#FCC1AF;" title="전체 초기화 (캔버스 + CG + 휴지통)">🗑 비우기</button>
         <span class="save-ind" id="save-ind">저장됨</span>
         <button class="trash-btn" id="trash-btn" hidden onclick="toggleTrash()">🗑 <span class="trash-count" id="trash-count">0</span></button>
       </div>
@@ -371,6 +372,23 @@ window.restoreTrash=function(idx){
   trash.splice(idx,1);
   refreshTrash();
   refreshAll();
+  scheduleSave();
+};
+
+window.clearAll=function(){
+  const cardCount = document.querySelectorAll('.qgroup').length;
+  const cgCount = document.querySelectorAll('#cg-list .cg-item').length;
+  if(cardCount===0 && cgCount===0 && trash.length===0){
+    return;
+  }
+  if(!confirm('마인드맵 전체를 비울까요?\n\n• Q 카드 '+cardCount+'개\n• CG '+cgCount+'개\n• 휴지통 '+trash.length+'개\n\n※ 복구 불가')) return;
+  document.querySelectorAll('.qgroup').forEach(g=>g.remove());
+  document.getElementById('cg-list').innerHTML='';
+  renumberCg();
+  trash.length=0;
+  refreshTrash();
+  qCounter=0;
+  setTimeout(refreshAll,0);
   scheduleSave();
 };
 
