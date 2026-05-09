@@ -50,9 +50,18 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .qc-x{cursor:pointer;background:none;border:none;font-size:11px;padding:0 3px;opacity:0;transition:opacity 0.15s,color 0.15s;font-family:inherit;flex-shrink:0;color:#888780;line-height:1;align-self:center}
 .qc:hover .qc-x{opacity:0.45}
 .qc-x:hover{opacity:1!important;color:#A32D2D}
-.blk{display:flex;align-items:flex-start;gap:5px;padding:5px 8px;border-radius:5px;font-size:12px;line-height:1.5;margin-bottom:4px}
+.blk{display:flex;align-items:flex-start;gap:5px;padding:5px 8px;border-radius:5px;font-size:12px;line-height:1.5;margin-bottom:4px;position:relative;transition:opacity 0.2s}
 .blk:last-child{margin-bottom:0}
-.lbl{font-size:10px;font-weight:500;flex-shrink:0;letter-spacing:0.2px;padding-top:1px}
+.blk-handle{cursor:grab;color:#B4B2A9;font-size:10px;flex-shrink:0;padding:0 1px;line-height:1.2;user-select:none;align-self:center;letter-spacing:-2px;opacity:0;transition:opacity 0.15s;font-family:inherit}
+.blk:hover .blk-handle{opacity:0.45}
+.blk-handle:hover{opacity:1!important;color:#1a1d23}
+.blk-handle:active{cursor:grabbing}
+.b-q .blk-handle{color:#FAC775}
+.b-q:hover .blk-handle{opacity:0.55}
+.blk-dragging{opacity:0.35!important;background:rgba(232,184,75,0.2)!important;outline:1px dashed #e8b84b}
+.lbl{font-size:10px;font-weight:500;flex-shrink:0;letter-spacing:0.2px;padding-top:1px;outline:none}
+.lbl[contenteditable]:focus{background:rgba(255,255,255,0.65);border-radius:3px;padding:0 3px}
+.lbl[data-placeholder]:empty::before{content:attr(data-placeholder);color:#B4B2A9;font-weight:400}
 .blk-text{flex:1;outline:none;min-width:0}
 .blk-text:focus{background:rgba(255,255,255,0.65);border-radius:3px}
 .blk-x{cursor:pointer;background:none;border:none;font-size:10px;padding:0 2px;opacity:0;transition:opacity 0.15s;font-family:inherit;flex-shrink:0;color:inherit;line-height:1}
@@ -62,6 +71,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .b-cb{background:#FAEEDA;color:#633806;border-left:2px solid #BA7517;padding-left:8px;border-radius:0 5px 5px 0}.b-cb .lbl{color:#854F0B}
 .b-st{background:#E6F1FB;color:#042C53}.b-st .lbl{color:#185FA5}
 .b-q{background:#1a1d23;color:#fff;padding:7px 10px;font-weight:500}.b-q .lbl{color:#FAC775}
+.b-mr{background:#FBEAF0;color:#7C2543}.b-mr .lbl{color:#993556}
+.b-sw{background:#F4ECFB;color:#3C1B5C;border-left:2px solid #7F77DD;padding-left:8px;border-radius:0 5px 5px 0}.b-sw .lbl{color:#534AB7}
 .add-blk-row{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:0.5px dashed #E5E3DA}
 .add-blk{padding:3px 8px;background:transparent;border:0.5px dashed #B4B2A9;color:#888780;border-radius:4px;cursor:pointer;font-size:9.5px;font-family:'DM Mono',monospace;letter-spacing:0.3px;transition:all 0.15s}
 .add-blk:hover{background:#F1EFE8;color:#1a1d23;border-color:#1a1d23}
@@ -426,18 +437,15 @@ window.addMemo=function(mid){
   scheduleSave();
 };
 
-const BLK_TEMPLATES = {
-  int:  {cls:'b-int',  lbl:'🎯 의도',  ph:'(의도 입력)'},
-  cb:   {cls:'b-cb',   lbl:'[콜백]',   ph:'(콜백 입력)'},
-  st:   {cls:'b-st',   lbl:'[상황]',   ph:'(상황 입력)'},
-  q:    {cls:'b-q',    lbl:'[질문]',   ph:'(질문 입력)'}
-};
-window.addBlk=function(btn, type){
-  const qc=btn.closest('.qc');
-  const tpl=BLK_TEMPLATES[type];if(!tpl||!qc)return;
+// 빈 블록 추가 — 라벨/내용 자유 편집
+window.addEmptyBlk=function(btn){
+  const qc=btn.closest('.qc');if(!qc)return;
   const div=document.createElement('div');
-  div.className='blk '+tpl.cls;
-  div.innerHTML='<span class="lbl">'+tpl.lbl+'</span><span class="blk-text" contenteditable="true">'+tpl.ph+'</span><button class="blk-x" onclick="rmEl(this)">✕</button>';
+  div.className='blk b-int';
+  div.innerHTML='<span class="blk-handle" draggable="true" title="드래그로 순서 변경">⋮⋮</span>'+
+    '<span class="lbl" contenteditable="true" data-placeholder="라벨"></span>'+
+    '<span class="blk-text" contenteditable="true">내용 입력...</span>'+
+    '<button class="blk-x" onclick="rmEl(this)">✕</button>';
   // add-blk-row 앞에 삽입
   const row=qc.querySelector('.add-blk-row');
   qc.insertBefore(div, row);
@@ -447,6 +455,43 @@ window.addBlk=function(btn, type){
   setTimeout(refreshAll,0);
   scheduleSave();
 };
+
+// === 블록 드래그 정렬 (이벤트 위임) ===
+let _draggingBlk = null;
+document.addEventListener('dragstart', (e)=>{
+  const handle = e.target.closest('.blk-handle');
+  if(!handle) return;
+  const blk = handle.closest('.blk');
+  if(!blk) return;
+  _draggingBlk = blk;
+  blk.classList.add('blk-dragging');
+  try {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  } catch(err){}
+});
+document.addEventListener('dragover', (e)=>{
+  if(!_draggingBlk) return;
+  const targetBlk = e.target.closest('.blk');
+  if(!targetBlk || targetBlk === _draggingBlk) return;
+  // 같은 카드 안에서만 순서 변경
+  if(_draggingBlk.parentNode !== targetBlk.parentNode) return;
+  e.preventDefault();
+  const rect = targetBlk.getBoundingClientRect();
+  const middle = rect.top + rect.height/2;
+  if(e.clientY < middle){
+    targetBlk.parentNode.insertBefore(_draggingBlk, targetBlk);
+  } else {
+    targetBlk.parentNode.insertBefore(_draggingBlk, targetBlk.nextSibling);
+  }
+});
+document.addEventListener('dragend', (e)=>{
+  if(!_draggingBlk) return;
+  _draggingBlk.classList.remove('blk-dragging');
+  _draggingBlk = null;
+  setTimeout(refreshAll, 0);
+  scheduleSave();
+});
 
 window.addQuestion=function(){
   qCounter++;
@@ -474,12 +519,14 @@ window.addQuestion=function(){
         '<span class="qlbl" contenteditable="true">(제목 입력)</span>'+
         '<button class="qc-x" onclick="rmQ(this)" title="질문 삭제">✕</button>'+
       '</div>'+
-      '<div class="blk b-q"><span class="lbl">[질문]</span><span class="blk-text" contenteditable="true">(질문 입력)</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>'+
+      '<div class="blk b-q">'+
+        '<span class="blk-handle" draggable="true">⋮⋮</span>'+
+        '<span class="lbl" contenteditable="true" data-placeholder="라벨">[질문]</span>'+
+        '<span class="blk-text" contenteditable="true">(질문 입력)</span>'+
+        '<button class="blk-x" onclick="rmEl(this)">✕</button>'+
+      '</div>'+
       '<div class="add-blk-row">'+
-        '<button class="add-blk" onclick="addBlk(this,\'int\')">＋ 의도</button>'+
-        '<button class="add-blk" onclick="addBlk(this,\'cb\')">＋ 콜백</button>'+
-        '<button class="add-blk" onclick="addBlk(this,\'st\')">＋ 상황</button>'+
-        '<button class="add-blk" onclick="addBlk(this,\'q\')">＋ 질문</button>'+
+        '<button class="add-blk" onclick="addEmptyBlk(this)">＋ 추가</button>'+
       '</div>'+
     '</div>'+
     '<div class="memo-col" id="m_'+id+'">'+
@@ -615,57 +662,65 @@ function parseQuestionsFromBody(bodyLines){
   return qs;
 }
 
+// 한 줄 = 한 블록. 분류·합치기 안 함. 마커는 그대로 라벨에 살림.
 function parseBlocksFromBody(bodyText){
-  const blocks = {intent:'', callback:'', situation:'', question:'', extras:[]};
-  if(!bodyText) return blocks;
+  const items = [];
+  if(!bodyText) return items;
   const lines = bodyText.split('\n');
-  let current = null;
-  let buffer = [];
-  function flush(){
-    if(current && buffer.length){
-      const text = buffer.join(' ').trim();
-      if(current === 'extras') blocks.extras.push(text);
-      else blocks[current] = (blocks[current] ? blocks[current]+'\n' : '') + text;
-    }
-    buffer = [];
-  }
   for(const raw of lines){
     const trimmed = raw.trim();
-    if(!trimmed){ continue; }
-    // ⇒ 자막은 마인드맵에 포함 X (방송용 답변 자막)
-    if(/^⇒/.test(trimmed)){ continue; }
-    if(/^(🎯|\[의도\]|의도\s*[:：])/.test(trimmed)){
-      flush(); current = 'intent';
-      buffer.push(trimmed.replace(/^(🎯|\[의도\]|의도\s*[:：])\s*/, ''));
-    } else if(/^(\[콜백\]|콜백\s*[:：])/.test(trimmed)){
-      flush(); current = 'callback';
-      buffer.push(trimmed.replace(/^(\[콜백\]|콜백\s*[:：])\s*/, ''));
-    } else if(/^▶/.test(trimmed)){
-      // ▶ DB 리콜 → 콜백 블록에 통합
-      if(current === 'callback'){
-        // 이미 콜백 중이면 같은 블록에 추가 (▶ 표시 유지)
-        buffer.push(trimmed);
-      } else {
-        flush();
-        current = 'callback';
-        buffer.push(trimmed);
-      }
-    } else if(/^(\[상황\]|상황\s*[:：]|\[배경\]|배경\s*[:：])/.test(trimmed)){
-      flush(); current = 'situation';
-      buffer.push(trimmed.replace(/^(\[상황\]|상황\s*[:：]|\[배경\]|배경\s*[:：])\s*/, ''));
-    } else if(/^(\[질문\]|질문\s*[:：]|❓)/.test(trimmed)){
-      flush(); current = 'question';
-      buffer.push(trimmed.replace(/^(\[질문\]|질문\s*[:：]|❓)\s*/, ''));
-    } else if(current){
-      buffer.push(trimmed);
-    } else {
-      // 마커 없으면 첫 줄은 question
-      current = 'question';
-      buffer.push(trimmed);
+    if(!trimmed) continue;
+    // ⇒ 자막은 무시
+    if(/^⇒/.test(trimmed)) continue;
+    
+    let marker = '', text = trimmed, cls = 'b-int';
+    let m;
+    
+    // 🎯 의도
+    if((m = trimmed.match(/^🎯\s*(?:질문\s*의도\s*[:：]\s*)?(.*)/))){
+      marker = '🎯 의도'; text = m[1].trim(); cls = 'b-int';
     }
+    // ▶ DB / DB연결
+    else if((m = trimmed.match(/^▶\s*(.*)/))){
+      marker = '▶ DB'; text = m[1].trim(); cls = 'b-cb';
+    }
+    // → [콜백] 또는 → 콜백
+    else if((m = trimmed.match(/^→\s*\[콜백\]\s*(.*)/)) || (m = trimmed.match(/^→\s*콜백\s*[:：]?\s*(.*)/))){
+      marker = '→ 콜백'; text = m[1].trim(); cls = 'b-cb';
+    }
+    // [콜백]
+    else if((m = trimmed.match(/^\[콜백\]\s*(.*)/))){
+      marker = '[콜백]'; text = m[1].trim(); cls = 'b-cb';
+    }
+    // [💫 말랑] 또는 [말랑]
+    else if((m = trimmed.match(/^\[(?:💫\s*)?말랑\]\s*(.*)/))){
+      marker = '💫 말랑'; text = m[1].trim(); cls = 'b-mr';
+    }
+    // [송곳] 또는 [🎯송곳]
+    else if((m = trimmed.match(/^\[(?:🎯\s*)?송곳\]\s*(.*)/))){
+      marker = '🎯 송곳'; text = m[1].trim(); cls = 'b-sw';
+    }
+    // [상황] / [배경]
+    else if((m = trimmed.match(/^\[(상황|배경)\]\s*(.*)/))){
+      marker = '['+m[1]+']'; text = m[2].trim(); cls = 'b-st';
+    }
+    // [질문] 또는 ❓
+    else if((m = trimmed.match(/^\[질문\]\s*(.*)/)) || (m = trimmed.match(/^❓\s*(.*)/))){
+      marker = '[질문]'; text = m[1].trim(); cls = 'b-q';
+    }
+    // 기타 [XXX] 마커 (이름표 등)
+    else if((m = trimmed.match(/^\[([^\]]+)\]\s*(.*)/))){
+      marker = '['+m[1]+']'; text = m[2].trim(); cls = 'b-int';
+    }
+    // 마커 없는 일반 줄
+    else {
+      marker = ''; text = trimmed; cls = 'b-int';
+    }
+    
+    if(!text) text = '(빈 줄)';
+    items.push({marker, text, cls});
   }
-  flush();
-  return blocks;
+  return items;
 }
 
 function createCardFromQ(q, baseTopY, leftX){
@@ -679,41 +734,36 @@ function createCardFromQ(q, baseTopY, leftX){
     qNum = (q.header.match(/Q[\d-]+/)||['Q?'])[0];
     qTitle = q.header;
   }
-  // [신뢰형] 같은 분류 마커는 제거
+  // [신뢰형] [🅰️ 신뢰형] [반종민] 같은 분류·이름 마커 제거
   qTitle = qTitle.replace(/\[[^\]]+\]/g, '').trim();
   
   const bodyText = q.body.join('\n').trim();
-  const blocks = parseBlocksFromBody(bodyText);
+  const items = parseBlocksFromBody(bodyText);
   
   qCounter++;
   const id = 'g'+Date.now()+'_'+qCounter;
   const colorIdx = ((qCounter-1) % 5) + 1;
   const colorClass = 'q'+colorIdx;
   
-  // 블록 HTML 빌드
+  // 줄별로 별개 블록 렌더 — 분류·합치기 안 함
   let blocksHtml = '';
-  if(blocks.intent){
-    blocksHtml += '<div class="blk b-int"><span class="lbl">🎯 의도</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.intent)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
-  }
-  if(blocks.callback){
-    blocksHtml += '<div class="blk b-cb"><span class="lbl">[콜백]</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.callback)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
-  }
-  if(blocks.situation){
-    blocksHtml += '<div class="blk b-st"><span class="lbl">[상황]</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.situation)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
-  }
-  if(blocks.question){
-    blocksHtml += '<div class="blk b-q"><span class="lbl">[질문]</span><span class="blk-text" contenteditable="true">'+escapeHtml(blocks.question)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
-  }
-  // 분류 안 된 경우 — body 통째로 [질문] 블록에
-  if(!blocksHtml){
-    blocksHtml = '<div class="blk b-q"><span class="lbl">[질문]</span><span class="blk-text" contenteditable="true">'+escapeHtml(bodyText || qTitle)+'</span><button class="blk-x" onclick="rmEl(this)">✕</button></div>';
-  }
-  
-  // 메모 (▶ DB 연결 등 extras → 메모로)
-  let memosHtml = '';
-  (blocks.extras || []).forEach(ext=>{
-    memosHtml += '<div class="memo"><span class="memo-icon">💭</span><span class="memo-text" contenteditable="true">'+escapeHtml(ext)+'</span><button class="memo-x" onclick="rmEl(this)">✕</button></div>';
+  items.forEach(it => {
+    blocksHtml += '<div class="blk '+it.cls+'">'+
+      '<span class="blk-handle" draggable="true" title="드래그로 순서 변경">⋮⋮</span>'+
+      '<span class="lbl" contenteditable="true" data-placeholder="라벨">'+escapeHtml(it.marker)+'</span>'+
+      '<span class="blk-text" contenteditable="true">'+escapeHtml(it.text)+'</span>'+
+      '<button class="blk-x" onclick="rmEl(this)">✕</button>'+
+    '</div>';
   });
+  // 빈 카드 방지 — 본문 없으면 빈 [질문] 블록
+  if(!blocksHtml){
+    blocksHtml = '<div class="blk b-q">'+
+      '<span class="blk-handle" draggable="true">⋮⋮</span>'+
+      '<span class="lbl" contenteditable="true" data-placeholder="라벨">[질문]</span>'+
+      '<span class="blk-text" contenteditable="true">'+escapeHtml(qTitle || '(질문 입력)')+'</span>'+
+      '<button class="blk-x" onclick="rmEl(this)">✕</button>'+
+    '</div>';
+  }
   
   const html = '<div class="qgroup" id="'+id+'" style="top:'+baseTopY+'px;left:'+leftX+'px">'+
     '<div class="qc '+colorClass+'">'+
@@ -724,14 +774,11 @@ function createCardFromQ(q, baseTopY, leftX){
       '</div>'+
       blocksHtml +
       '<div class="add-blk-row">'+
-        '<button class="add-blk" onclick="addBlk(this,\'int\')">＋ 의도</button>'+
-        '<button class="add-blk" onclick="addBlk(this,\'cb\')">＋ 콜백</button>'+
-        '<button class="add-blk" onclick="addBlk(this,\'st\')">＋ 상황</button>'+
-        '<button class="add-blk" onclick="addBlk(this,\'q\')">＋ 질문</button>'+
+        '<button class="add-blk" onclick="addEmptyBlk(this)">＋ 추가</button>'+
       '</div>'+
     '</div>'+
     '<div class="memo-col" id="m_'+id+'">'+
-      '<div class="memos">'+memosHtml+'</div>'+
+      '<div class="memos"></div>'+
       '<button class="add-memo" onclick="addMemo(\'m_'+id+'\')">＋ MORE IDEAS?</button>'+
     '</div>'+
   '</div>';
