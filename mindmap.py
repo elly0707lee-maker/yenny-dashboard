@@ -182,6 +182,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 <div class="import-bar" id="import-bar" hidden>
   <span class="label">📥 ON AIR에서:</span>
   <span id="corner-buttons"></span>
+  <span style="font-size:9.5px;color:#A8A6A0;font-family:'DM Mono',monospace;letter-spacing:0.3px;margin-left:6px;">버튼 누를 때마다 그 시점 데이터 추가</span>
   <button class="import-refresh" onclick="loadOnAirCorners()" title="ON AIR 데이터 다시 불러오기">↻</button>
 </div>
 
@@ -882,6 +883,19 @@ window.addEventListener('beforeunload',(e)=>{
 // 초기 로드
 loadMindmap();
 loadOnAirCorners();
+
+// === ON AIR 자동 동기화 ===
+// 1) 다른 탭에서 돌아오면 즉시 새로고침
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden) loadOnAirCorners();
+});
+window.addEventListener('focus', ()=>{
+  loadOnAirCorners();
+});
+// 2) 30초마다 백그라운드 fetch (탭이 활성일 때만)
+setInterval(()=>{
+  if(!document.hidden) loadOnAirCorners();
+}, 30000);
 </script>
 
 </body>
