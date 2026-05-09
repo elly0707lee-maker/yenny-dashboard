@@ -632,6 +632,8 @@ function parseBlocksFromBody(bodyText){
   for(const raw of lines){
     const trimmed = raw.trim();
     if(!trimmed){ continue; }
+    // ⇒ 자막은 마인드맵에 포함 X (방송용 답변 자막)
+    if(/^⇒/.test(trimmed)){ continue; }
     if(/^(🎯|\[의도\]|의도\s*[:：])/.test(trimmed)){
       flush(); current = 'intent';
       buffer.push(trimmed.replace(/^(🎯|\[의도\]|의도\s*[:：])\s*/, ''));
@@ -639,8 +641,15 @@ function parseBlocksFromBody(bodyText){
       flush(); current = 'callback';
       buffer.push(trimmed.replace(/^(\[콜백\]|콜백\s*[:：])\s*/, ''));
     } else if(/^▶/.test(trimmed)){
-      flush(); current = 'extras';
-      buffer.push(trimmed);
+      // ▶ DB 리콜 → 콜백 블록에 통합
+      if(current === 'callback'){
+        // 이미 콜백 중이면 같은 블록에 추가 (▶ 표시 유지)
+        buffer.push(trimmed);
+      } else {
+        flush();
+        current = 'callback';
+        buffer.push(trimmed);
+      }
     } else if(/^(\[상황\]|상황\s*[:：]|\[배경\]|배경\s*[:：])/.test(trimmed)){
       flush(); current = 'situation';
       buffer.push(trimmed.replace(/^(\[상황\]|상황\s*[:：]|\[배경\]|배경\s*[:：])\s*/, ''));
