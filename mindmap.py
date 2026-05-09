@@ -139,7 +139,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 .trash-restore:hover{color:#185FA5}
 .trash-empty{font-size:10px;color:#A8A6A0;text-align:center;padding:10px;font-family:'DM Mono',monospace}
 
-.hint{position:absolute;bottom:8px;left:10px;font-size:10px;color:#A8A6A0;font-family:'DM Mono',monospace;letter-spacing:0.4px;pointer-events:none;z-index:1}
+.hint{position:absolute;bottom:8px;left:10px;font-size:10px;color:#A8A6A0;font-family:'DM Mono',monospace;letter-spacing:0.4px;pointer-events:none;z-index:1;line-height:1.5}
+.hint b{color:#888780;font-weight:500}
+
+.text-menu{position:fixed;background:#fff;border:0.5px solid #1a1d23;border-radius:8px;padding:6px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;display:flex;flex-direction:column;gap:4px}
+.tm-row{display:flex;gap:3px}
+.tm-btn{width:30px;height:28px;border:0.5px solid #D3D1C7;background:#fff;color:#1a1d23;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;padding:0;font-family:inherit;transition:all 0.1s}
+.tm-btn:hover{background:#1a1d23;color:#fff;border-color:#1a1d23}
 .empty-state{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#A8A6A0;font-size:13px;line-height:1.7;pointer-events:none}
 .empty-state b{color:#888780;font-size:14px}
 
@@ -209,7 +215,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
         <div class="trash-list" id="trash-list"></div>
       </div>
 
-      <div class="hint">⌘ Q번호·헤더 잡고 드래그 · CG 칩 클릭=Q 순환 · 호버하면 ✕</div>
+      <div class="hint">
+        <b>드래그</b>: Q번호·헤더 잡기 · <b>CG칩</b>: 클릭=Q 순환<br>
+        <b>텍스트</b>: ⌘+B/I/U · ⇧+H(노랑) ⇧+D(빨강) ⇧+B(파랑) ⇧+G(초록) ⇧+L(크게) ⇧+N(제거) · <b>우클릭</b>=메뉴
+      </div>
     </div>
   </div>
 
@@ -897,6 +906,78 @@ window.addEventListener('beforeunload',(e)=>{
     saveMindmap();
   }
 });
+
+// === 텍스트 효과 단축키 (Q 카드 / 메모 / CG 안에서) ===
+document.addEventListener('keydown', function(e){
+  const active = document.activeElement;
+  if(!active || !active.isContentEditable) return;
+  if(!active.closest('.qgroup, .cg-item')) return;
+  const mod = e.metaKey || e.ctrlKey;
+  if(!mod) return;
+  // Cmd/Ctrl + B/I/U는 브라우저 기본 동작으로 처리됨 (자동)
+  if(!e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  if(key === 'h'){ e.preventDefault(); document.execCommand('backColor', false, '#fff3a0'); }
+  else if(key === 'y'){ e.preventDefault(); document.execCommand('backColor', false, '#FFD6D6'); }   // 분홍 하이라이트
+  else if(key === 'p'){ e.preventDefault(); document.execCommand('backColor', false, '#D6F0FF'); }   // 파랑 하이라이트
+  else if(key === 'x'){ e.preventDefault(); document.execCommand('backColor', false, 'transparent'); } // 하이라이트 제거
+  else if(key === 'l'){ e.preventDefault(); document.execCommand('fontSize', false, '5'); }
+  else if(key === 'b'){ e.preventDefault(); document.execCommand('foreColor', false, '#0984e3'); }   // 파란 글자
+  else if(key === 'g'){ e.preventDefault(); document.execCommand('foreColor', false, '#00b894'); }   // 초록 글자
+  else if(key === 'd'){ e.preventDefault(); document.execCommand('foreColor', false, '#d63031'); }   // 빨간 글자
+  else if(key === 'n'){ e.preventDefault(); document.execCommand('foreColor', false, ''); document.execCommand('backColor', false, 'transparent'); } // 색깔 다 제거
+}, true);
+
+// 우클릭 메뉴 — 텍스트 효과 빠르게 적용 (PWA/모바일에선 길게 누르기)
+document.addEventListener('contextmenu', function(e){
+  const target = e.target;
+  if(!target || !target.isContentEditable) return;
+  if(!target.closest('.qgroup, .cg-item')) return;
+  // 텍스트 선택 있을 때만 효과
+  const sel = window.getSelection();
+  if(!sel.rangeCount || sel.toString().length === 0) return;
+  e.preventDefault();
+  showTextMenu(e.clientX, e.clientY, target);
+});
+
+function showTextMenu(x, y, target){
+  const old = document.getElementById('text-menu');
+  if(old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 'text-menu';
+  menu.className = 'text-menu';
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.innerHTML =
+    '<div class="tm-row">'+
+      '<button class="tm-btn" onclick="document.execCommand(\'bold\');closeTextMenu()" title="굵게"><b>B</b></button>'+
+      '<button class="tm-btn" onclick="document.execCommand(\'italic\');closeTextMenu()" title="기울임"><i>I</i></button>'+
+      '<button class="tm-btn" onclick="document.execCommand(\'underline\');closeTextMenu()" title="밑줄"><u>U</u></button>'+
+      '<button class="tm-btn" onclick="document.execCommand(\'strikeThrough\');closeTextMenu()" title="취소선"><s>S</s></button>'+
+    '</div>'+
+    '<div class="tm-row">'+
+      '<button class="tm-btn" style="background:#fff3a0" onclick="document.execCommand(\'backColor\',false,\'#fff3a0\');closeTextMenu()" title="노랑">H</button>'+
+      '<button class="tm-btn" style="background:#FFD6D6" onclick="document.execCommand(\'backColor\',false,\'#FFD6D6\');closeTextMenu()" title="분홍">H</button>'+
+      '<button class="tm-btn" style="background:#D6F0FF" onclick="document.execCommand(\'backColor\',false,\'#D6F0FF\');closeTextMenu()" title="파랑">H</button>'+
+      '<button class="tm-btn" onclick="document.execCommand(\'backColor\',false,\'transparent\');closeTextMenu()" title="제거">✕</button>'+
+    '</div>'+
+    '<div class="tm-row">'+
+      '<button class="tm-btn" style="color:#d63031" onclick="document.execCommand(\'foreColor\',false,\'#d63031\');closeTextMenu()" title="빨강"><b>A</b></button>'+
+      '<button class="tm-btn" style="color:#0984e3" onclick="document.execCommand(\'foreColor\',false,\'#0984e3\');closeTextMenu()" title="파랑"><b>A</b></button>'+
+      '<button class="tm-btn" style="color:#00b894" onclick="document.execCommand(\'foreColor\',false,\'#00b894\');closeTextMenu()" title="초록"><b>A</b></button>'+
+      '<button class="tm-btn" onclick="document.execCommand(\'foreColor\',false,\'\');closeTextMenu()" title="기본"><b>A</b></button>'+
+    '</div>';
+  document.body.appendChild(menu);
+  // 클릭 다른 곳 → 닫기
+  setTimeout(()=>{
+    document.addEventListener('click', closeTextMenu, {once:true});
+  }, 50);
+}
+window.closeTextMenu = function(){
+  const m = document.getElementById('text-menu');
+  if(m) m.remove();
+  scheduleSave();
+};
 
 // 초기 로드
 loadMindmap();
