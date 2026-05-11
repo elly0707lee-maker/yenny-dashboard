@@ -73,6 +73,8 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-onair-item .title{color:#1a1d23;font-weight:500;font-size:12.5px}
 .mm-onair-item .meta{display:block;color:#888780;font-size:10px;margin-top:3px;font-family:'DM Mono',monospace}
 .mm-onair-empty{padding:18px 10px;text-align:center;color:#888780;font-size:11px;line-height:1.5}
+.mm-onair-reset{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;padding:7px;border:0.5px dashed #E68A8A;background:#FCEBEB;border-radius:5px;cursor:pointer;font-size:11px;color:#A32D2D;margin-top:6px;font-family:'Noto Sans KR',sans-serif}
+.mm-onair-reset:hover{border-color:#A32D2D;background:#F5C9C9;border-style:solid}
 
 .mm-body{display:grid;grid-template-columns:180px 1fr;gap:14px;align-items:start}
 
@@ -257,6 +259,7 @@ input,textarea,button{font-family:inherit;color:inherit}
           <div class="mm-onair-menu" id="mm-onair-menu" style="display:none">
             <button class="mm-onair-refresh" onclick="loadOnAirCorners()">↻ 다시 불러오기</button>
             <div id="mm-onair-list"></div>
+            <button class="mm-onair-reset" onclick="resetMindmap()">🗑 마인드맵 전체 초기화</button>
           </div>
         </div>
         <button class="mm-new-q" onclick="addQuestion()"><span style="font-size:14px;line-height:1">＋</span>새 Q</button>
@@ -1109,6 +1112,29 @@ function parseLineToComment(rawLine){
   else if((m = trimmed.match(/^\[([^\]]+)\]\s*(.*)/))){ label=m[1]; text=m[2].trim(); }
   return {label, text: text || trimmed};
 }
+
+window.resetMindmap = function(){
+  const qCount = MD.corner.questions.length;
+  const cgCount = MD.corner.questions.reduce((s,q)=>s+(q.cgs||[]).length, 0);
+  if(qCount === 0 && !MD.corner.title && !MD.corner.subtitle){
+    alert('이미 비어있습니다.');
+    return;
+  }
+  let msg = '마인드맵 전체를 초기화할까요?\n\n';
+  if(MD.corner.title) msg += '코너: "'+MD.corner.title+'"\n';
+  msg += 'Q '+qCount+'개';
+  if(cgCount) msg += ', CG '+cgCount+'장';
+  msg += ' 이 사라집니다.\n(되돌릴 수 없습니다)';
+  if(!confirm(msg)) return;
+  MD = {
+    corner: { title:'', subtitle:'', questions:[] },
+    activeQuestionId: null
+  };
+  const menu = document.getElementById('mm-onair-menu');
+  if(menu) menu.style.display = 'none';
+  render();
+  scheduleSave();
+};
 
 window.importCornerToMindmap = function(cornerNumber){
   const corner = _onAirCorners.find(c => c.number === cornerNumber);
