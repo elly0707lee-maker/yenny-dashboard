@@ -57,6 +57,22 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-corner-sub::placeholder{color:#B4B2A9}
 .mm-new-q{font-size:12px;padding:6px 14px;background:#1a1d23;color:#e8b84b;border:0.5px solid #1a1d23;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;height:fit-content;align-self:center}
 .mm-new-q:hover{background:#2C2C2A}
+.mm-actions{display:flex;gap:6px;align-items:center;align-self:center}
+.mm-onair-wrap{position:relative}
+.mm-onair-btn{font-size:11px;padding:6px 11px;background:#FAEEDA;color:#633806;border:0.5px solid #BA7517;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;letter-spacing:0.3px}
+.mm-onair-btn:hover{background:#EF9F27;color:#fff;border-color:#854F0B}
+.mm-onair-btn .caret{font-size:8px;opacity:0.6}
+.mm-onair-menu{position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:0.5px solid #D3D1C7;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);min-width:300px;z-index:60;padding:6px;max-height:420px;overflow-y:auto}
+.mm-onair-menu.show{display:block}
+.mm-onair-refresh{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;padding:6px;border:0.5px dashed #D3D1C7;background:transparent;border-radius:5px;cursor:pointer;font-size:11px;color:#888780;margin-bottom:5px}
+.mm-onair-refresh:hover{border-color:#888780;color:#1a1d23}
+.mm-onair-item{display:block;width:100%;text-align:left;padding:8px 10px;background:transparent;border:none;cursor:pointer;border-radius:5px;line-height:1.4;border-bottom:0.5px solid #F1EFE8}
+.mm-onair-item:last-child{border-bottom:none}
+.mm-onair-item:hover{background:#FDF7EC}
+.mm-onair-item .num{font-family:'DM Mono',monospace;color:#854F0B;font-size:10px;margin-right:7px;background:#FAEEDA;padding:1px 5px;border-radius:3px}
+.mm-onair-item .title{color:#1a1d23;font-weight:500;font-size:12.5px}
+.mm-onair-item .meta{display:block;color:#888780;font-size:10px;margin-top:3px;font-family:'DM Mono',monospace}
+.mm-onair-empty{padding:18px 10px;text-align:center;color:#888780;font-size:11px;line-height:1.5}
 
 .mm-body{display:grid;grid-template-columns:180px 1fr;gap:14px;align-items:start}
 
@@ -226,7 +242,16 @@ input,textarea,button{font-family:inherit;color:inherit}
         <input type="text" class="mm-corner-title" id="mm-corner-title" placeholder="코너 제목 (예: 미국 하락 코너)">
         <input type="text" class="mm-corner-sub" id="mm-corner-sub" placeholder="부제목 (선택)">
       </div>
-      <button class="mm-new-q" onclick="addQuestion()"><span style="font-size:14px;line-height:1">＋</span>새 Q</button>
+      <div class="mm-actions">
+        <div class="mm-onair-wrap">
+          <button class="mm-onair-btn" onclick="toggleOnAirMenu(event)">⬇ ON AIR <span class="caret">▼</span></button>
+          <div class="mm-onair-menu" id="mm-onair-menu" style="display:none">
+            <button class="mm-onair-refresh" onclick="loadOnAirCorners()">↻ 다시 불러오기</button>
+            <div id="mm-onair-list"></div>
+          </div>
+        </div>
+        <button class="mm-new-q" onclick="addQuestion()"><span style="font-size:14px;line-height:1">＋</span>새 Q</button>
+      </div>
     </div>
 
     <div class="mm-body">
@@ -753,6 +778,212 @@ const tablerCss = document.createElement('link');
 tablerCss.rel = 'stylesheet';
 tablerCss.href = 'https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css';
 document.head.appendChild(tablerCss);
+
+// === ON AIR import ===
+let _onAirCorners = [];
+
+window.toggleOnAirMenu = function(e){
+  if(e) e.stopPropagation();
+  const menu = document.getElementById('mm-onair-menu');
+  if(!menu) return;
+  if(menu.style.display === 'none' || !menu.style.display){
+    menu.style.display = 'block';
+    loadOnAirCorners();
+  } else {
+    menu.style.display = 'none';
+  }
+};
+
+// 메뉴 밖 클릭 시 닫기
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('.mm-onair-wrap')){
+    const menu = document.getElementById('mm-onair-menu');
+    if(menu) menu.style.display = 'none';
+  }
+});
+
+async function loadOnAirCorners(){
+  const listEl = document.getElementById('mm-onair-list');
+  if(listEl) listEl.innerHTML = '<div class="mm-onair-empty">불러오는 중...</div>';
+  try{
+    const d = await fetch('/api/post/wdaebon').then(r => r.json());
+    let text = '';
+    if(d && d.content){
+      try{
+        const payload = JSON.parse(d.content);
+        if(payload && typeof payload === 'object' && payload.text !== undefined){
+          text = payload.text;
+        } else {
+          text = d.content;
+        }
+      }catch(e){
+        text = d.content;
+      }
+    }
+    _onAirCorners = parseOnAirText(text);
+    renderOnAirMenu();
+  }catch(e){
+    console.error('ON AIR load error:', e);
+    if(listEl) listEl.innerHTML = '<div class="mm-onair-empty">ON AIR 데이터를 불러올 수 없습니다</div>';
+  }
+}
+
+function renderOnAirMenu(){
+  const listEl = document.getElementById('mm-onair-list');
+  if(!listEl) return;
+  if(!_onAirCorners.length){
+    listEl.innerHTML = '<div class="mm-onair-empty">ON AIR에 코너가 없거나<br>"#1 ... " 형식이 아닙니다</div>';
+    return;
+  }
+  let html = '';
+  _onAirCorners.forEach(c => {
+    const qs = parseQuestionsFromBody(c.body);
+    html += '<button class="mm-onair-item" onclick="importCornerToMindmap(\''+c.number+'\')">'+
+      '<span class="num">#'+c.number+'</span>'+
+      '<span class="title">'+escapeHtml(c.title)+'</span>'+
+      '<span class="meta">Q '+qs.length+'개</span>'+
+    '</button>';
+  });
+  listEl.innerHTML = html;
+}
+
+function parseOnAirText(text){
+  if(!text || !text.trim()) return [];
+  const lines = text.split('\n');
+  const corners = [];
+  let current = null;
+  for(const line of lines){
+    const m = line.match(/^\s*#(\d+)\s*\.?\s*(.*)/);
+    if(m){
+      if(current) corners.push(current);
+      current = {number:m[1], title:m[2].trim()||'코너'+m[1], body:[]};
+    } else if(current){
+      current.body.push(line);
+    }
+  }
+  if(current) corners.push(current);
+  return corners;
+}
+
+function parseQuestionsFromBody(bodyLines){
+  const qs = [];
+  let current = null;
+  const qHeaderRe = /^\s*Q[\d-]+\s*\.\s*/;
+  for(const line of bodyLines){
+    if(qHeaderRe.test(line)){
+      if(current) qs.push(current);
+      current = {header: line.trim(), body: []};
+    } else if(current){
+      current.body.push(line);
+    }
+  }
+  if(current) qs.push(current);
+  qs.forEach(q => {
+    while(q.body.length && !q.body[0].trim()) q.body.shift();
+    while(q.body.length && !q.body[q.body.length-1].trim()) q.body.pop();
+  });
+  return qs;
+}
+
+function parseQHeader(header){
+  // "Q1. [🅰️ 신뢰형] 외인 매도... [반종민]"
+  // → {number:'Q1', type:'🅰️ 신뢰형', guest:'반종민', title:'외인 매도...'}
+  let number = 'Q', type = '', guest = '', title = header;
+  const m = header.match(/^(Q[\d-]+)\s*\.\s*(.+)$/);
+  if(!m) return {number, type, guest, title};
+  number = m[1];
+  let rest = m[2].trim();
+  // 끝의 [이름] = 출연자
+  const trailing = rest.match(/\s*\[([^\]]+)\]\s*$/);
+  if(trailing){
+    guest = trailing[1].trim();
+    rest = rest.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
+  }
+  // 앞의 [타입] = 타입
+  const leading = rest.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+  if(leading){
+    type = leading[1].trim();
+    rest = leading[2].trim();
+  }
+  title = rest;
+  return {number, type, guest, title};
+}
+
+function parseLineToComment(rawLine){
+  // 한 줄 → {label, text} | null
+  const trimmed = rawLine.trim();
+  if(!trimmed) return null;
+  if(/^⇒/.test(trimmed)) return null; // 자막 무시
+  let label = '', text = trimmed, m;
+  if((m = trimmed.match(/^🎯\s*(?:질문\s*의도\s*[:：]\s*)?(.*)/))){ label='의도'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^▶\s*(.*)/))){ label='▶ DB'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^→\s*\[콜백\]\s*(.*)/)) || (m = trimmed.match(/^→\s*콜백\s*[:：]?\s*(.*)/))){ label='→ 콜백'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^\[콜백\]\s*(.*)/))){ label='콜백'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^\[(?:💫\s*)?말랑\]\s*(.*)/))){ label='💫 말랑'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^\[(?:🎯\s*)?송곳\]\s*(.*)/))){ label='🎯 송곳'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^\[(상황|배경)\]\s*(.*)/))){ label=m[1]; text=m[2].trim(); }
+  else if((m = trimmed.match(/^\[질문\]\s*(.*)/)) || (m = trimmed.match(/^❓\s*(.*)/))){ label='질문'; text=m[1].trim(); }
+  else if((m = trimmed.match(/^\[([^\]]+)\]\s*(.*)/))){ label=m[1]; text=m[2].trim(); }
+  return {label, text: text || trimmed};
+}
+
+window.importCornerToMindmap = function(cornerNumber){
+  const corner = _onAirCorners.find(c => c.number === cornerNumber);
+  if(!corner) return;
+
+  // 기존 작업 보호: 사용자가 만든 CG가 있거나 Q가 있으면 확인
+  const hasWork = MD.corner.questions.length > 0 ||
+                  (MD.corner.title && MD.corner.title.trim()) ||
+                  MD.corner.questions.some(q => (q.cgs||[]).length > 0);
+  if(hasWork){
+    const cgCount = MD.corner.questions.reduce((s,q)=>s+(q.cgs||[]).length, 0);
+    let msg = 'ON AIR #'+corner.number+' "'+corner.title+'" 으로 덮어쓸까요?\n\n';
+    msg += '기존 마인드맵 ('+MD.corner.questions.length+'개 Q';
+    if(cgCount) msg += ', CG '+cgCount+'장';
+    msg += ')이 사라집니다.';
+    if(!confirm(msg)) return;
+  }
+
+  // 코너 정보 갈아끼우기
+  MD.corner.title = corner.title;
+  MD.corner.subtitle = '';
+
+  // Q 파싱
+  const qs = parseQuestionsFromBody(corner.body);
+  MD.corner.questions = qs.map((q, idx) => {
+    const header = parseQHeader(q.header);
+    const bodyText = q.body.join('\n');
+    const comments = [];
+    bodyText.split('\n').forEach(line => {
+      const c = parseLineToComment(line);
+      if(c){
+        comments.push({
+          id: genId('qc'),
+          label: c.label || '',
+          text: c.text
+        });
+      }
+    });
+    return {
+      id: genId('q'),
+      number: header.number || ('Q' + (idx+1)),
+      type: header.type || '',
+      guest: header.guest || '',
+      title: header.title || '',
+      cgs: [],
+      comments: comments
+    };
+  });
+
+  MD.activeQuestionId = MD.corner.questions.length ? MD.corner.questions[0].id : null;
+
+  // 메뉴 닫기
+  const menu = document.getElementById('mm-onair-menu');
+  if(menu) menu.style.display = 'none';
+
+  render();
+  scheduleSave();
+};
 
 // === 초기 로드 ===
 loadMindmap();
