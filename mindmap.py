@@ -40,7 +40,7 @@ input,textarea,button{font-family:inherit;color:inherit}
 .topbar-title span{color:#e8b84b;font-weight:400;font-size:12px;margin-left:6px}
 .topbar a{color:#e8b84b;text-decoration:none;font-size:12px;padding:5px 12px;border:0.5px solid #e8b84b;border-radius:6px;font-family:'DM Mono',monospace}
 .topbar a:hover{background:#e8b84b;color:#1a1d23}
-.save-ind{font-size:10px;color:#00b894;font-family:'DM Mono',monospace;letter-spacing:0.5px;opacity:0;transition:opacity 0.3s;padding:0 6px}
+.save-ind{font-size:10px;color:#00b894;font-family:'DM Mono',monospace;letter-spacing:0.3px;opacity:0;transition:opacity 0.3s;padding:0 6px;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
 .save-ind.saving{color:#fff;opacity:1}
 .save-ind.saved{color:#00b894;opacity:1}
 .save-ind.error{color:#ff7878;opacity:1}
@@ -278,6 +278,21 @@ input,textarea,button{font-family:inherit;color:inherit}
 <input type="file" id="mm-file-input" accept="image/*" style="display:none" multiple>
 
 <script>
+// === fetch wrapper for auth (PWA 세션 쿠키 + API secret 자동 추가) ===
+const _origFetch = window.fetch;
+window.fetch = function(url, options){
+  options = options || {};
+  if(typeof url === 'string' && (url.startsWith('/') || url.startsWith(location.origin))){
+    options.credentials = options.credentials || 'include';
+    options.headers = options.headers || {};
+    if(window._API_SECRET){
+      if(options.headers instanceof Headers) options.headers.set('X-API-Secret', window._API_SECRET);
+      else options.headers['X-API-Secret'] = window._API_SECRET;
+    }
+  }
+  return _origFetch(url, options);
+};
+
 // === 데이터 모델 ===
 let MD = {
   corner: { title:'', subtitle:'', questions:[] },
@@ -321,22 +336,33 @@ function syncActiveContentEditable(){
 }
 
 function indSaving(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='저장 중...';i.className='save-ind saving';i.style.opacity=1;}
-function indSaved(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✓ 저장됨';i.className='save-ind saved';i.style.opacity=1;setTimeout(()=>{i.style.opacity=0;},1500);}
-function indError(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✕ 저장 실패';i.className='save-ind error';i.style.opacity=1;}
+function indSaved(sizeKB){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✓ 저장됨'+(sizeKB?' ('+sizeKB+'KB)':'');i.className='save-ind saved';i.style.opacity=1;setTimeout(()=>{i.style.opacity=0;},1800);}
+function indError(detail){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✕ '+(detail||'저장 실패');i.className='save-ind error';i.style.opacity=1;}
 
 async function saveMindmap(){
+  let sizeKB = 0;
   try{
     syncActiveContentEditable();
     indSaving();
     const content = JSON.stringify(MD);
+    sizeKB = Math.round(content.length / 1024);
     const res = await fetch('/api/post/mindmap',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({content, date: new Date().toISOString().slice(0,10)})
     });
-    if(!res.ok){indError();return;}
-    indSaved();
-  }catch(e){indError();}
+    if(!res.ok){
+      let extra = '';
+      try{ extra = (await res.text()).slice(0, 80); }catch(e){}
+      console.error('[mindmap save] HTTP', res.status, extra, 'size:', sizeKB+'KB');
+      indError('HTTP '+res.status+' · '+sizeKB+'KB');
+      return;
+    }
+    indSaved(sizeKB);
+  }catch(e){
+    console.error('[mindmap save] exception', e, 'size:', sizeKB+'KB');
+    indError((e.message||'network').slice(0,40)+' · '+sizeKB+'KB');
+  }
 }
 function scheduleSave(){
   dirty = true;
