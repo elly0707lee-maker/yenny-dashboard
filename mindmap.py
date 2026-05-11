@@ -117,6 +117,11 @@ input,textarea,button{font-family:inherit;color:inherit}
 
 .mm-q-head{margin-bottom:14px}
 .mm-q-chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.mm-q-nav{margin-left:auto;display:flex;gap:3px;align-items:center}
+.mm-q-nav-pos{font-size:10px;color:#888780;font-family:'DM Mono',monospace;padding:0 6px;letter-spacing:0.4px}
+.mm-q-nav-btn{font-size:12px;padding:3px 10px;background:#F1EFE8;color:#5F5E5A;border:0.5px solid #D3D1C7;border-radius:4px;cursor:pointer;font-family:'DM Mono',monospace;line-height:1.2}
+.mm-q-nav-btn:hover{background:#1a1d23;color:#fff;border-color:#1a1d23}
+.mm-q-nav-btn:disabled{opacity:0.3;cursor:not-allowed;background:#F1EFE8;color:#5F5E5A;border-color:#D3D1C7}
 .mm-q-num-chip{font-size:10px;padding:2px 8px;background:#888780;color:#fff;border-radius:4px;font-family:'DM Mono',monospace;font-weight:500;outline:none;min-width:24px;text-align:center}
 .mm-q-detail.q1 .mm-q-num-chip{background:#378ADD}
 .mm-q-detail.q2 .mm-q-num-chip{background:#D85A30}
@@ -151,10 +156,14 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-cg-del{position:absolute;top:6px;left:8px;font-size:11px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:3px;padding:2px 5px;cursor:pointer;line-height:1;opacity:0;transition:opacity 0.1s}
 .mm-cg-card:hover .mm-cg-del{opacity:1}
 .mm-cg-meta{padding:9px 11px}
-.mm-cg-title{width:100%;border:none;background:transparent;padding:0;font-size:12.5px;font-weight:500;outline:none;color:#1a1d23}
-.mm-cg-title::placeholder{color:#B4B2A9}
-.mm-cg-sub{width:100%;border:none;background:transparent;padding:2px 0 0;font-size:11px;color:#5F5E5A;outline:none}
-.mm-cg-sub::placeholder{color:#B4B2A9}
+.mm-cg-caption{width:100%;border:none;background:transparent;padding:2px 0;font-size:12px;line-height:1.5;outline:none;color:#1a1d23;min-height:34px;white-space:pre-wrap;word-break:break-word}
+.mm-cg-caption:focus{background:#FAFAF7;border-radius:3px;padding:3px 6px;margin:-1px -6px}
+.mm-cg-caption[data-placeholder]:empty::before{content:attr(data-placeholder);color:#B4B2A9;pointer-events:none}
+.mm-cg-caption b, .mm-cg-caption strong{font-weight:500;color:#1a1d23}
+.hl{background:#FAC775;color:#412402;padding:0 3px;border-radius:2px;font-weight:500;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.mm-cg-comment-text b, .mm-cg-comment-text strong, .mm-qc-text b, .mm-qc-text strong{font-weight:500}
+.mm-cg-caption i, .mm-cg-caption em, .mm-cg-comment-text i, .mm-cg-comment-text em, .mm-qc-text i, .mm-qc-text em{font-style:italic}
+.mm-cg-caption u, .mm-cg-comment-text u, .mm-qc-text u{text-decoration:underline;text-decoration-color:#888780;text-underline-offset:2px}
 
 .mm-cg-comments{margin-top:8px;padding-top:8px;border-top:0.5px dashed #D3D1C7}
 .mm-cg-comments-head{font-size:9.5px;color:#888780;font-family:'DM Mono',monospace;letter-spacing:0.3px;margin-bottom:5px}
@@ -303,12 +312,21 @@ function getQCBgClass(label){
 }
 
 // === 저장/로드 ===
+function syncActiveContentEditable(){
+  // 활성 contenteditable의 현재 값을 모델에 반영 (onblur 트리거)
+  const a = document.activeElement;
+  if(a && a.isContentEditable && typeof a.onblur === 'function'){
+    try{ a.onblur(); }catch(e){}
+  }
+}
+
 function indSaving(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='저장 중...';i.className='save-ind saving';i.style.opacity=1;}
 function indSaved(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✓ 저장됨';i.className='save-ind saved';i.style.opacity=1;setTimeout(()=>{i.style.opacity=0;},1500);}
 function indError(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✕ 저장 실패';i.className='save-ind error';i.style.opacity=1;}
 
 async function saveMindmap(){
   try{
+    syncActiveContentEditable();
     indSaving();
     const content = JSON.stringify(MD);
     const res = await fetch('/api/post/mindmap',{
@@ -337,7 +355,17 @@ async function loadMindmap(){
           MD.corner.questions.forEach(q => {
             if(!q.cgs) q.cgs = [];
             if(!q.comments) q.comments = [];
-            q.cgs.forEach(cg => { if(!cg.comments) cg.comments = []; });
+            q.cgs.forEach(cg => {
+              if(!cg.comments) cg.comments = [];
+              // 구버전 title/subtitle → caption 마이그레이션
+              if(cg.caption === undefined && (cg.title || cg.subtitle)){
+                const parts = [];
+                if(cg.title) parts.push(cg.title);
+                if(cg.subtitle) parts.push(cg.subtitle);
+                cg.caption = parts.join('\n');
+                delete cg.title; delete cg.subtitle;
+              }
+            });
           });
         }
       }catch(e){console.error('parse failed', e);}
@@ -348,6 +376,7 @@ async function loadMindmap(){
 
 // === 렌더링 ===
 function render(){
+  syncActiveContentEditable();
   renderHeader();
   renderQList();
   renderQDetail();
@@ -394,10 +423,19 @@ function renderQDetail(){
 
   let html = '';
   html += '<div class="mm-q-head">';
+  const qIdx = MD.corner.questions.indexOf(q);
+  const qTotal = MD.corner.questions.length;
   html += '<div class="mm-q-chips">';
   html += '<span class="mm-q-num-chip" contenteditable="true" onblur="updateQField(\''+q.id+'\',\'number\',this.textContent.trim())">'+escapeHtml(q.number||'Q')+'</span>';
   html += '<input type="text" class="mm-q-type-input" value="'+escapeHtml(q.type||'')+'" placeholder="🅰️ 타입" onchange="updateQField(\''+q.id+'\',\'type\',this.value)">';
   html += '<input type="text" class="mm-q-guest-input" value="'+escapeHtml(q.guest||'')+'" placeholder="출연자" onchange="updateQField(\''+q.id+'\',\'guest\',this.value)">';
+  if(qTotal > 1){
+    html += '<div class="mm-q-nav">';
+    html += '<button class="mm-q-nav-btn" title="이전 Q (⌘⇧↑)" onclick="prevQ()">←</button>';
+    html += '<span class="mm-q-nav-pos">'+(qIdx+1)+' / '+qTotal+'</span>';
+    html += '<button class="mm-q-nav-btn" title="다음 Q (⌘⇧↓)" onclick="nextQ()">→</button>';
+    html += '</div>';
+  }
   html += '</div>';
   html += '<textarea class="mm-q-title-input" placeholder="질문 제목 입력..." onchange="updateQField(\''+q.id+'\',\'title\',this.value)" oninput="autoResizeTextarea(this);scheduleSave()">'+escapeHtml(q.title||'')+'</textarea>';
   html += '</div>';
@@ -445,8 +483,7 @@ function renderCGCard(qId, cg, idx){
     '<button class="mm-cg-del" onclick="deleteCG(\''+qId+'\',\''+cg.id+'\')" title="삭제">✕</button>'+
     '</div>';
   html += '<div class="mm-cg-meta">';
-  html += '<input type="text" class="mm-cg-title" value="'+escapeHtml(cg.title||'')+'" placeholder="제목" onchange="updateCGField(\''+qId+'\',\''+cg.id+'\',\'title\',this.value)">';
-  html += '<input type="text" class="mm-cg-sub" value="'+escapeHtml(cg.subtitle||'')+'" placeholder="부제목" onchange="updateCGField(\''+qId+'\',\''+cg.id+'\',\'subtitle\',this.value)">';
+  html += '<div class="mm-cg-caption" contenteditable="true" data-placeholder="여기에 자유 입력… (제목·메모 뭐든)" onblur="updateCGField(\''+qId+'\',\''+cg.id+'\',\'caption\',this.innerHTML)">'+(cg.caption||'')+'</div>';
   html += '<div class="mm-cg-comments">';
   html += '<div class="mm-cg-comments-head">COMMENT</div>';
   (cg.comments || []).forEach(cc => {
@@ -525,7 +562,7 @@ function deleteCG(qId, cgId){
 }
 function addCG(qId, base64Image){
   const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
-  const cg = { id: genId('cg'), image: base64Image, title: '', subtitle: '', comments: [] };
+  const cg = { id: genId('cg'), image: base64Image, caption: '', comments: [] };
   q.cgs.push(cg);
   render();
   scheduleSave();
@@ -769,8 +806,128 @@ window.openLightbox = function(src){
 window.closeLightbox = function(){
   document.getElementById('mm-lightbox').classList.remove('show');
 };
+
+// === Q 빠른 전환 ===
+function commitActiveInput(){
+  // 현재 포커스된 입력 요소의 onblur 트리거 (변경 사항 commit)
+  const a = document.activeElement;
+  if(a && (a.isContentEditable || a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')){
+    if(typeof a.blur === 'function') a.blur();
+  }
+}
+window.prevQ = function(){
+  if(MD.corner.questions.length < 2) return;
+  commitActiveInput();
+  const idx = MD.corner.questions.findIndex(q => q.id === MD.activeQuestionId);
+  const newIdx = idx > 0 ? idx - 1 : MD.corner.questions.length - 1;
+  selectQuestion(MD.corner.questions[newIdx].id);
+};
+window.nextQ = function(){
+  if(MD.corner.questions.length < 2) return;
+  commitActiveInput();
+  const idx = MD.corner.questions.findIndex(q => q.id === MD.activeQuestionId);
+  const newIdx = idx < MD.corner.questions.length - 1 ? idx + 1 : 0;
+  selectQuestion(MD.corner.questions[newIdx].id);
+};
+
+// === 하이라이트 토글 ===
+function toggleHighlight(){
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  // 이미 .hl 안에 있는지 체크
+  let startNode = range.startContainer;
+  if(startNode.nodeType === 3) startNode = startNode.parentNode;
+  const existingHl = startNode.closest && startNode.closest('.hl');
+
+  if(existingHl){
+    // 토글 해제: span 풀기
+    const parent = existingHl.parentNode;
+    if(!parent) return;
+    while(existingHl.firstChild){
+      parent.insertBefore(existingHl.firstChild, existingHl);
+    }
+    parent.removeChild(existingHl);
+    parent.normalize();
+  } else {
+    try{
+      const span = document.createElement('span');
+      span.className = 'hl';
+      range.surroundContents(span);
+      sel.removeAllRanges();
+      const newRange = document.createRange();
+      newRange.selectNodeContents(span);
+      sel.addRange(newRange);
+    }catch(err){
+      // 여러 요소 걸친 selection은 extractContents
+      try{
+        const span = document.createElement('span');
+        span.className = 'hl';
+        const frag = range.extractContents();
+        span.appendChild(frag);
+        range.insertNode(span);
+      }catch(e2){console.error('hl error', e2);}
+    }
+  }
+}
+
+// === 단축키 핸들러 ===
 document.addEventListener('keydown', (e) => {
-  if(e.key === 'Escape') closeLightbox();
+  // ESC → lightbox 닫기
+  if(e.key === 'Escape'){ closeLightbox(); return; }
+
+  const mod = e.metaKey || e.ctrlKey;
+  if(!mod) return;
+
+  // ⌘⇧↑ / ⌘⇧↓ — 이전/다음 Q (어디서나)
+  if(e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')){
+    if(MD.corner.questions.length < 2) return;
+    e.preventDefault();
+    if(e.key === 'ArrowUp') prevQ(); else nextQ();
+    return;
+  }
+
+  // 아래는 contenteditable 안에서만
+  if(!e.target || !e.target.isContentEditable) return;
+
+  // ⌘B — 굵게
+  if(!e.shiftKey && (e.key === 'b' || e.key === 'B')){
+    e.preventDefault();
+    document.execCommand('bold');
+    scheduleSave();
+    return;
+  }
+
+  // ⌘I — 기울게
+  if(!e.shiftKey && (e.key === 'i' || e.key === 'I')){
+    e.preventDefault();
+    document.execCommand('italic');
+    scheduleSave();
+    return;
+  }
+
+  // ⌘U — 밑줄
+  if(!e.shiftKey && (e.key === 'u' || e.key === 'U')){
+    e.preventDefault();
+    document.execCommand('underline');
+    scheduleSave();
+    return;
+  }
+
+  // ⌘⇧H — 하이라이트 토글
+  if(e.shiftKey && (e.key === 'h' || e.key === 'H')){
+    e.preventDefault();
+    toggleHighlight();
+    scheduleSave();
+    return;
+  }
+});
+
+// contenteditable 변경 시 자동 저장 (input 이벤트)
+document.addEventListener('input', (e) => {
+  if(e.target && e.target.isContentEditable){
+    scheduleSave();
+  }
 });
 
 // === Tabler icons (선택적 - CDN 차단 시 텍스트 폴백) ===
