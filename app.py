@@ -1268,17 +1268,12 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   <!-- ON AIR — 마인드맵으로 이동 -->
   <div class="section-label">🎙️ ON AIR</div>
-  <a href="/mindmap" target="_blank" class="content-card"
-     style="display:block;text-decoration:none;text-align:center;padding:34px 24px;cursor:pointer;
-            background:linear-gradient(135deg,#fdfbf5 0%,#fff 100%);border:1.5px solid #e8b84b;transition:all .15s;">
-    <div style="font-size:36px;margin-bottom:10px;">🗺️</div>
-    <div style="font-size:16px;color:#1a1d23;font-weight:700;margin-bottom:6px;letter-spacing:-.3px;">오늘 방송 흐름은 마인드맵에서</div>
-    <div style="font-size:12px;color:#7a8099;margin-bottom:20px;line-height:1.6;">
-      코너 / Q 섹션 / CG 매소너리 그리드로 정리해요<br>
-      Claude에서 정리한 Q 텍스트를 마인드맵 상단 박스에 붙여넣으면 자동으로 섹션 생성
+  <div class="content-card" style="padding:14px 18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름은 마인드맵에서 정리해요</span>
+      <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
     </div>
-    <span class="btn btn-mindmap" style="font-size:14px;padding:11px 26px;">마인드맵 열기 →</span>
-  </a>
+  </div>
 
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
