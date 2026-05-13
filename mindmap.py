@@ -152,8 +152,10 @@ input,textarea,button{font-family:inherit;color:inherit}
 /* === CG 가로 그리드 (1→2→3, 4→5→6 순서) === */
 .mm-cg-masonry{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:8px;align-items:start}
 
-.mm-cg-card{background:#fff;border:0.5px solid #D3D1C7;border-radius:7px;overflow:hidden;position:relative;transition:opacity 0.2s;max-height:520px;display:flex;flex-direction:column}
+.mm-cg-card{background:#fff;border:0.5px solid #D3D1C7;border-radius:7px;overflow:hidden;position:relative;transition:opacity 0.2s,outline 0.1s;max-height:520px;display:flex;flex-direction:column}
 .mm-cg-card.mm-dragging{opacity:0.4}
+.mm-cg-card.mm-selected{outline:2px solid #EF9F27;outline-offset:1px;z-index:1}
+.mm-cg-card.mm-selected.mm-text-card{outline-color:#BA7517}
 .mm-cg-img{background:#F1EFE8;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;flex-shrink:0}
 .mm-cg-img img{width:100%;display:block;cursor:zoom-in}
 .mm-cg-img-empty{padding:30px 10px;color:#B4B2A9;font-size:11px;text-align:center}
@@ -249,7 +251,8 @@ input,textarea,button{font-family:inherit;color:inherit}
         <input type="text" class="mm-corner-sub" id="mm-corner-sub" placeholder="부제목 (선택)">
         <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 추가… (엔터로 1개 / 멀티라인 paste면 자동으로 여러 Q 생성)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
         <div class="mm-shortcuts-hint">
-          텍스트 입력 중: <kbd>⌘B</kbd> 굵게 · <kbd>⌘I</kbd> 기울임 · <kbd>⌘U</kbd> 밑줄 · <kbd>⌘⇧H</kbd> 하이라이트 · <kbd>⌘⇧↑↓</kbd> 이전/다음 Q
+          텍스트 입력 중: <kbd>⌘B</kbd> 굵게 · <kbd>⌘I</kbd> 기울임 · <kbd>⌘U</kbd> 밑줄 · <kbd>⌘⇧H</kbd> 하이라이트 · <kbd>⌘⇧↑↓</kbd> 이전/다음 Q<br>
+          카드 클릭 후: <kbd>←</kbd> <kbd>→</kbd> 카드 순서 이동 · <kbd>ESC</kbd> 선택 해제
         </div>
       </div>
       <div class="mm-actions">
@@ -921,6 +924,54 @@ window.closeLightbox = function(){
   document.getElementById('mm-lightbox').classList.remove('show');
 };
 
+// === 카드 선택 + 화살표 키 정렬 ===
+let _selectedCardId = null;
+
+function selectCardForReorder(cgId){
+  _selectedCardId = cgId;
+  document.querySelectorAll('.mm-cg-card.mm-selected').forEach(el => el.classList.remove('mm-selected'));
+  if(cgId){
+    const el = document.querySelector('[data-cg-id="'+cgId+'"]');
+    if(el) el.classList.add('mm-selected');
+  }
+}
+function deselectCardForReorder(){
+  _selectedCardId = null;
+  document.querySelectorAll('.mm-cg-card.mm-selected').forEach(el => el.classList.remove('mm-selected'));
+}
+function moveSelectedCard(direction){
+  if(!_selectedCardId) return;
+  for(const q of MD.corner.questions){
+    const idx = q.cgs.findIndex(c => c.id === _selectedCardId);
+    if(idx < 0) continue;
+    const newIdx = idx + direction;
+    if(newIdx < 0 || newIdx >= q.cgs.length) return;
+    const [item] = q.cgs.splice(idx, 1);
+    q.cgs.splice(newIdx, 0, item);
+    const keepId = _selectedCardId;
+    render();
+    scheduleSave();
+    // 선택 유지 (render 후 DOM 새로 생기니까)
+    setTimeout(()=> selectCardForReorder(keepId), 30);
+    return;
+  }
+}
+
+// 카드 클릭 → 선택 (편집 영역/삭제버튼/드롭존 제외)
+document.addEventListener('click', (e) => {
+  // 빠른Q, lightbox close 등 다른 클릭은 무시
+  const card = e.target.closest('.mm-cg-card');
+  if(!card){
+    // 카드 밖 영역 클릭 → 선택 해제
+    if(_selectedCardId) deselectCardForReorder();
+    return;
+  }
+  // 카드 안의 편집 영역, 입력 박스, 삭제 버튼은 선택 X (각자 동작)
+  if(e.target.closest('.mm-cg-caption, .mm-cg-comment-text, .mm-cg-comment-add, .mm-cg-del, input, textarea')) return;
+  // 그 외 (이미지, 라벨, 카드 padding) → 카드 선택
+  selectCardForReorder(card.dataset.cgId);
+});
+
 // === Q 빠른 전환 (다음 Q 섹션으로 스크롤 + 펼침) ===
 function commitActiveInput(){
   const a = document.activeElement;
@@ -1020,7 +1071,22 @@ function toggleHighlight(){
 
 // === 단축키 ===
 document.addEventListener('keydown', (e) => {
-  if(e.key === 'Escape'){ closeLightbox(); return; }
+  if(e.key === 'Escape'){
+    const lb = document.getElementById('mm-lightbox');
+    if(lb && lb.classList.contains('show')){ closeLightbox(); return; }
+    if(_selectedCardId){ deselectCardForReorder(); return; }
+    return;
+  }
+  // 카드 선택 상태에서 좌/우 화살표 → 카드 순서 이동
+  if(_selectedCardId && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey){
+    if(e.target.isContentEditable || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA'){
+      // 텍스트 편집 중이면 화살표는 커서 이동
+    } else if(e.key === 'ArrowLeft'){
+      e.preventDefault(); moveSelectedCard(-1); return;
+    } else if(e.key === 'ArrowRight'){
+      e.preventDefault(); moveSelectedCard(1); return;
+    }
+  }
   const mod = e.metaKey || e.ctrlKey;
   if(!mod) return;
   // ⌘⇧↑/↓ — 이전/다음 Q
