@@ -79,6 +79,8 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-onair-reset:hover{border-color:#A32D2D;background:#F5C9C9;border-style:solid}
 .mm-new-q{font-size:12px;padding:6px 14px;background:#1a1d23;color:#e8b84b;border:0.5px solid #1a1d23;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;height:fit-content;align-self:center}
 .mm-new-q:hover{background:#2C2C2A}
+.mm-reset-btn{font-size:13px;padding:6px 10px;background:transparent;border:0.5px solid #D3D1C7;border-radius:6px;cursor:pointer;color:#888780;line-height:1;align-self:center}
+.mm-reset-btn:hover{border-color:#A32D2D;background:#FCEBEB;color:#A32D2D}
 
 /* === Q 섹션 데크 === */
 .mm-sections{display:flex;flex-direction:column;gap:12px}
@@ -256,14 +258,7 @@ input,textarea,button{font-family:inherit;color:inherit}
         </div>
       </div>
       <div class="mm-actions">
-        <div class="mm-onair-wrap">
-          <button class="mm-onair-btn" onclick="toggleOnAirMenu(event)">⬇ ON AIR <span class="caret">▼</span></button>
-          <div class="mm-onair-menu" id="mm-onair-menu" style="display:none">
-            <button class="mm-onair-refresh" onclick="loadOnAirCorners()">↻ 다시 불러오기</button>
-            <div id="mm-onair-list"></div>
-            <button class="mm-onair-reset" onclick="resetMindmap()">🗑 마인드맵 전체 초기화</button>
-          </div>
-        </div>
+        <button class="mm-reset-btn" onclick="resetMindmap()" title="마인드맵 전체 초기화">🗑</button>
         <button class="mm-new-q" onclick="addQuestion()"><span style="font-size:14px;line-height:1">＋</span>새 Q</button>
       </div>
     </div>
@@ -406,7 +401,7 @@ function render(){
 function renderSections(){
   const container = document.getElementById('mm-sections');
   if(!MD.corner.questions.length){
-    container.innerHTML = '<div class="mm-empty"><div class="emo">📋</div>아직 질문이 없어요<br>＋ 새 Q 또는 ⬇ ON AIR 에서 가져오기로 시작하세요</div>'
+    container.innerHTML = '<div class="mm-empty"><div class="emo">📋</div>아직 질문이 없어요<br>＋ 새 Q 또는 위 입력 박스에 멀티라인 paste로 시작하세요</div>'
       + '<button class="mm-add-section" onclick="addQuestion()">＋ 새 Q 섹션</button>';
     return;
   }
