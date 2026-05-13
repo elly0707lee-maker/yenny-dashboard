@@ -54,6 +54,9 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-corner-title::placeholder{color:#B4B2A9}
 .mm-corner-sub{font-size:12.5px;color:#5F5E5A;border:none;background:transparent;outline:none;width:100%;padding:3px 0 0;margin-top:2px}
 .mm-corner-sub::placeholder{color:#B4B2A9}
+.mm-quick-q{width:100%;border:0.5px dashed #B4B2A9;background:transparent;border-radius:6px;padding:8px 12px;font-size:13px;outline:none;margin-top:10px;color:#1a1d23;transition:all 0.12s}
+.mm-quick-q:focus{border-color:#1a1d23;background:#fff;border-style:solid}
+.mm-quick-q::placeholder{color:#B4B2A9}
 
 .mm-actions{display:flex;gap:6px;align-items:center;align-self:center}
 .mm-onair-wrap{position:relative}
@@ -228,6 +231,7 @@ input,textarea,button{font-family:inherit;color:inherit}
         <div class="mm-corner-label">CORNER · #1</div>
         <input type="text" class="mm-corner-title" id="mm-corner-title" placeholder="코너 제목 (예: 미국 하락 코너)">
         <input type="text" class="mm-corner-sub" id="mm-corner-sub" placeholder="부제목 (선택)">
+        <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 빠르게 추가… (엔터로 새 섹션 생성)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
       </div>
       <div class="mm-actions">
         <div class="mm-onair-wrap">
@@ -397,8 +401,7 @@ function renderSections(){
 function renderSection(q, idx){
   const colorIdx = (idx % 5) + 1;
   const cgCount = (q.cgs || []).length;
-  const qcCount = (q.comments || []).length;
-  const cmtCount = (q.cgs || []).reduce((s,cg)=>s+(cg.comments||[]).length,0) + qcCount;
+  const cgCmtCount = (q.cgs || []).reduce((s,cg)=>s+(cg.comments||[]).length,0);
   const collapsed = q.collapsed ? ' collapsed' : '';
   const caret = q.collapsed ? '▶' : '▼';
 
@@ -409,24 +412,13 @@ function renderSection(q, idx){
   html += '<input type="text" class="mm-q-type" value="'+escapeHtml(q.type||'')+'" placeholder="🅰️ 타입" onchange="updateQField(\''+q.id+'\',\'type\',this.value)">';
   html += '<input type="text" class="mm-q-guest" value="'+escapeHtml(q.guest||'')+'" placeholder="출연자" onchange="updateQField(\''+q.id+'\',\'guest\',this.value)">';
   html += '<textarea class="mm-q-title-input" placeholder="질문 제목 입력..." onchange="updateQField(\''+q.id+'\',\'title\',this.value)" oninput="autoResizeTextarea(this);scheduleSave()">'+escapeHtml(q.title||'')+'</textarea>';
-  html += '<span class="mm-section-meta">CG '+cgCount+' · 💬'+cmtCount+'</span>';
+  html += '<span class="mm-section-meta">CG '+cgCount+(cgCmtCount?' · 💬'+cgCmtCount:'')+'</span>';
   html += '<button class="mm-section-act" title="접기/펼치기" onclick="toggleSectionCollapse(\''+q.id+'\')">'+caret+'</button>';
   html += '<button class="mm-section-act del" title="섹션 삭제" onclick="deleteQuestion(\''+q.id+'\')">✕</button>';
   html += '</div>';
 
   // 본체 (접혀있어도 HTML은 생성, CSS로 숨김)
   html += '<div class="mm-section-body">';
-
-  // Q comments
-  html += '<div class="mm-q-comments">';
-  html += '<div class="mm-q-comments-head">Q COMMENTS · '+qcCount+'</div>';
-  html += '<div class="mm-qc-list">';
-  (q.comments || []).forEach(qc => {
-    html += renderQComment(q.id, qc);
-  });
-  html += '</div>';
-  html += '<input type="text" class="mm-qc-add" placeholder="+ comment 추가 (자유 라벨)" onkeydown="if(event.key===\'Enter\'){addQComment(\''+q.id+'\',this.value);this.value=\'\'}">';
-  html += '</div>';
 
   // CG 매소너리 그리드
   html += '<div class="mm-cg-masonry" id="mm-cg-masonry-'+q.id+'">';
@@ -505,6 +497,22 @@ function addQuestion(){
     }
   }, 80);
 }
+window.quickAddQ = function(text){
+  if(!text || !text.trim()) return;
+  const num = 'Q' + (MD.corner.questions.length + 1);
+  const q = { id: genId('q'), number: num, type: '', guest: '', title: text.trim(), cgs: [], comments: [], collapsed: false };
+  MD.corner.questions.push(q);
+  render();
+  scheduleSave();
+  // 새 섹션으로 스크롤
+  setTimeout(()=>{
+    const section = document.querySelector('[data-q-id="'+q.id+'"]');
+    if(section) section.scrollIntoView({behavior:'smooth', block:'start'});
+    // 빠른 Q 입력 박스로 다시 포커스 (연속 입력 가능)
+    const input = document.getElementById('mm-quick-q');
+    if(input) input.focus();
+  }, 80);
+};
 function deleteQuestion(qId){
   const q = getQById(qId);
   if(!q) return;
