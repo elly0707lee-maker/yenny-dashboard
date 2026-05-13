@@ -1,21 +1,20 @@
 """
-Yenny Dashboard - Mindmap Module (Q-CG-Comment 구조)
+Yenny Dashboard - Mindmap Module (v2: Q 섹션 데크 + 매소너리 그리드)
 URL: /mindmap
 저장: 'mindmap' 타입으로 PostgreSQL에 자동 저장 (1.5초 debounce)
 
-데이터 구조:
+구조:
+  Q 섹션들이 세로로 데크처럼 쌓임
+  각 섹션 헤더 = Q 번호/타입/출연자/제목 + 접기/순서/삭제
+  각 섹션 본체 = Q comments + CG 매소너리 그리드 (columns: auto)
+
+데이터:
 {
-  corner: {
-    title: "...", subtitle: "...",
-    questions: [
-      {
-        id, number, type, guest, title,
-        cgs: [{id, image, title, subtitle, comments: [{id, text}]}],
-        comments: [{id, label, text}]
-      }
-    ]
-  },
-  activeQuestionId: "..."
+  corner: { title, subtitle, questions: [
+    {id, number, type, guest, title, collapsed,
+     cgs: [{id, image, caption, comments: [{id, text}]}],
+     comments: [{id, label, text}]}
+  ]}
 }
 """
 
@@ -45,7 +44,7 @@ input,textarea,button{font-family:inherit;color:inherit}
 .save-ind.saved{color:#00b894;opacity:1}
 .save-ind.error{color:#ff7878;opacity:1}
 
-.wrap{padding:18px;max-width:1400px;margin:0 auto}
+.wrap{padding:18px;max-width:1600px;margin:0 auto}
 
 .mm{background:#fff;border:0.5px solid #D3D1C7;border-radius:12px;padding:16px 18px;min-height:640px}
 .mm-corner-head{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;margin-bottom:14px;border-bottom:0.5px solid #D3D1C7;gap:14px}
@@ -55,15 +54,13 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-corner-title::placeholder{color:#B4B2A9}
 .mm-corner-sub{font-size:12.5px;color:#5F5E5A;border:none;background:transparent;outline:none;width:100%;padding:3px 0 0;margin-top:2px}
 .mm-corner-sub::placeholder{color:#B4B2A9}
-.mm-new-q{font-size:12px;padding:6px 14px;background:#1a1d23;color:#e8b84b;border:0.5px solid #1a1d23;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;height:fit-content;align-self:center}
-.mm-new-q:hover{background:#2C2C2A}
+
 .mm-actions{display:flex;gap:6px;align-items:center;align-self:center}
 .mm-onair-wrap{position:relative}
 .mm-onair-btn{font-size:11px;padding:6px 11px;background:#FAEEDA;color:#633806;border:0.5px solid #BA7517;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;letter-spacing:0.3px}
 .mm-onair-btn:hover{background:#EF9F27;color:#fff;border-color:#854F0B}
 .mm-onair-btn .caret{font-size:8px;opacity:0.6}
 .mm-onair-menu{position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:0.5px solid #D3D1C7;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);min-width:300px;z-index:60;padding:6px;max-height:420px;overflow-y:auto}
-.mm-onair-menu.show{display:block}
 .mm-onair-refresh{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;padding:6px;border:0.5px dashed #D3D1C7;background:transparent;border-radius:5px;cursor:pointer;font-size:11px;color:#888780;margin-bottom:5px}
 .mm-onair-refresh:hover{border-color:#888780;color:#1a1d23}
 .mm-onair-item{display:block;width:100%;text-align:left;padding:8px 10px;background:transparent;border:none;cursor:pointer;border-radius:5px;line-height:1.4;border-bottom:0.5px solid #F1EFE8}
@@ -75,120 +72,48 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-onair-empty{padding:18px 10px;text-align:center;color:#888780;font-size:11px;line-height:1.5}
 .mm-onair-reset{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;padding:7px;border:0.5px dashed #E68A8A;background:#FCEBEB;border-radius:5px;cursor:pointer;font-size:11px;color:#A32D2D;margin-top:6px;font-family:'Noto Sans KR',sans-serif}
 .mm-onair-reset:hover{border-color:#A32D2D;background:#F5C9C9;border-style:solid}
+.mm-new-q{font-size:12px;padding:6px 14px;background:#1a1d23;color:#e8b84b;border:0.5px solid #1a1d23;border-radius:6px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;height:fit-content;align-self:center}
+.mm-new-q:hover{background:#2C2C2A}
 
-.mm-body{display:grid;grid-template-columns:180px 1fr;gap:14px;align-items:start}
+/* === Q 섹션 데크 === */
+.mm-sections{display:flex;flex-direction:column;gap:12px}
+.mm-section{border-radius:10px;overflow:hidden;border:0.5px solid #D3D1C7;transition:opacity 0.2s}
+.mm-section.mm-dragging{opacity:0.45}
+.mm-section.q1{background:#F0F7FE;border-left:3px solid #378ADD}
+.mm-section.q2{background:#FCF1ED;border-left:3px solid #D85A30}
+.mm-section.q3{background:#F4F9EC;border-left:3px solid #639922}
+.mm-section.q4{background:#F7F6FE;border-left:3px solid #7F77DD}
+.mm-section.q5{background:#FBF5EA;border-left:3px solid #BA7517}
 
-.mm-q-list{display:flex;flex-direction:column;gap:6px;min-width:0}
-.mm-list-head{font-size:10px;color:#888780;font-family:'DM Mono',monospace;letter-spacing:0.5px;padding:0 4px 2px}
-.mm-q-card{background:#fff;border:0.5px solid #D3D1C7;border-left:3px solid #888780;border-radius:8px;padding:8px 10px;cursor:pointer;transition:all 0.12s;position:relative}
-.mm-q-card:hover{border-color:#888780}
-.mm-q-card.active{border:1.5px solid #185FA5;border-left-width:1.5px}
-.mm-q-card.active.q2{border-color:#993C1D}
-.mm-q-card.active.q3{border-color:#3B6D11}
-.mm-q-card.active.q4{border-color:#3C3489}
-.mm-q-card.active.q5{border-color:#854F0B}
-.mm-q-card.mm-dragging{opacity:0.4;background:#FAEEDA}
-.mm-q-card.q1{border-left-color:#378ADD}
-.mm-q-card.q2{border-left-color:#D85A30}
-.mm-q-card.q3{border-left-color:#639922}
-.mm-q-card.q4{border-left-color:#7F77DD}
-.mm-q-card.q5{border-left-color:#BA7517}
-.mm-q-card-head{display:flex;align-items:center;gap:5px;margin-bottom:3px}
-.mm-q-card-num{font-size:9px;padding:1px 5px;color:#fff;border-radius:3px;font-family:'DM Mono',monospace;font-weight:500}
-.mm-q-card.q1 .mm-q-card-num{background:#378ADD}
-.mm-q-card.q2 .mm-q-card-num{background:#D85A30}
-.mm-q-card.q3 .mm-q-card-num{background:#639922}
-.mm-q-card.q4 .mm-q-card-num{background:#7F77DD}
-.mm-q-card.q5 .mm-q-card-num{background:#BA7517}
-.mm-q-card-grip{font-size:10px;color:#B4B2A9;cursor:grab;letter-spacing:-2px;opacity:0;transition:opacity 0.1s;user-select:none}
-.mm-q-card:hover .mm-q-card-grip{opacity:0.6}
-.mm-q-card-grip:active{cursor:grabbing}
-.mm-q-card-title{font-size:11.5px;line-height:1.4;color:#1a1d23;word-break:break-word}
-.mm-q-card.active .mm-q-card-title{font-weight:500}
-.mm-q-card-stats{display:flex;gap:7px;margin-top:4px;font-size:9.5px;color:#888780;align-items:center}
-.mm-q-card-stats span{display:flex;align-items:center;gap:2px}
-.mm-q-card-del{position:absolute;top:4px;right:4px;font-size:11px;color:#B4B2A9;background:none;border:none;padding:2px 5px;border-radius:3px;cursor:pointer;opacity:0;line-height:1}
-.mm-q-card:hover .mm-q-card-del{opacity:0.8}
-.mm-q-card-del:hover{background:#FCEBEB;color:#A32D2D;opacity:1}
-.mm-q-add{border:0.5px dashed #B4B2A9;background:transparent;border-radius:8px;padding:7px;text-align:center;color:#888780;font-size:11px;cursor:pointer;transition:all 0.12s}
-.mm-q-add:hover{border-color:#888780;background:#F1EFE8}
-
-.mm-q-detail{background:#fff;border:0.5px solid #D3D1C7;border-radius:8px;padding:14px 16px;min-width:0}
-.mm-q-empty{padding:60px 30px;text-align:center;color:#888780;font-size:13px;line-height:1.7}
-.mm-q-empty .emo{font-size:36px;margin-bottom:10px;color:#B4B2A9}
-
-.mm-q-head{margin-bottom:14px}
-.mm-q-chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
-.mm-q-nav{margin-left:auto;display:flex;gap:3px;align-items:center}
-.mm-q-nav-pos{font-size:10px;color:#888780;font-family:'DM Mono',monospace;padding:0 6px;letter-spacing:0.4px}
-.mm-q-nav-btn{font-size:12px;padding:3px 10px;background:#F1EFE8;color:#5F5E5A;border:0.5px solid #D3D1C7;border-radius:4px;cursor:pointer;font-family:'DM Mono',monospace;line-height:1.2}
-.mm-q-nav-btn:hover{background:#1a1d23;color:#fff;border-color:#1a1d23}
-.mm-q-nav-btn:disabled{opacity:0.3;cursor:not-allowed;background:#F1EFE8;color:#5F5E5A;border-color:#D3D1C7}
-.mm-q-num-chip{font-size:10px;padding:2px 8px;background:#888780;color:#fff;border-radius:4px;font-family:'DM Mono',monospace;font-weight:500;outline:none;min-width:24px;text-align:center}
-.mm-q-detail.q1 .mm-q-num-chip{background:#378ADD}
-.mm-q-detail.q2 .mm-q-num-chip{background:#D85A30}
-.mm-q-detail.q3 .mm-q-num-chip{background:#639922}
-.mm-q-detail.q4 .mm-q-num-chip{background:#7F77DD}
-.mm-q-detail.q5 .mm-q-num-chip{background:#BA7517}
-.mm-q-type-input{font-size:11px;padding:2px 8px;background:#E6F1FB;color:#0C447C;border:0.5px solid transparent;border-radius:4px;outline:none;width:100px}
-.mm-q-type-input:focus{border-color:#378ADD;background:#fff}
-.mm-q-guest-input{font-size:11px;padding:2px 8px;background:#FAEEDA;color:#633806;border:0.5px solid transparent;border-radius:4px;outline:none;font-family:'DM Mono',monospace;width:90px}
-.mm-q-guest-input:focus{border-color:#BA7517;background:#fff}
-.mm-q-title-input{width:100%;font-size:14px;font-weight:500;line-height:1.45;border:none;background:transparent;outline:none;resize:none;padding:2px 0;color:#1a1d23;overflow:hidden;font-family:inherit;min-height:24px}
+.mm-section-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:rgba(255,255,255,0.55);flex-wrap:wrap}
+.mm-section-grip{font-size:11px;color:#B4B2A9;cursor:grab;letter-spacing:-2px;user-select:none;flex-shrink:0;opacity:0.5;transition:opacity 0.1s}
+.mm-section-head:hover .mm-section-grip{opacity:1}
+.mm-section-grip:active{cursor:grabbing}
+.mm-q-num{font-size:9.5px;padding:2px 7px;color:#fff;border-radius:4px;font-family:'DM Mono',monospace;font-weight:500;outline:none;min-width:22px;text-align:center;flex-shrink:0}
+.q1 .mm-q-num{background:#378ADD}
+.q2 .mm-q-num{background:#D85A30}
+.q3 .mm-q-num{background:#639922}
+.q4 .mm-q-num{background:#7F77DD}
+.q5 .mm-q-num{background:#BA7517}
+.mm-q-type{font-size:11px;padding:2px 8px;background:#fff;color:#0C447C;border:0.5px solid rgba(0,0,0,0.06);border-radius:4px;outline:none;width:100px;flex-shrink:0}
+.mm-q-type:focus{border-color:#378ADD}
+.mm-q-guest{font-size:11px;padding:2px 8px;background:#fff;color:#633806;border:0.5px solid rgba(0,0,0,0.06);border-radius:4px;outline:none;font-family:'DM Mono',monospace;width:80px;flex-shrink:0}
+.mm-q-guest:focus{border-color:#BA7517}
+.mm-q-title-input{flex:1;min-width:200px;font-size:13.5px;font-weight:500;line-height:1.45;border:none;background:transparent;outline:none;resize:none;padding:2px 0;color:#1a1d23;overflow:hidden;font-family:inherit;min-height:22px}
 .mm-q-title-input::placeholder{color:#B4B2A9}
+.mm-section-meta{font-size:10px;color:#888780;font-family:'DM Mono',monospace;white-space:nowrap;flex-shrink:0}
+.mm-section-act{font-size:13px;padding:4px 9px;background:transparent;border:0.5px solid transparent;color:#888780;cursor:pointer;border-radius:5px;line-height:1;flex-shrink:0;font-family:'DM Mono',monospace}
+.mm-section-act:hover{border-color:#D3D1C7;color:#1a1d23;background:#fff}
+.mm-section-act.del:hover{border-color:#A32D2D;color:#A32D2D;background:#FCEBEB}
 
-.mm-cg-section{margin-bottom:14px}
-.mm-section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.mm-section-label{font-size:11px;color:#5F5E5A;font-family:'DM Mono',monospace;letter-spacing:0.4px}
-.mm-section-hint{font-size:10px;color:#B4B2A9}
+.mm-section-body{padding:8px 12px 12px;background:rgba(255,255,255,0.35)}
+.mm-section.collapsed .mm-section-body{display:none}
 
-.mm-cg-scroll{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px;scrollbar-width:thin;scrollbar-color:#B4B2A9 transparent}
-.mm-cg-scroll::-webkit-scrollbar{height:8px}
-.mm-cg-scroll::-webkit-scrollbar-thumb{background:#B4B2A9;border-radius:4px}
-.mm-cg-scroll::-webkit-scrollbar-track{background:transparent}
-
-.mm-cg-card{flex:0 0 240px;border:0.5px solid #D3D1C7;border-radius:8px;overflow:hidden;background:#fff;position:relative;transition:opacity 0.2s}
-.mm-cg-card.mm-dragging{opacity:0.4}
-.mm-cg-img{height:140px;background:#F1EFE8;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
-.mm-cg-img img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
-.mm-cg-img-empty{color:#B4B2A9;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center}
-.mm-cg-img-empty .icn{font-size:24px}
-.mm-cg-label{position:absolute;top:6px;right:8px;font-size:9px;color:#1a1d23;font-family:'DM Mono',monospace;background:rgba(255,255,255,0.92);padding:2px 6px;border-radius:3px;font-weight:500;cursor:grab;user-select:none}
-.mm-cg-label:active{cursor:grabbing}
-.mm-cg-del{position:absolute;top:6px;left:8px;font-size:11px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:3px;padding:2px 5px;cursor:pointer;line-height:1;opacity:0;transition:opacity 0.1s}
-.mm-cg-card:hover .mm-cg-del{opacity:1}
-.mm-cg-meta{padding:9px 11px}
-.mm-cg-caption{width:100%;border:none;background:transparent;padding:2px 0;font-size:12px;line-height:1.5;outline:none;color:#1a1d23;min-height:34px;white-space:pre-wrap;word-break:break-word}
-.mm-cg-caption:focus{background:#FAFAF7;border-radius:3px;padding:3px 6px;margin:-1px -6px}
-.mm-cg-caption[data-placeholder]:empty::before{content:attr(data-placeholder);color:#B4B2A9;pointer-events:none}
-.mm-cg-caption b, .mm-cg-caption strong{font-weight:500;color:#1a1d23}
-.hl{background:#FAC775;color:#412402;padding:0 3px;border-radius:2px;font-weight:500;box-decoration-break:clone;-webkit-box-decoration-break:clone}
-.mm-cg-comment-text b, .mm-cg-comment-text strong, .mm-qc-text b, .mm-qc-text strong{font-weight:500}
-.mm-cg-caption i, .mm-cg-caption em, .mm-cg-comment-text i, .mm-cg-comment-text em, .mm-qc-text i, .mm-qc-text em{font-style:italic}
-.mm-cg-caption u, .mm-cg-comment-text u, .mm-qc-text u{text-decoration:underline;text-decoration-color:#888780;text-underline-offset:2px}
-
-.mm-cg-comments{margin-top:8px;padding-top:8px;border-top:0.5px dashed #D3D1C7}
-.mm-cg-comments-head{font-size:9.5px;color:#888780;font-family:'DM Mono',monospace;letter-spacing:0.3px;margin-bottom:5px}
-.mm-cg-comment{display:flex;gap:6px;padding:4px 7px;font-size:11.5px;line-height:1.45;background:#FAFAF7;border-radius:4px;align-items:flex-start;margin-bottom:3px;transition:opacity 0.2s}
-.mm-cg-comment.mm-dragging{opacity:0.4;background:#FAEEDA}
-.mm-cg-comment .mm-grip{font-size:10px;color:#B4B2A9;opacity:0.4;padding-top:2px;cursor:grab;letter-spacing:-2px;user-select:none;flex-shrink:0;transition:opacity 0.1s}
-.mm-cg-comment:hover .mm-grip{opacity:0.7}
-.mm-cg-comment .mm-grip:active{cursor:grabbing}
-.mm-cg-comment-text{flex:1;outline:none;word-break:break-word}
-.mm-cg-comment-text:focus{background:#fff;border-radius:3px;padding:0 2px;margin:0 -2px}
-.mm-cg-comment-del{background:none;border:none;color:#B4B2A9;font-size:10px;cursor:pointer;padding:0 2px;opacity:0;line-height:1;flex-shrink:0}
-.mm-cg-comment:hover .mm-cg-comment-del{opacity:0.7}
-.mm-cg-comment-del:hover{color:#A32D2D;opacity:1}
-.mm-cg-comment-add{width:100%;border:0.5px solid #D3D1C7;padding:4px 9px;border-radius:6px;font-size:11px;outline:none;margin-top:2px;background:#fff}
-.mm-cg-comment-add:focus{border-color:#888780}
-
-.mm-cg-drop{flex:0 0 180px;border:0.5px dashed #B4B2A9;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888780;background:#F1EFE8;gap:6px;min-height:240px;cursor:pointer;transition:all 0.12s;text-align:center;padding:0 12px;font-size:11px;line-height:1.5}
-.mm-cg-drop:hover, .mm-cg-drop.drag-over{border-color:#1a1d23;background:#FAEEDA;color:#412402}
-.mm-cg-drop .ic{font-size:22px;margin-bottom:2px}
-
-.mm-qc-section{border-top:0.5px solid #D3D1C7;padding-top:12px;margin-top:14px}
+/* === Q comments (섹션 상단) === */
+.mm-q-comments{padding:6px 0 10px;border-bottom:0.5px dashed #D3D1C7;margin-bottom:10px}
+.mm-q-comments-head{font-size:9.5px;color:#888780;font-family:'DM Mono',monospace;letter-spacing:0.4px;margin-bottom:5px}
 .mm-qc-list{display:flex;flex-direction:column;gap:3px}
-.mm-qc{display:flex;gap:8px;padding:5px 8px;font-size:12px;line-height:1.5;align-items:flex-start;background:transparent;border-radius:4px;transition:opacity 0.2s}
+.mm-qc{display:flex;gap:8px;padding:4px 8px;font-size:11.5px;line-height:1.5;align-items:flex-start;background:rgba(255,255,255,0.7);border-radius:4px;transition:opacity 0.2s}
 .mm-qc.mm-dragging{opacity:0.4;background:#FAEEDA}
 .mm-qc.bg-amber{background:#FDF7EC}
 .mm-qc.bg-pink{background:#FCF3F7}
@@ -198,7 +123,7 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-qc .mm-grip{font-size:10px;color:#B4B2A9;opacity:0.4;padding-top:3px;cursor:grab;letter-spacing:-2px;user-select:none;flex-shrink:0;transition:opacity 0.1s}
 .mm-qc:hover .mm-grip{opacity:0.7}
 .mm-qc .mm-grip:active{cursor:grabbing}
-.mm-qc-label{font-size:10px;flex-shrink:0;padding-top:2px;color:#5F5E5A;font-family:'DM Mono',monospace;min-width:40px;outline:none;font-weight:500}
+.mm-qc-label{font-size:10px;flex-shrink:0;padding-top:2px;color:#5F5E5A;font-family:'DM Mono',monospace;min-width:36px;outline:none;font-weight:500}
 .mm-qc-label:focus{background:#fff;border-radius:3px;padding:0 3px}
 .mm-qc-label[data-placeholder]:empty::before{content:attr(data-placeholder);color:#B4B2A9;font-weight:400}
 .mm-qc.bg-amber .mm-qc-label{color:#854F0B}
@@ -216,22 +141,73 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-qc-del{background:none;border:none;color:#B4B2A9;font-size:11px;cursor:pointer;padding:0 4px;opacity:0;line-height:1;flex-shrink:0}
 .mm-qc:hover .mm-qc-del{opacity:0.7}
 .mm-qc-del:hover{color:#A32D2D;opacity:1}
-.mm-qc-add{width:100%;border:0.5px solid #D3D1C7;padding:6px 10px;border-radius:6px;font-size:12px;outline:none;margin-top:6px;background:#fff}
-.mm-qc-add:focus{border-color:#888780}
+.mm-qc-add{width:100%;border:0.5px solid #D3D1C7;padding:5px 10px;border-radius:5px;font-size:11.5px;outline:none;margin-top:5px;background:rgba(255,255,255,0.85)}
+.mm-qc-add:focus{border-color:#888780;background:#fff}
 
+/* === CG 매소너리 그리드 === */
+.mm-cg-masonry{columns:auto 220px;column-gap:8px}
+.mm-cg-masonry > *{break-inside:avoid;margin-bottom:8px;display:inline-block;width:100%}
+
+.mm-cg-card{background:#fff;border:0.5px solid #D3D1C7;border-radius:7px;overflow:hidden;position:relative;transition:opacity 0.2s}
+.mm-cg-card.mm-dragging{opacity:0.4}
+.mm-cg-img{background:#F1EFE8;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.mm-cg-img img{width:100%;display:block;cursor:zoom-in}
+.mm-cg-img-empty{padding:30px 10px;color:#B4B2A9;font-size:11px;text-align:center}
+.mm-cg-num{position:absolute;top:5px;right:6px;font-size:9px;color:#1a1d23;font-family:'DM Mono',monospace;background:rgba(255,255,255,0.92);padding:1px 5px;border-radius:3px;font-weight:500;cursor:grab;user-select:none}
+.mm-cg-num:active{cursor:grabbing}
+.mm-cg-del{position:absolute;top:5px;left:6px;font-size:10px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:3px;padding:1px 5px;cursor:pointer;line-height:1;opacity:0;transition:opacity 0.1s}
+.mm-cg-card:hover .mm-cg-del{opacity:1}
+.mm-cg-meta{padding:7px 9px}
+.mm-cg-caption{width:100%;border:none;background:transparent;padding:0;font-size:11.5px;line-height:1.45;outline:none;color:#1a1d23;min-height:18px;white-space:pre-wrap;word-break:break-word}
+.mm-cg-caption:focus{background:#FAFAF7;border-radius:3px;padding:2px 4px;margin:-1px -4px}
+.mm-cg-caption[data-placeholder]:empty::before{content:attr(data-placeholder);color:#B4B2A9;pointer-events:none}
+.mm-cg-caption b, .mm-cg-caption strong{font-weight:500;color:#1a1d23}
+
+.mm-cg-comments{margin-top:6px;padding-top:6px;border-top:0.5px dashed #E8E5DC}
+.mm-cg-comments-head{font-size:9px;color:#B4B2A9;font-family:'DM Mono',monospace;letter-spacing:0.3px;margin-bottom:3px}
+.mm-cg-comment{display:flex;gap:5px;padding:3px 6px;font-size:10.5px;line-height:1.4;background:#FAFAF7;border-radius:3px;align-items:flex-start;margin-bottom:2px;transition:opacity 0.2s}
+.mm-cg-comment.mm-dragging{opacity:0.4;background:#FAEEDA}
+.mm-cg-comment .mm-grip{font-size:9px;color:#B4B2A9;opacity:0.4;padding-top:2px;cursor:grab;letter-spacing:-2px;user-select:none;flex-shrink:0}
+.mm-cg-comment:hover .mm-grip{opacity:0.7}
+.mm-cg-comment-text{flex:1;outline:none;word-break:break-word}
+.mm-cg-comment-text:focus{background:#fff;border-radius:2px;padding:0 2px;margin:0 -2px}
+.mm-cg-comment-del{background:none;border:none;color:#B4B2A9;font-size:9px;cursor:pointer;padding:0 2px;opacity:0;line-height:1;flex-shrink:0}
+.mm-cg-comment:hover .mm-cg-comment-del{opacity:0.7}
+.mm-cg-comment-del:hover{color:#A32D2D;opacity:1}
+.mm-cg-comment-add{width:100%;border:0.5px solid #D3D1C7;padding:3px 7px;border-radius:4px;font-size:10.5px;outline:none;margin-top:2px;background:#fff}
+.mm-cg-comment-add:focus{border-color:#888780}
+
+.mm-cg-drop{border:0.5px dashed #B4B2A9;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888780;background:rgba(255,255,255,0.6);gap:5px;min-height:120px;cursor:pointer;transition:all 0.12s;text-align:center;padding:14px 8px;font-size:10.5px;line-height:1.5;font-family:'Noto Sans KR',sans-serif}
+.mm-cg-drop:hover, .mm-cg-drop.drag-over{border-color:#1a1d23;background:#FAEEDA;color:#412402}
+.mm-cg-drop .ic{font-size:18px}
+
+/* === highlight & bold === */
+.hl{background:#FAC775;color:#412402;padding:0 3px;border-radius:2px;font-weight:500;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.mm-cg-caption i, .mm-cg-caption em, .mm-cg-comment-text i, .mm-cg-comment-text em, .mm-qc-text i, .mm-qc-text em{font-style:italic}
+.mm-cg-caption u, .mm-cg-comment-text u, .mm-qc-text u{text-decoration:underline;text-decoration-color:#888780;text-underline-offset:2px}
+
+/* === 새 Q 추가 버튼 === */
+.mm-add-section{border:0.5px dashed #B4B2A9;background:transparent;border-radius:10px;padding:14px;text-align:center;color:#888780;font-size:12.5px;cursor:pointer;transition:all 0.12s;margin-top:6px;font-family:'Noto Sans KR',sans-serif}
+.mm-add-section:hover{border-color:#888780;background:#F1EFE8;color:#1a1d23}
+
+/* === 빈 상태 === */
+.mm-empty{padding:80px 30px;text-align:center;color:#888780;font-size:13px;line-height:1.7}
+.mm-empty .emo{font-size:40px;margin-bottom:12px;color:#B4B2A9}
+
+/* === lightbox === */
 .mm-lightbox{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:200;display:none;align-items:center;justify-content:center;padding:30px;cursor:zoom-out}
 .mm-lightbox.show{display:flex}
 .mm-lightbox img{max-width:100%;max-height:100%;object-fit:contain}
 .mm-lightbox-close{position:absolute;top:18px;right:24px;background:rgba(255,255,255,0.15);color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer}
 .mm-lightbox-close:hover{background:rgba(255,255,255,0.25)}
 
+/* === responsive === */
 @media (max-width: 700px){
   .wrap{padding:10px}
   .mm{padding:12px}
-  .mm-body{grid-template-columns:1fr;gap:10px}
-  .mm-q-list{flex-direction:row;overflow-x:auto;padding-bottom:6px;gap:8px}
-  .mm-q-card{flex:0 0 170px}
-  .mm-list-head{display:none}
+  .mm-cg-masonry{columns:auto 160px;column-gap:6px}
+  .mm-q-type, .mm-q-guest{width:auto;min-width:70px;flex:1}
+  .mm-q-title-input{min-width:100%;order:10}
 }
 </style>
 </head>
@@ -266,10 +242,7 @@ input,textarea,button{font-family:inherit;color:inherit}
       </div>
     </div>
 
-    <div class="mm-body">
-      <div class="mm-q-list" id="mm-q-list"></div>
-      <div class="mm-q-detail" id="mm-q-detail"></div>
-    </div>
+    <div class="mm-sections" id="mm-sections"></div>
   </div>
 </div>
 
@@ -281,7 +254,7 @@ input,textarea,button{font-family:inherit;color:inherit}
 <input type="file" id="mm-file-input" accept="image/*" style="display:none" multiple>
 
 <script>
-// === fetch wrapper for auth (PWA 세션 쿠키 + API secret 자동 추가) ===
+// === fetch wrapper (PWA 세션 + X-API-Secret 자동) ===
 const _origFetch = window.fetch;
 window.fetch = function(url, options){
   options = options || {};
@@ -298,23 +271,14 @@ window.fetch = function(url, options){
 
 // === 데이터 모델 ===
 let MD = {
-  corner: { title:'', subtitle:'', questions:[] },
-  activeQuestionId: null
+  corner: { title:'', subtitle:'', questions:[] }
 };
 let saveTimer = null;
-let dirty = false;
 
 function genId(prefix){
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,7);
 }
-function getActiveQ(){
-  if(!MD.activeQuestionId) return null;
-  return MD.corner.questions.find(q => q.id === MD.activeQuestionId) || null;
-}
-function getQColorIdx(q){
-  const idx = MD.corner.questions.indexOf(q);
-  return (idx % 5) + 1;
-}
+function getQById(qId){ return MD.corner.questions.find(q => q.id === qId) || null; }
 function escapeHtml(s){
   if(s == null) return '';
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -324,20 +288,18 @@ function getQCBgClass(label){
   if(/db|콜백/.test(l)) return 'bg-amber';
   if(/말랑|💫/.test(l)) return 'bg-pink';
   if(/상황|배경/.test(l)) return 'bg-blue';
-  if(/송곳|🎯송곳/.test(l)) return 'bg-purple';
+  if(/송곳/.test(l)) return 'bg-purple';
   if(/질문/.test(l)) return 'bg-green';
   return '';
 }
 
 // === 저장/로드 ===
 function syncActiveContentEditable(){
-  // 활성 contenteditable의 현재 값을 모델에 반영 (onblur 트리거)
   const a = document.activeElement;
   if(a && a.isContentEditable && typeof a.onblur === 'function'){
     try{ a.onblur(); }catch(e){}
   }
 }
-
 function indSaving(){const i=document.getElementById('save-ind');if(!i)return;i.textContent='저장 중...';i.className='save-ind saving';i.style.opacity=1;}
 function indSaved(sizeKB){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✓ 저장됨'+(sizeKB?' ('+sizeKB+'KB)':'');i.className='save-ind saved';i.style.opacity=1;setTimeout(()=>{i.style.opacity=0;},1800);}
 function indError(detail){const i=document.getElementById('save-ind');if(!i)return;i.textContent='✕ '+(detail||'저장 실패');i.className='save-ind error';i.style.opacity=1;}
@@ -349,6 +311,11 @@ async function saveMindmap(){
     indSaving();
     const content = JSON.stringify(MD);
     sizeKB = Math.round(content.length / 1024);
+    if(sizeKB > 4500){
+      console.error('[mindmap save] payload too large:', sizeKB+'KB');
+      indError('너무 큼 '+sizeKB+'KB · 이미지 일부 삭제 필요');
+      return;
+    }
     const res = await fetch('/api/post/mindmap',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -368,9 +335,8 @@ async function saveMindmap(){
   }
 }
 function scheduleSave(){
-  dirty = true;
   if(saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(()=>{ saveMindmap(); dirty=false; }, 1500);
+  saveTimer = setTimeout(saveMindmap, 1500);
 }
 async function loadMindmap(){
   try{
@@ -384,9 +350,9 @@ async function loadMindmap(){
           MD.corner.questions.forEach(q => {
             if(!q.cgs) q.cgs = [];
             if(!q.comments) q.comments = [];
+            if(q.collapsed === undefined) q.collapsed = false;
             q.cgs.forEach(cg => {
               if(!cg.comments) cg.comments = [];
-              // 구버전 title/subtitle → caption 마이그레이션
               if(cg.caption === undefined && (cg.title || cg.subtitle)){
                 const parts = [];
                 if(cg.title) parts.push(cg.title);
@@ -406,115 +372,92 @@ async function loadMindmap(){
 // === 렌더링 ===
 function render(){
   syncActiveContentEditable();
-  renderHeader();
-  renderQList();
-  renderQDetail();
-}
-function renderHeader(){
   document.getElementById('mm-corner-title').value = MD.corner.title || '';
   document.getElementById('mm-corner-sub').value = MD.corner.subtitle || '';
+  renderSections();
 }
-function renderQList(){
-  const list = document.getElementById('mm-q-list');
-  const head = '<div class="mm-list-head">QUESTIONS · '+MD.corner.questions.length+'</div>';
-  let html = head;
-  MD.corner.questions.forEach((q, idx) => {
-    const colorIdx = (idx % 5) + 1;
-    const active = q.id === MD.activeQuestionId ? ' active' : '';
-    const cgCount = (q.cgs || []).length;
-    const commentCount = (q.comments || []).length + (q.cgs || []).reduce((s,cg)=>s+(cg.comments||[]).length,0);
-    html += '<div class="mm-q-card q'+colorIdx+active+'" data-q-id="'+q.id+'" onclick="selectQuestion(\''+q.id+'\')">'+
-      '<button class="mm-q-card-del" onclick="event.stopPropagation();deleteQuestion(\''+q.id+'\')" title="삭제">✕</button>'+
-      '<div class="mm-q-card-head">'+
-        '<span class="mm-q-card-grip" draggable="true" onclick="event.stopPropagation()">⋮⋮</span>'+
-        '<span class="mm-q-card-num">'+escapeHtml(q.number || ('Q'+(idx+1)))+'</span>'+
-      '</div>'+
-      '<div class="mm-q-card-title">'+escapeHtml(q.title || '(제목 없음)')+'</div>'+
-      '<div class="mm-q-card-stats">'+
-        '<span><i class="ti ti-message-circle" style="font-size:10px"></i> '+commentCount+'</span>'+
-        (cgCount ? '<span><i class="ti ti-photo" style="font-size:10px"></i> '+cgCount+'</span>' : '')+
-      '</div>'+
-    '</div>';
-  });
-  html += '<button class="mm-q-add" onclick="addQuestion()">＋ 새 질문</button>';
-  list.innerHTML = html;
-}
-function renderQDetail(){
-  const detail = document.getElementById('mm-q-detail');
-  const q = getActiveQ();
-  if(!q){
-    detail.className = 'mm-q-detail';
-    detail.innerHTML = '<div class="mm-q-empty"><div class="emo">💬</div>왼쪽에서 질문을 선택하거나<br>＋ 새 Q 버튼으로 추가하세요</div>';
+
+function renderSections(){
+  const container = document.getElementById('mm-sections');
+  if(!MD.corner.questions.length){
+    container.innerHTML = '<div class="mm-empty"><div class="emo">📋</div>아직 질문이 없어요<br>＋ 새 Q 또는 ⬇ ON AIR 에서 가져오기로 시작하세요</div>'
+      + '<button class="mm-add-section" onclick="addQuestion()">＋ 새 Q 섹션</button>';
     return;
   }
-  const colorIdx = getQColorIdx(q);
-  detail.className = 'mm-q-detail q'+colorIdx;
-
   let html = '';
-  html += '<div class="mm-q-head">';
-  const qIdx = MD.corner.questions.indexOf(q);
-  const qTotal = MD.corner.questions.length;
-  html += '<div class="mm-q-chips">';
-  html += '<span class="mm-q-num-chip" contenteditable="true" onblur="updateQField(\''+q.id+'\',\'number\',this.textContent.trim())">'+escapeHtml(q.number||'Q')+'</span>';
-  html += '<input type="text" class="mm-q-type-input" value="'+escapeHtml(q.type||'')+'" placeholder="🅰️ 타입" onchange="updateQField(\''+q.id+'\',\'type\',this.value)">';
-  html += '<input type="text" class="mm-q-guest-input" value="'+escapeHtml(q.guest||'')+'" placeholder="출연자" onchange="updateQField(\''+q.id+'\',\'guest\',this.value)">';
-  if(qTotal > 1){
-    html += '<div class="mm-q-nav">';
-    html += '<button class="mm-q-nav-btn" title="이전 Q (⌘⇧↑)" onclick="prevQ()">←</button>';
-    html += '<span class="mm-q-nav-pos">'+(qIdx+1)+' / '+qTotal+'</span>';
-    html += '<button class="mm-q-nav-btn" title="다음 Q (⌘⇧↓)" onclick="nextQ()">→</button>';
-    html += '</div>';
-  }
-  html += '</div>';
+  MD.corner.questions.forEach((q, idx) => {
+    html += renderSection(q, idx);
+  });
+  html += '<button class="mm-add-section" onclick="addQuestion()">＋ 새 Q 섹션</button>';
+  container.innerHTML = html;
+  // textarea 자동 리사이즈
+  container.querySelectorAll('.mm-q-title-input').forEach(autoResizeTextarea);
+}
+
+function renderSection(q, idx){
+  const colorIdx = (idx % 5) + 1;
+  const cgCount = (q.cgs || []).length;
+  const qcCount = (q.comments || []).length;
+  const cmtCount = (q.cgs || []).reduce((s,cg)=>s+(cg.comments||[]).length,0) + qcCount;
+  const collapsed = q.collapsed ? ' collapsed' : '';
+  const caret = q.collapsed ? '▶' : '▼';
+
+  let html = '<div class="mm-section q'+colorIdx+collapsed+'" data-q-id="'+q.id+'">';
+  html += '<div class="mm-section-head">';
+  html += '<span class="mm-section-grip" draggable="true">⋮⋮</span>';
+  html += '<span class="mm-q-num" contenteditable="true" onblur="updateQField(\''+q.id+'\',\'number\',this.textContent.trim())">'+escapeHtml(q.number||'Q')+'</span>';
+  html += '<input type="text" class="mm-q-type" value="'+escapeHtml(q.type||'')+'" placeholder="🅰️ 타입" onchange="updateQField(\''+q.id+'\',\'type\',this.value)">';
+  html += '<input type="text" class="mm-q-guest" value="'+escapeHtml(q.guest||'')+'" placeholder="출연자" onchange="updateQField(\''+q.id+'\',\'guest\',this.value)">';
   html += '<textarea class="mm-q-title-input" placeholder="질문 제목 입력..." onchange="updateQField(\''+q.id+'\',\'title\',this.value)" oninput="autoResizeTextarea(this);scheduleSave()">'+escapeHtml(q.title||'')+'</textarea>';
+  html += '<span class="mm-section-meta">CG '+cgCount+' · 💬'+cmtCount+'</span>';
+  html += '<button class="mm-section-act" title="접기/펼치기" onclick="toggleSectionCollapse(\''+q.id+'\')">'+caret+'</button>';
+  html += '<button class="mm-section-act del" title="섹션 삭제" onclick="deleteQuestion(\''+q.id+'\')">✕</button>';
   html += '</div>';
 
-  html += '<div class="mm-cg-section">';
-  html += '<div class="mm-section-head">';
-  html += '<div class="mm-section-label">CG · '+(q.cgs||[]).length+'장 <span style="font-family:\'Noto Sans KR\',sans-serif;color:#B4B2A9;margin-left:4px">→ 가로 스크롤</span></div>';
-  html += '<div class="mm-section-hint">드래그 = 순서 · 클릭 = 풀스크린</div>';
+  // 본체 (접혀있어도 HTML은 생성, CSS로 숨김)
+  html += '<div class="mm-section-body">';
+
+  // Q comments
+  html += '<div class="mm-q-comments">';
+  html += '<div class="mm-q-comments-head">Q COMMENTS · '+qcCount+'</div>';
+  html += '<div class="mm-qc-list">';
+  (q.comments || []).forEach(qc => {
+    html += renderQComment(q.id, qc);
+  });
   html += '</div>';
-  html += '<div class="mm-cg-scroll" id="mm-cg-scroll-'+q.id+'">';
-  (q.cgs || []).forEach((cg, idx) => {
-    html += renderCGCard(q.id, cg, idx);
+  html += '<input type="text" class="mm-qc-add" placeholder="+ comment 추가 (자유 라벨)" onkeydown="if(event.key===\'Enter\'){addQComment(\''+q.id+'\',this.value);this.value=\'\'}">';
+  html += '</div>';
+
+  // CG 매소너리 그리드
+  html += '<div class="mm-cg-masonry" id="mm-cg-masonry-'+q.id+'">';
+  (q.cgs || []).forEach((cg, cgIdx) => {
+    html += renderCGCard(q.id, cg, cgIdx);
   });
   html += '<div class="mm-cg-drop" onclick="triggerFileInput(\''+q.id+'\')" data-q-id="'+q.id+'">'+
     '<div class="ic">⬆</div>'+
     '<div>이미지 끌어다 놓기<br>또는 클릭 · Cmd+V</div>'+
   '</div>';
   html += '</div>';
-  html += '</div>';
 
-  html += '<div class="mm-qc-section">';
-  html += '<div class="mm-section-head">';
-  html += '<div class="mm-section-label">Q COMMENTS · '+(q.comments||[]).length+'</div>';
-  html += '</div>';
-  html += '<div class="mm-qc-list">';
-  (q.comments || []).forEach(qc => {
-    html += renderQComment(q.id, qc);
-  });
-  html += '</div>';
-  html += '<input type="text" class="mm-qc-add" placeholder="+ comment 추가 (자유 라벨, 예: 의도 | ▶ DB | 💫 말랑)" onkeydown="if(event.key===\'Enter\'){addQComment(\''+q.id+'\',this.value);this.value=\'\'}">';
-  html += '</div>';
-
-  detail.innerHTML = html;
-  const ta = detail.querySelector('.mm-q-title-input');
-  if(ta) autoResizeTextarea(ta);
+  html += '</div>'; // section-body
+  html += '</div>'; // section
+  return html;
 }
+
 function renderCGCard(qId, cg, idx){
   const imgHtml = cg.image
     ? '<img src="'+escapeHtml(cg.image)+'" alt="" onclick="openLightbox(this.src)">'
-    : '<div class="mm-cg-img-empty"><div class="icn">📷</div>이미지 없음</div>';
+    : '<div class="mm-cg-img-empty">이미지 없음</div>';
 
   let html = '<div class="mm-cg-card" data-cg-id="'+cg.id+'" data-q-id="'+qId+'">';
   html += '<div class="mm-cg-img">'+imgHtml+
-    '<span class="mm-cg-label" draggable="true">CG-'+(idx+1)+'</span>'+
+    '<span class="mm-cg-num" draggable="true">CG-'+(idx+1)+'</span>'+
     '<button class="mm-cg-del" onclick="deleteCG(\''+qId+'\',\''+cg.id+'\')" title="삭제">✕</button>'+
     '</div>';
   html += '<div class="mm-cg-meta">';
-  html += '<div class="mm-cg-caption" contenteditable="true" data-placeholder="여기에 자유 입력… (제목·메모 뭐든)" onblur="updateCGField(\''+qId+'\',\''+cg.id+'\',\'caption\',this.innerHTML)">'+(cg.caption||'')+'</div>';
+  html += '<div class="mm-cg-caption" contenteditable="true" data-placeholder="여기에 자유 입력…" onblur="updateCGField(\''+qId+'\',\''+cg.id+'\',\'caption\',this.innerHTML)">'+(cg.caption||'')+'</div>';
   html += '<div class="mm-cg-comments">';
-  html += '<div class="mm-cg-comments-head">COMMENT</div>';
+  html += '<div class="mm-cg-comments-head">COMMENT · '+(cg.comments||[]).length+'</div>';
   (cg.comments || []).forEach(cc => {
     html += '<div class="mm-cg-comment" data-cc-id="'+cc.id+'">'+
       '<span class="mm-grip" draggable="true">⋮⋮</span>'+
@@ -528,6 +471,7 @@ function renderCGCard(qId, cg, idx){
   html += '</div>';
   return html;
 }
+
 function renderQComment(qId, qc){
   const bg = getQCBgClass(qc.label);
   return '<div class="mm-qc '+bg+'" data-qc-id="'+qc.id+'">'+
@@ -537,60 +481,64 @@ function renderQComment(qId, qc){
     '<button class="mm-qc-del" onclick="deleteQComment(\''+qId+'\',\''+qc.id+'\')">✕</button>'+
   '</div>';
 }
-function escapeAttr(s){return String(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;');}
-function autoResizeTextarea(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px';}
+
+function autoResizeTextarea(el){
+  if(!el) return;
+  el.style.height = 'auto';
+  el.style.height = (el.scrollHeight + 2) + 'px';
+}
 
 // === CRUD ===
 function addQuestion(){
   const num = 'Q' + (MD.corner.questions.length + 1);
-  const q = { id: genId('q'), number: num, type: '', guest: '', title: '', cgs: [], comments: [] };
+  const q = { id: genId('q'), number: num, type: '', guest: '', title: '', cgs: [], comments: [], collapsed: false };
   MD.corner.questions.push(q);
-  MD.activeQuestionId = q.id;
   render();
   scheduleSave();
+  // 새 섹션으로 스크롤 + 제목 포커스
   setTimeout(()=>{
-    const ta = document.querySelector('.mm-q-title-input');
-    if(ta){ ta.focus(); }
-  }, 50);
-}
-function selectQuestion(qId){
-  MD.activeQuestionId = qId;
-  render();
-  scheduleSave();
+    const section = document.querySelector('[data-q-id="'+q.id+'"]');
+    if(section){
+      section.scrollIntoView({behavior:'smooth', block:'start'});
+      const title = section.querySelector('.mm-q-title-input');
+      if(title) title.focus();
+    }
+  }, 80);
 }
 function deleteQuestion(qId){
-  const q = MD.corner.questions.find(x => x.id === qId);
+  const q = getQById(qId);
   if(!q) return;
-  if(!confirm('이 질문을 삭제할까요?\n\n"'+(q.title || q.number)+'"')) return;
+  if(!confirm('이 질문 섹션을 삭제할까요?\n\n"'+(q.title || q.number)+'"\nCG '+(q.cgs||[]).length+'장, comment '+(q.comments||[]).length+'개도 함께 사라집니다.')) return;
   MD.corner.questions = MD.corner.questions.filter(x => x.id !== qId);
-  if(MD.activeQuestionId === qId){
-    MD.activeQuestionId = MD.corner.questions.length ? MD.corner.questions[0].id : null;
-  }
   render();
   scheduleSave();
 }
 function updateQField(qId, field, value){
-  const q = MD.corner.questions.find(x => x.id === qId);
-  if(!q) return;
+  const q = getQById(qId); if(!q) return;
   q[field] = value;
-  if(field === 'title' || field === 'number'){ renderQList(); }
   scheduleSave();
 }
+window.toggleSectionCollapse = function(qId){
+  const q = getQById(qId); if(!q) return;
+  q.collapsed = !q.collapsed;
+  render();
+  scheduleSave();
+};
 function updateCGField(qId, cgId, field, value){
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   const cg = q.cgs.find(c => c.id === cgId); if(!cg) return;
   cg[field] = value;
   scheduleSave();
 }
 function deleteCG(qId, cgId){
   if(!confirm('이 CG를 삭제할까요?')) return;
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   q.cgs = q.cgs.filter(c => c.id !== cgId);
   render();
   scheduleSave();
 }
 function addCG(qId, base64Image){
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   const cg = { id: genId('cg'), image: base64Image, caption: '', comments: [] };
   q.cgs.push(cg);
   render();
@@ -598,21 +546,21 @@ function addCG(qId, base64Image){
 }
 function addCGComment(qId, cgId, text){
   if(!text || !text.trim()) return;
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   const cg = q.cgs.find(c => c.id === cgId); if(!cg) return;
   cg.comments.push({ id: genId('cc'), text: text.trim() });
   render();
   scheduleSave();
 }
 function updateCGComment(qId, cgId, ccId, text){
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   const cg = q.cgs.find(c => c.id === cgId); if(!cg) return;
   const cc = cg.comments.find(c => c.id === ccId); if(!cc) return;
   cc.text = text;
   scheduleSave();
 }
 function deleteCGComment(qId, cgId, ccId){
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   const cg = q.cgs.find(c => c.id === cgId); if(!cg) return;
   cg.comments = cg.comments.filter(c => c.id !== ccId);
   render();
@@ -620,7 +568,7 @@ function deleteCGComment(qId, cgId, ccId){
 }
 function addQComment(qId, raw){
   if(!raw || !raw.trim()) return;
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   let label = '', text = raw.trim(), m;
   if((m = text.match(/^\[([^\]]+)\]\s*(.*)/))){ label = m[1]; text = m[2]; }
   else if((m = text.match(/^(\S{1,8})\s*[:：]\s*(.+)/))){ label = m[1]; text = m[2]; }
@@ -629,14 +577,14 @@ function addQComment(qId, raw){
   scheduleSave();
 }
 function updateQCommentField(qId, qcId, field, value){
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   const qc = q.comments.find(c => c.id === qcId); if(!qc) return;
   qc[field] = value;
-  if(field === 'label'){ renderQDetail(); }
+  if(field === 'label'){ render(); }
   scheduleSave();
 }
 function deleteQComment(qId, qcId){
-  const q = MD.corner.questions.find(x => x.id === qId); if(!q) return;
+  const q = getQById(qId); if(!q) return;
   q.comments = q.comments.filter(c => c.id !== qcId);
   render();
   scheduleSave();
@@ -661,7 +609,7 @@ document.getElementById('mm-file-input').addEventListener('change', async (e) =>
   _pendingDropQId = null;
 });
 
-function resizeImage(file, maxW=1400, maxH=900, quality=0.85){
+function resizeImage(file, maxW=1100, maxH=750, quality=0.78){
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -687,14 +635,14 @@ function resizeImage(file, maxW=1400, maxH=900, quality=0.85){
   });
 }
 
-// === 드롭존 드래그 & 클립보드 ===
+// === 드롭존 + 클립보드 ===
 document.addEventListener('dragover', (e) => {
   const drop = e.target.closest('.mm-cg-drop');
   if(drop){ e.preventDefault(); drop.classList.add('drag-over'); return; }
   // 정렬 드래그
   if(!_draggingEl) return;
   let targetSel = null;
-  if(_draggingKind === 'q-card') targetSel = '.mm-q-card';
+  if(_draggingKind === 'q-section') targetSel = '.mm-section';
   else if(_draggingKind === 'cg-card') targetSel = '.mm-cg-card';
   else if(_draggingKind === 'cg-comment') targetSel = '.mm-cg-comment';
   else if(_draggingKind === 'q-comment') targetSel = '.mm-qc';
@@ -704,10 +652,9 @@ document.addEventListener('dragover', (e) => {
   if(target.parentNode !== _draggingEl.parentNode) return;
   e.preventDefault();
   const rect = target.getBoundingClientRect();
-  const horizontal = _draggingKind === 'cg-card';
-  const middle = horizontal ? (rect.left + rect.width/2) : (rect.top + rect.height/2);
-  const pos = horizontal ? e.clientX : e.clientY;
-  if(pos < middle){ target.parentNode.insertBefore(_draggingEl, target); }
+  // 매소너리는 column 단위라 vertical middle 비교가 자연스러움
+  const middle = rect.top + rect.height/2;
+  if(e.clientY < middle){ target.parentNode.insertBefore(_draggingEl, target); }
   else { target.parentNode.insertBefore(_draggingEl, target.nextSibling); }
 });
 document.addEventListener('dragleave', (e) => {
@@ -729,19 +676,22 @@ document.addEventListener('drop', async (e) => {
   }
 });
 document.addEventListener('paste', async (e) => {
-  const tgt = e.target;
-  // 입력란에 포커스 중이면 일반 텍스트 붙여넣기는 막지 않음
   const items = (e.clipboardData || window.clipboardData)?.items || [];
-  let handled = false;
   for(const item of items){
     if(item.type && item.type.startsWith('image/')){
-      const q = getActiveQ(); if(!q) continue;
+      // 활성 Q 결정 — 포커스된 섹션 또는 첫 번째 펼친 섹션
+      const focusSection = document.activeElement ? document.activeElement.closest('.mm-section') : null;
+      let qId = focusSection ? focusSection.dataset.qId : null;
+      if(!qId){
+        const firstOpen = MD.corner.questions.find(q => !q.collapsed);
+        if(firstOpen) qId = firstOpen.id;
+      }
+      if(!qId) continue;
       const f = item.getAsFile();
       if(f){
         e.preventDefault();
-        handled = true;
         const data = await resizeImage(f);
-        addCG(q.id, data);
+        addCG(qId, data);
       }
     }
   }
@@ -750,22 +700,19 @@ document.addEventListener('paste', async (e) => {
 // === 드래그 정렬 ===
 let _draggingEl = null;
 let _draggingKind = null;
-
 document.addEventListener('dragstart', (e) => {
   const t = e.target;
   if(!t || !t.classList) return;
-  if(t.classList.contains('mm-q-card-grip')){
-    _draggingEl = t.closest('.mm-q-card');
-    _draggingKind = 'q-card';
-  }
-  else if(t.classList.contains('mm-cg-label')){
+  if(t.classList.contains('mm-section-grip')){
+    _draggingEl = t.closest('.mm-section');
+    _draggingKind = 'q-section';
+  } else if(t.classList.contains('mm-cg-num')){
     _draggingEl = t.closest('.mm-cg-card');
     _draggingKind = 'cg-card';
-  }
-  else if(t.classList.contains('mm-grip')){
-    const cg = t.closest('.mm-cg-comment');
+  } else if(t.classList.contains('mm-grip')){
+    const cgc = t.closest('.mm-cg-comment');
     const qc = t.closest('.mm-qc');
-    if(cg){ _draggingEl = cg; _draggingKind = 'cg-comment'; }
+    if(cgc){ _draggingEl = cgc; _draggingKind = 'cg-comment'; }
     else if(qc){ _draggingEl = qc; _draggingKind = 'q-comment'; }
   }
   if(_draggingEl){
@@ -776,8 +723,7 @@ document.addEventListener('dragstart', (e) => {
     }catch(err){}
   }
 });
-
-document.addEventListener('dragend', (e) => {
+document.addEventListener('dragend', () => {
   if(!_draggingEl) return;
   _draggingEl.classList.remove('mm-dragging');
   syncOrderFromDOM(_draggingKind);
@@ -787,32 +733,41 @@ document.addEventListener('dragend', (e) => {
 });
 
 function syncOrderFromDOM(kind){
-  if(kind === 'q-card'){
-    const list = document.getElementById('mm-q-list');
-    const ids = Array.from(list.querySelectorAll('.mm-q-card')).map(el => el.dataset.qId);
+  if(kind === 'q-section'){
+    const container = document.getElementById('mm-sections');
+    const ids = Array.from(container.querySelectorAll('.mm-section')).map(el => el.dataset.qId);
     MD.corner.questions.sort((a,b) => ids.indexOf(a.id) - ids.indexOf(b.id));
-    renderQList();
+    render();
   } else if(kind === 'cg-card'){
-    const q = getActiveQ(); if(!q) return;
-    const scroll = document.getElementById('mm-cg-scroll-'+q.id);
-    if(!scroll) return;
-    const ids = Array.from(scroll.querySelectorAll('.mm-cg-card')).map(el => el.dataset.cgId);
-    q.cgs.sort((a,b) => ids.indexOf(a.id) - ids.indexOf(b.id));
-    renderQDetail();
+    // 어느 섹션의 CG인지 찾기
+    document.querySelectorAll('.mm-section').forEach(sec => {
+      const qId = sec.dataset.qId;
+      const q = getQById(qId); if(!q) return;
+      const grid = sec.querySelector('.mm-cg-masonry');
+      if(!grid) return;
+      const ids = Array.from(grid.querySelectorAll('.mm-cg-card')).map(el => el.dataset.cgId);
+      q.cgs.sort((a,b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    });
+    // CG-N 번호 갱신을 위해 render
+    render();
   } else if(kind === 'cg-comment'){
-    const q = getActiveQ(); if(!q) return;
     document.querySelectorAll('.mm-cg-card').forEach(cgEl => {
       const cgId = cgEl.dataset.cgId;
+      const qId = cgEl.dataset.qId;
+      const q = getQById(qId); if(!q) return;
       const cg = q.cgs.find(c => c.id === cgId); if(!cg) return;
       const ids = Array.from(cgEl.querySelectorAll('.mm-cg-comment')).map(el => el.dataset.ccId);
       cg.comments.sort((a,b) => ids.indexOf(a.id) - ids.indexOf(b.id));
     });
   } else if(kind === 'q-comment'){
-    const q = getActiveQ(); if(!q) return;
-    const list = document.querySelector('.mm-qc-list');
-    if(!list) return;
-    const ids = Array.from(list.querySelectorAll('.mm-qc')).map(el => el.dataset.qcId);
-    q.comments.sort((a,b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    document.querySelectorAll('.mm-section').forEach(sec => {
+      const qId = sec.dataset.qId;
+      const q = getQById(qId); if(!q) return;
+      const list = sec.querySelector('.mm-qc-list');
+      if(!list) return;
+      const ids = Array.from(list.querySelectorAll('.mm-qc')).map(el => el.dataset.qcId);
+      q.comments.sort((a,b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+    });
   }
 }
 
@@ -828,35 +783,73 @@ document.getElementById('mm-corner-sub').addEventListener('input', (e) => {
 
 // === lightbox ===
 window.openLightbox = function(src){
-  const lb = document.getElementById('mm-lightbox');
   document.getElementById('mm-lightbox-img').src = src;
-  lb.classList.add('show');
+  document.getElementById('mm-lightbox').classList.add('show');
 };
 window.closeLightbox = function(){
   document.getElementById('mm-lightbox').classList.remove('show');
 };
 
-// === Q 빠른 전환 ===
+// === Q 빠른 전환 (다음 Q 섹션으로 스크롤 + 펼침) ===
 function commitActiveInput(){
-  // 현재 포커스된 입력 요소의 onblur 트리거 (변경 사항 commit)
   const a = document.activeElement;
   if(a && (a.isContentEditable || a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')){
     if(typeof a.blur === 'function') a.blur();
   }
 }
+function scrollToSection(qId){
+  const q = getQById(qId); if(!q) return;
+  if(q.collapsed){ q.collapsed = false; render(); scheduleSave(); }
+  setTimeout(()=>{
+    const section = document.querySelector('[data-q-id="'+qId+'"]');
+    if(section){
+      section.scrollIntoView({behavior:'smooth', block:'start'});
+      const title = section.querySelector('.mm-q-title-input');
+      if(title) setTimeout(()=>title.focus(), 200);
+    }
+  }, q.collapsed === false ? 0 : 50);
+}
 window.prevQ = function(){
   if(MD.corner.questions.length < 2) return;
   commitActiveInput();
-  const idx = MD.corner.questions.findIndex(q => q.id === MD.activeQuestionId);
-  const newIdx = idx > 0 ? idx - 1 : MD.corner.questions.length - 1;
-  selectQuestion(MD.corner.questions[newIdx].id);
+  // 현재 화면에서 가장 가까운 섹션 찾기
+  const sections = Array.from(document.querySelectorAll('.mm-section'));
+  let currentIdx = -1;
+  const focusSection = document.activeElement ? document.activeElement.closest('.mm-section') : null;
+  if(focusSection) currentIdx = sections.indexOf(focusSection);
+  if(currentIdx < 0){
+    // 화면 중앙에 가장 가까운 섹션
+    const vh = window.innerHeight;
+    let best = 0, bestDist = Infinity;
+    sections.forEach((s, i) => {
+      const r = s.getBoundingClientRect();
+      const d = Math.abs(r.top + r.height/2 - vh/2);
+      if(d < bestDist){ bestDist = d; best = i; }
+    });
+    currentIdx = best;
+  }
+  const newIdx = currentIdx > 0 ? currentIdx - 1 : MD.corner.questions.length - 1;
+  scrollToSection(MD.corner.questions[newIdx].id);
 };
 window.nextQ = function(){
   if(MD.corner.questions.length < 2) return;
   commitActiveInput();
-  const idx = MD.corner.questions.findIndex(q => q.id === MD.activeQuestionId);
-  const newIdx = idx < MD.corner.questions.length - 1 ? idx + 1 : 0;
-  selectQuestion(MD.corner.questions[newIdx].id);
+  const sections = Array.from(document.querySelectorAll('.mm-section'));
+  let currentIdx = -1;
+  const focusSection = document.activeElement ? document.activeElement.closest('.mm-section') : null;
+  if(focusSection) currentIdx = sections.indexOf(focusSection);
+  if(currentIdx < 0){
+    const vh = window.innerHeight;
+    let best = 0, bestDist = Infinity;
+    sections.forEach((s, i) => {
+      const r = s.getBoundingClientRect();
+      const d = Math.abs(r.top + r.height/2 - vh/2);
+      if(d < bestDist){ bestDist = d; best = i; }
+    });
+    currentIdx = best;
+  }
+  const newIdx = currentIdx < MD.corner.questions.length - 1 ? currentIdx + 1 : 0;
+  scrollToSection(MD.corner.questions[newIdx].id);
 };
 
 // === 하이라이트 토글 ===
@@ -864,18 +857,13 @@ function toggleHighlight(){
   const sel = window.getSelection();
   if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
-  // 이미 .hl 안에 있는지 체크
   let startNode = range.startContainer;
   if(startNode.nodeType === 3) startNode = startNode.parentNode;
   const existingHl = startNode.closest && startNode.closest('.hl');
-
   if(existingHl){
-    // 토글 해제: span 풀기
     const parent = existingHl.parentNode;
     if(!parent) return;
-    while(existingHl.firstChild){
-      parent.insertBefore(existingHl.firstChild, existingHl);
-    }
+    while(existingHl.firstChild){ parent.insertBefore(existingHl.firstChild, existingHl); }
     parent.removeChild(existingHl);
     parent.normalize();
   } else {
@@ -888,7 +876,6 @@ function toggleHighlight(){
       newRange.selectNodeContents(span);
       sel.addRange(newRange);
     }catch(err){
-      // 여러 요소 걸친 selection은 extractContents
       try{
         const span = document.createElement('span');
         span.className = 'hl';
@@ -900,74 +887,39 @@ function toggleHighlight(){
   }
 }
 
-// === 단축키 핸들러 ===
+// === 단축키 ===
 document.addEventListener('keydown', (e) => {
-  // ESC → lightbox 닫기
   if(e.key === 'Escape'){ closeLightbox(); return; }
-
   const mod = e.metaKey || e.ctrlKey;
   if(!mod) return;
-
-  // ⌘⇧↑ / ⌘⇧↓ — 이전/다음 Q (어디서나)
+  // ⌘⇧↑/↓ — 이전/다음 Q
   if(e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')){
     if(MD.corner.questions.length < 2) return;
     e.preventDefault();
     if(e.key === 'ArrowUp') prevQ(); else nextQ();
     return;
   }
-
-  // 아래는 contenteditable 안에서만
   if(!e.target || !e.target.isContentEditable) return;
-
-  // ⌘B — 굵게
   if(!e.shiftKey && (e.key === 'b' || e.key === 'B')){
-    e.preventDefault();
-    document.execCommand('bold');
-    scheduleSave();
-    return;
+    e.preventDefault(); document.execCommand('bold'); scheduleSave(); return;
   }
-
-  // ⌘I — 기울게
   if(!e.shiftKey && (e.key === 'i' || e.key === 'I')){
-    e.preventDefault();
-    document.execCommand('italic');
-    scheduleSave();
-    return;
+    e.preventDefault(); document.execCommand('italic'); scheduleSave(); return;
   }
-
-  // ⌘U — 밑줄
   if(!e.shiftKey && (e.key === 'u' || e.key === 'U')){
-    e.preventDefault();
-    document.execCommand('underline');
-    scheduleSave();
-    return;
+    e.preventDefault(); document.execCommand('underline'); scheduleSave(); return;
   }
-
-  // ⌘⇧H — 하이라이트 토글
   if(e.shiftKey && (e.key === 'h' || e.key === 'H')){
-    e.preventDefault();
-    toggleHighlight();
-    scheduleSave();
-    return;
+    e.preventDefault(); toggleHighlight(); scheduleSave(); return;
   }
 });
 
-// contenteditable 변경 시 자동 저장 (input 이벤트)
 document.addEventListener('input', (e) => {
-  if(e.target && e.target.isContentEditable){
-    scheduleSave();
-  }
+  if(e.target && e.target.isContentEditable){ scheduleSave(); }
 });
-
-// === Tabler icons (선택적 - CDN 차단 시 텍스트 폴백) ===
-const tablerCss = document.createElement('link');
-tablerCss.rel = 'stylesheet';
-tablerCss.href = 'https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css';
-document.head.appendChild(tablerCss);
 
 // === ON AIR import ===
 let _onAirCorners = [];
-
 window.toggleOnAirMenu = function(e){
   if(e) e.stopPropagation();
   const menu = document.getElementById('mm-onair-menu');
@@ -975,19 +927,14 @@ window.toggleOnAirMenu = function(e){
   if(menu.style.display === 'none' || !menu.style.display){
     menu.style.display = 'block';
     loadOnAirCorners();
-  } else {
-    menu.style.display = 'none';
-  }
+  } else { menu.style.display = 'none'; }
 };
-
-// 메뉴 밖 클릭 시 닫기
 document.addEventListener('click', (e) => {
   if(!e.target.closest('.mm-onair-wrap')){
     const menu = document.getElementById('mm-onair-menu');
     if(menu) menu.style.display = 'none';
   }
 });
-
 async function loadOnAirCorners(){
   const listEl = document.getElementById('mm-onair-list');
   if(listEl) listEl.innerHTML = '<div class="mm-onair-empty">불러오는 중...</div>';
@@ -999,12 +946,8 @@ async function loadOnAirCorners(){
         const payload = JSON.parse(d.content);
         if(payload && typeof payload === 'object' && payload.text !== undefined){
           text = payload.text;
-        } else {
-          text = d.content;
-        }
-      }catch(e){
-        text = d.content;
-      }
+        } else { text = d.content; }
+      }catch(e){ text = d.content; }
     }
     _onAirCorners = parseOnAirText(text);
     renderOnAirMenu();
@@ -1013,12 +956,11 @@ async function loadOnAirCorners(){
     if(listEl) listEl.innerHTML = '<div class="mm-onair-empty">ON AIR 데이터를 불러올 수 없습니다</div>';
   }
 }
-
 function renderOnAirMenu(){
   const listEl = document.getElementById('mm-onair-list');
   if(!listEl) return;
   if(!_onAirCorners.length){
-    listEl.innerHTML = '<div class="mm-onair-empty">ON AIR에 코너가 없거나<br>"#1 ... " 형식이 아닙니다</div>';
+    listEl.innerHTML = '<div class="mm-onair-empty">ON AIR에 코너가 없거나<br>"#1 ..." 형식이 아닙니다</div>';
     return;
   }
   let html = '';
@@ -1032,7 +974,6 @@ function renderOnAirMenu(){
   });
   listEl.innerHTML = html;
 }
-
 function parseOnAirText(text){
   if(!text || !text.trim()) return [];
   const lines = text.split('\n');
@@ -1043,14 +984,11 @@ function parseOnAirText(text){
     if(m){
       if(current) corners.push(current);
       current = {number:m[1], title:m[2].trim()||'코너'+m[1], body:[]};
-    } else if(current){
-      current.body.push(line);
-    }
+    } else if(current){ current.body.push(line); }
   }
   if(current) corners.push(current);
   return corners;
 }
-
 function parseQuestionsFromBody(bodyLines){
   const qs = [];
   let current = null;
@@ -1059,9 +997,7 @@ function parseQuestionsFromBody(bodyLines){
     if(qHeaderRe.test(line)){
       if(current) qs.push(current);
       current = {header: line.trim(), body: []};
-    } else if(current){
-      current.body.push(line);
-    }
+    } else if(current){ current.body.push(line); }
   }
   if(current) qs.push(current);
   qs.forEach(q => {
@@ -1070,22 +1006,17 @@ function parseQuestionsFromBody(bodyLines){
   });
   return qs;
 }
-
 function parseQHeader(header){
-  // "Q1. [🅰️ 신뢰형] 외인 매도... [반종민]"
-  // → {number:'Q1', type:'🅰️ 신뢰형', guest:'반종민', title:'외인 매도...'}
   let number = 'Q', type = '', guest = '', title = header;
   const m = header.match(/^(Q[\d-]+)\s*\.\s*(.+)$/);
   if(!m) return {number, type, guest, title};
   number = m[1];
   let rest = m[2].trim();
-  // 끝의 [이름] = 출연자
   const trailing = rest.match(/\s*\[([^\]]+)\]\s*$/);
   if(trailing){
     guest = trailing[1].trim();
     rest = rest.replace(/\s*\[[^\]]+\]\s*$/, '').trim();
   }
-  // 앞의 [타입] = 타입
   const leading = rest.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
   if(leading){
     type = leading[1].trim();
@@ -1094,12 +1025,10 @@ function parseQHeader(header){
   title = rest;
   return {number, type, guest, title};
 }
-
 function parseLineToComment(rawLine){
-  // 한 줄 → {label, text} | null
   const trimmed = rawLine.trim();
   if(!trimmed) return null;
-  if(/^⇒/.test(trimmed)) return null; // 자막 무시
+  if(/^⇒/.test(trimmed)) return null;
   let label = '', text = trimmed, m;
   if((m = trimmed.match(/^🎯\s*(?:질문\s*의도\s*[:：]\s*)?(.*)/))){ label='의도'; text=m[1].trim(); }
   else if((m = trimmed.match(/^▶\s*(.*)/))){ label='▶ DB'; text=m[1].trim(); }
@@ -1126,10 +1055,7 @@ window.resetMindmap = function(){
   if(cgCount) msg += ', CG '+cgCount+'장';
   msg += ' 이 사라집니다.\n(되돌릴 수 없습니다)';
   if(!confirm(msg)) return;
-  MD = {
-    corner: { title:'', subtitle:'', questions:[] },
-    activeQuestionId: null
-  };
+  MD = { corner: { title:'', subtitle:'', questions:[] } };
   const menu = document.getElementById('mm-onair-menu');
   if(menu) menu.style.display = 'none';
   render();
@@ -1139,8 +1065,6 @@ window.resetMindmap = function(){
 window.importCornerToMindmap = function(cornerNumber){
   const corner = _onAirCorners.find(c => c.number === cornerNumber);
   if(!corner) return;
-
-  // 기존 작업 보호: 사용자가 만든 CG가 있거나 Q가 있으면 확인
   const hasWork = MD.corner.questions.length > 0 ||
                   (MD.corner.title && MD.corner.title.trim()) ||
                   MD.corner.questions.some(q => (q.cgs||[]).length > 0);
@@ -1152,12 +1076,8 @@ window.importCornerToMindmap = function(cornerNumber){
     msg += ')이 사라집니다.';
     if(!confirm(msg)) return;
   }
-
-  // 코너 정보 갈아끼우기
   MD.corner.title = corner.title;
   MD.corner.subtitle = '';
-
-  // Q 파싱
   const qs = parseQuestionsFromBody(corner.body);
   MD.corner.questions = qs.map((q, idx) => {
     const header = parseQHeader(q.header);
@@ -1165,13 +1085,7 @@ window.importCornerToMindmap = function(cornerNumber){
     const comments = [];
     bodyText.split('\n').forEach(line => {
       const c = parseLineToComment(line);
-      if(c){
-        comments.push({
-          id: genId('qc'),
-          label: c.label || '',
-          text: c.text
-        });
-      }
+      if(c){ comments.push({ id: genId('qc'), label: c.label || '', text: c.text }); }
     });
     return {
       id: genId('q'),
@@ -1179,20 +1093,22 @@ window.importCornerToMindmap = function(cornerNumber){
       type: header.type || '',
       guest: header.guest || '',
       title: header.title || '',
+      collapsed: false,
       cgs: [],
       comments: comments
     };
   });
-
-  MD.activeQuestionId = MD.corner.questions.length ? MD.corner.questions[0].id : null;
-
-  // 메뉴 닫기
   const menu = document.getElementById('mm-onair-menu');
   if(menu) menu.style.display = 'none';
-
   render();
   scheduleSave();
 };
+
+// === Tabler icons (선택) ===
+const tablerCss = document.createElement('link');
+tablerCss.rel = 'stylesheet';
+tablerCss.href = 'https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css';
+document.head.appendChild(tablerCss);
 
 // === 초기 로드 ===
 loadMindmap();
