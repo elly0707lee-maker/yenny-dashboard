@@ -106,8 +106,14 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-q-type:focus{border-color:#378ADD}
 .mm-q-guest{font-size:11px;padding:2px 8px;background:#fff;color:#633806;border:0.5px solid rgba(0,0,0,0.06);border-radius:4px;outline:none;font-family:'DM Mono',monospace;width:80px;flex-shrink:0}
 .mm-q-guest:focus{border-color:#BA7517}
-.mm-q-title-input{flex:1;min-width:200px;font-size:13.5px;font-weight:500;line-height:1.45;border:none;background:transparent;outline:none;resize:none;padding:2px 0;color:#1a1d23;overflow:hidden;font-family:inherit;min-height:22px}
+.mm-q-title-wrap{flex:1;min-width:200px;display:flex;flex-direction:column;gap:1px}
+.mm-q-title-input{font-size:13.5px;font-weight:500;line-height:1.45;border:none;background:transparent;outline:none;resize:none;padding:2px 0;color:#1a1d23;overflow:hidden;font-family:inherit;min-height:22px;width:100%}
 .mm-q-title-input::placeholder{color:#B4B2A9}
+.mm-q-intent{display:flex;align-items:center;gap:5px;padding:1px 0}
+.mm-q-intent-icon{flex-shrink:0;font-size:10.5px;opacity:0.7;line-height:1}
+.mm-q-intent-input{flex:1;min-width:0;font-size:11px;line-height:1.4;color:#5F5E5A;border:none;background:transparent;outline:none;padding:1px 0;font-family:inherit}
+.mm-q-intent-input:focus{background:rgba(255,255,255,0.7);border-radius:3px;padding:2px 5px;margin:-1px -5px;color:#1a1d23}
+.mm-q-intent-input::placeholder{color:#B4B2A9;font-style:italic}
 .mm-section-meta{font-size:10px;color:#888780;font-family:'DM Mono',monospace;white-space:nowrap;flex-shrink:0}
 .mm-section-act{font-size:13px;padding:4px 9px;background:transparent;border:0.5px solid transparent;color:#888780;cursor:pointer;border-radius:5px;line-height:1;flex-shrink:0;font-family:'DM Mono',monospace}
 .mm-section-act:hover{border-color:#D3D1C7;color:#1a1d23;background:#fff}
@@ -230,7 +236,7 @@ input,textarea,button{font-family:inherit;color:inherit}
   .mm-cg-masonry{grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
   .mm-cg-card{max-height:460px}
   .mm-q-type, .mm-q-guest{width:auto;min-width:70px;flex:1}
-  .mm-q-title-input{min-width:100%;order:10}
+  .mm-q-title-wrap{min-width:100%;order:10;flex:none}
 }
 </style>
 </head>
@@ -372,6 +378,11 @@ async function loadMindmap(){
             if(!q.cgs) q.cgs = [];
             if(!q.comments) q.comments = [];
             if(q.collapsed === undefined) q.collapsed = false;
+            // q.intent 마이그레이션: 기존 q.comments에 의도 항목이 있으면 옮김
+            if(q.intent === undefined){
+              const intentCmt = q.comments.find(c => /의도|🎯/.test(c.label||''));
+              q.intent = intentCmt ? (intentCmt.text || '') : '';
+            }
             q.cgs.forEach(cg => {
               if(!cg.comments) cg.comments = [];
               if(cg.caption === undefined && (cg.title || cg.subtitle)){
@@ -426,9 +437,14 @@ function renderSection(q, idx){
   html += '<div class="mm-section-head">';
   html += '<span class="mm-section-grip" draggable="true">⋮⋮</span>';
   html += '<span class="mm-q-num" contenteditable="true" onblur="updateQField(\''+q.id+'\',\'number\',this.textContent.trim())">'+escapeHtml(q.number||'Q')+'</span>';
-  html += '<input type="text" class="mm-q-type" value="'+escapeHtml(q.type||'')+'" placeholder="🅰️ 타입" onchange="updateQField(\''+q.id+'\',\'type\',this.value)">';
   html += '<input type="text" class="mm-q-guest" value="'+escapeHtml(q.guest||'')+'" placeholder="출연자" onchange="updateQField(\''+q.id+'\',\'guest\',this.value)">';
+  html += '<div class="mm-q-title-wrap">';
   html += '<textarea class="mm-q-title-input" placeholder="질문 제목 입력..." onchange="updateQField(\''+q.id+'\',\'title\',this.value)" oninput="autoResizeTextarea(this);scheduleSave()">'+escapeHtml(q.title||'')+'</textarea>';
+  html += '<div class="mm-q-intent">';
+  html += '<span class="mm-q-intent-icon">🎯</span>';
+  html += '<input type="text" class="mm-q-intent-input" value="'+escapeHtml(q.intent||'')+'" placeholder="의도/한 줄 메모 (선택)" onchange="updateQField(\''+q.id+'\',\'intent\',this.value)">';
+  html += '</div>';
+  html += '</div>';
   html += '<span class="mm-section-meta">CG '+cgCount+(cgCmtCount?' · 💬'+cgCmtCount:'')+'</span>';
   html += '<button class="mm-section-act" title="접기/펼치기" onclick="toggleSectionCollapse(\''+q.id+'\')">'+caret+'</button>';
   html += '<button class="mm-section-act del" title="섹션 삭제" onclick="deleteQuestion(\''+q.id+'\')">✕</button>';
@@ -513,7 +529,7 @@ function autoResizeTextarea(el){
 // === CRUD ===
 function addQuestion(){
   const num = 'Q' + (MD.corner.questions.length + 1);
-  const q = { id: genId('q'), number: num, type: '', guest: '', title: '', cgs: [], comments: [], collapsed: false };
+  const q = { id: genId('q'), number: num, type: '', guest: '', title: '', intent: '', cgs: [], comments: [], collapsed: false };
   MD.corner.questions.push(q);
   render();
   scheduleSave();
@@ -530,7 +546,7 @@ function addQuestion(){
 window.quickAddQ = function(text){
   if(!text || !text.trim()) return;
   const num = 'Q' + (MD.corner.questions.length + 1);
-  const q = { id: genId('q'), number: num, type: '', guest: '', title: text.trim(), cgs: [], comments: [], collapsed: false };
+  const q = { id: genId('q'), number: num, type: '', guest: '', title: text.trim(), intent: '', cgs: [], comments: [], collapsed: false };
   MD.corner.questions.push(q);
   render();
   scheduleSave();
@@ -570,10 +586,18 @@ window.importTextAsQuestions = function(text){
   qs.forEach((q, idx) => {
     const header = parseQHeader(q.header);
     const bodyText = q.body.join('\n');
+    let intent = '';
     const comments = [];
     bodyText.split('\n').forEach(line => {
       const c = parseLineToComment(line);
-      if(c && c.text) comments.push({ id: genId('qc'), label: c.label || '', text: c.text });
+      if(c && c.text){
+        // 🎯 의도 라인은 q.intent로 (첫 번째만), 나머지 메타라인은 데이터에 보존
+        if(/의도|🎯/.test(c.label || '') && !intent){
+          intent = c.text;
+        } else {
+          comments.push({ id: genId('qc'), label: c.label || '', text: c.text });
+        }
+      }
     });
     const newId = genId('q');
     if(idx === 0) firstId = newId;
@@ -583,6 +607,7 @@ window.importTextAsQuestions = function(text){
       type: header.type || '',
       guest: header.guest || '',
       title: header.title || '',
+      intent: intent,
       collapsed: false,
       cgs: [],
       comments: comments
