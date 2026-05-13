@@ -231,7 +231,7 @@ input,textarea,button{font-family:inherit;color:inherit}
         <div class="mm-corner-label">CORNER · #1</div>
         <input type="text" class="mm-corner-title" id="mm-corner-title" placeholder="코너 제목 (예: 미국 하락 코너)">
         <input type="text" class="mm-corner-sub" id="mm-corner-sub" placeholder="부제목 (선택)">
-        <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 빠르게 추가… (엔터로 새 섹션 생성)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
+        <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 추가… (엔터로 1개 / 멀티라인 paste면 자동으로 여러 Q 생성)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
       </div>
       <div class="mm-actions">
         <div class="mm-onair-wrap">
@@ -512,6 +512,70 @@ window.quickAddQ = function(text){
     const input = document.getElementById('mm-quick-q');
     if(input) input.focus();
   }, 80);
+};
+
+// 멀티라인 텍스트 → 여러 Q 섹션 자동 생성
+window.importTextAsQuestions = function(text){
+  if(!text || !text.trim()) return 0;
+  const lines = text.split(/\r?\n/);
+  // 코너 헤더 추출 (#N 제목)
+  let cornerTitle = '';
+  const bodyLines = [];
+  for(const line of lines){
+    const m = line.match(/^\s*#(\d+)\s*\.?\s*(.+)/);
+    if(m && !cornerTitle){
+      cornerTitle = m[2].trim();
+    } else {
+      bodyLines.push(line);
+    }
+  }
+  // 코너 제목 비어있을 때만 설정 (기존 입력 보호)
+  if(cornerTitle && !MD.corner.title){
+    MD.corner.title = cornerTitle;
+  }
+  // Q 파싱
+  const qs = parseQuestionsFromBody(bodyLines);
+  if(!qs.length) return 0;
+  let firstId = null;
+  qs.forEach((q, idx) => {
+    const header = parseQHeader(q.header);
+    const bodyText = q.body.join('\n');
+    const comments = [];
+    bodyText.split('\n').forEach(line => {
+      const c = parseLineToComment(line);
+      if(c && c.text) comments.push({ id: genId('qc'), label: c.label || '', text: c.text });
+    });
+    const newId = genId('q');
+    if(idx === 0) firstId = newId;
+    MD.corner.questions.push({
+      id: newId,
+      number: header.number || ('Q' + (MD.corner.questions.length + 1)),
+      type: header.type || '',
+      guest: header.guest || '',
+      title: header.title || '',
+      collapsed: false,
+      cgs: [],
+      comments: comments
+    });
+  });
+  render();
+  scheduleSave();
+  // 첫 새 Q로 스크롤
+  setTimeout(()=>{
+    if(firstId){
+      const el = document.querySelector('[data-q-id="'+firstId+'"]');
+      if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    }
+  }, 100);
+  // 알림
+  const ind = document.getElementById('save-ind');
+  if(ind){
+    ind.textContent = '✓ '+qs.length+'개 Q 섹션 추가됨';
+    ind.className = 'save-ind saved';
+    ind.style.opacity = 1;
+    setTimeout(()=>{ind.style.opacity = 0;}, 2800);
+  }
+  return qs.length;
 };
 function deleteQuestion(qId){
   const q = getQById(qId);
@@ -1027,8 +1091,21 @@ function parseQHeader(header){
   }
   const leading = rest.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
   if(leading){
-    type = leading[1].trim();
+    const inner = leading[1].trim();
     rest = leading[2].trim();
+    // 이미 끝에 guest를 받았으면 시작 []는 type
+    // 아니면 내용 분석: 이모지/영문 = type, 한글 이름 패턴 = guest
+    if(guest){
+      type = inner;
+    } else {
+      const hasEmojiOrLatin = /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}🅰🅱🅲🅴🅵🆎]/u.test(inner) || /[A-Za-z]/.test(inner);
+      if(hasEmojiOrLatin){
+        type = inner;
+      } else {
+        // 순수 한글/한자 = 출연자 이름으로 추정 (예: [황대근], [임하영→황대근])
+        guest = inner;
+      }
+    }
   }
   title = rest;
   return {number, type, guest, title};
@@ -1117,6 +1194,22 @@ const tablerCss = document.createElement('link');
 tablerCss.rel = 'stylesheet';
 tablerCss.href = 'https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css';
 document.head.appendChild(tablerCss);
+
+// === 빠른 Q 박스: paste 자동 파싱 ===
+(function(){
+  const inp = document.getElementById('mm-quick-q');
+  if(!inp) return;
+  inp.addEventListener('paste', (e) => {
+    const text = (e.clipboardData || window.clipboardData).getData('text') || '';
+    if(!text || !text.includes('\n')) return; // 한 줄이면 기본 동작
+    const lines = text.split(/\r?\n/);
+    const hasQPattern = lines.some(l => /^\s*Q[\d-]+\s*\./.test(l));
+    if(!hasQPattern) return; // Q 패턴 없으면 기본 동작
+    e.preventDefault();
+    const added = importTextAsQuestions(text);
+    if(added > 0) inp.value = '';
+  });
+})();
 
 // === 초기 로드 ===
 loadMindmap();
