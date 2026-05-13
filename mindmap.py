@@ -147,20 +147,19 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-qc-add{width:100%;border:0.5px solid #D3D1C7;padding:5px 10px;border-radius:5px;font-size:11.5px;outline:none;margin-top:5px;background:rgba(255,255,255,0.85)}
 .mm-qc-add:focus{border-color:#888780;background:#fff}
 
-/* === CG 매소너리 그리드 === */
-.mm-cg-masonry{columns:auto 220px;column-gap:8px}
-.mm-cg-masonry > *{break-inside:avoid;margin-bottom:8px;display:inline-block;width:100%}
+/* === CG 가로 그리드 (1→2→3, 4→5→6 순서) === */
+.mm-cg-masonry{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:8px;align-items:start}
 
-.mm-cg-card{background:#fff;border:0.5px solid #D3D1C7;border-radius:7px;overflow:hidden;position:relative;transition:opacity 0.2s}
+.mm-cg-card{background:#fff;border:0.5px solid #D3D1C7;border-radius:7px;overflow:hidden;position:relative;transition:opacity 0.2s;max-height:520px;display:flex;flex-direction:column}
 .mm-cg-card.mm-dragging{opacity:0.4}
-.mm-cg-img{background:#F1EFE8;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.mm-cg-img{background:#F1EFE8;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;flex-shrink:0}
 .mm-cg-img img{width:100%;display:block;cursor:zoom-in}
 .mm-cg-img-empty{padding:30px 10px;color:#B4B2A9;font-size:11px;text-align:center}
 .mm-cg-num{position:absolute;top:5px;right:6px;font-size:9px;color:#1a1d23;font-family:'DM Mono',monospace;background:rgba(255,255,255,0.92);padding:1px 5px;border-radius:3px;font-weight:500;cursor:grab;user-select:none}
 .mm-cg-num:active{cursor:grabbing}
 .mm-cg-del{position:absolute;top:5px;left:6px;font-size:10px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:3px;padding:1px 5px;cursor:pointer;line-height:1;opacity:0;transition:opacity 0.1s}
 .mm-cg-card:hover .mm-cg-del{opacity:1}
-.mm-cg-meta{padding:7px 9px}
+.mm-cg-meta{padding:7px 9px;flex:1 1 auto;overflow-y:auto;min-height:0}
 .mm-cg-caption{width:100%;border:none;background:transparent;padding:0;font-size:11.5px;line-height:1.45;outline:none;color:#1a1d23;min-height:18px;white-space:pre-wrap;word-break:break-word}
 .mm-cg-caption:focus{background:#FAFAF7;border-radius:3px;padding:2px 4px;margin:-1px -4px}
 .mm-cg-caption[data-placeholder]:empty::before{content:attr(data-placeholder);color:#B4B2A9;pointer-events:none}
@@ -208,7 +207,8 @@ input,textarea,button{font-family:inherit;color:inherit}
 @media (max-width: 700px){
   .wrap{padding:10px}
   .mm{padding:12px}
-  .mm-cg-masonry{columns:auto 160px;column-gap:6px}
+  .mm-cg-masonry{grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:6px}
+  .mm-cg-card{max-height:460px}
   .mm-q-type, .mm-q-guest{width:auto;min-width:70px;flex:1}
   .mm-q-title-input{min-width:100%;order:10}
 }
@@ -724,9 +724,21 @@ document.addEventListener('dragover', (e) => {
   if(target.parentNode !== _draggingEl.parentNode) return;
   e.preventDefault();
   const rect = target.getBoundingClientRect();
-  // 매소너리는 column 단위라 vertical middle 비교가 자연스러움
-  const middle = rect.top + rect.height/2;
-  if(e.clientY < middle){ target.parentNode.insertBefore(_draggingEl, target); }
+  let isAfter;
+  if(_draggingKind === 'cg-card'){
+    // CG는 grid 가로 흐름 — 가로/세로 둘 다 고려
+    const dx = e.clientX - (rect.left + rect.width/2);
+    const dy = e.clientY - (rect.top + rect.height/2);
+    if(Math.abs(dy) > rect.height/3){
+      isAfter = dy > 0;
+    } else {
+      isAfter = dx > 0;
+    }
+  } else {
+    // Q 섹션, comment 리스트 — 세로
+    isAfter = e.clientY > rect.top + rect.height/2;
+  }
+  if(!isAfter){ target.parentNode.insertBefore(_draggingEl, target); }
   else { target.parentNode.insertBefore(_draggingEl, target.nextSibling); }
 });
 document.addEventListener('dragleave', (e) => {
