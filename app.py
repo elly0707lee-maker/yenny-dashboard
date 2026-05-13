@@ -1266,32 +1266,19 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- 완대본 플로우 + 마인드맵 진입 -->
+  <!-- ON AIR — 마인드맵으로 이동 -->
   <div class="section-label">🎙️ ON AIR</div>
-  <div class="content-card">
-    <div class="content-header">
-      <span class="content-title">🎙️ ON AIR</span>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <span class="saved-badge" id="wdb-badge">✓ 저장됨</span>
-        <a href="/mindmap" target="_blank" class="btn btn-mindmap">🗺️ 마인드맵 열기</a>
-        <button class="btn btn-green" onclick="saveWdaebon()">저장</button>
-        <button class="btn" onclick="clearWdaebon()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-      </div>
+  <a href="/mindmap" target="_blank" class="content-card"
+     style="display:block;text-decoration:none;text-align:center;padding:34px 24px;cursor:pointer;
+            background:linear-gradient(135deg,#fdfbf5 0%,#fff 100%);border:1.5px solid #e8b84b;transition:all .15s;">
+    <div style="font-size:36px;margin-bottom:10px;">🗺️</div>
+    <div style="font-size:16px;color:#1a1d23;font-weight:700;margin-bottom:6px;letter-spacing:-.3px;">오늘 방송 흐름은 마인드맵에서</div>
+    <div style="font-size:12px;color:#7a8099;margin-bottom:20px;line-height:1.6;">
+      코너 / Q 섹션 / CG 매소너리 그리드로 정리해요<br>
+      Claude에서 정리한 Q 텍스트를 마인드맵 상단 박스에 붙여넣으면 자동으로 섹션 생성
     </div>
-    <div style="font-size:11px;color:#7a8099;margin-bottom:8px;">
-      💡 Claude에서 정리한 코너별 플로우를 아래에 붙여넣기 하세요. 각 코너는 <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#1 제목</code>, <code style="background:#f0f2f5;padding:2px 4px;border-radius:3px;">#2 제목</code> 형식으로 구분돼요. <b>탭 내용을 직접 편집할 수 있어요.</b>
-    </div>
-    <textarea class="input-area" id="wdb-input" placeholder="예시:
-#1 오프닝
-이예은 앵커 오프닝 멘트...
-
-#2 미국 증시 브리핑  
-김예림 - 뉴욕 증시 마감 브리핑
-
-#3 앵커 브리핑
-..." style="min-height:120px;font-family:monospace;font-size:12px;" oninput="renderWdb()"></textarea>
-    <div id="wdb-tabs-container" style="margin-top:14px;"></div>
-  </div>
+    <span class="btn btn-mindmap" style="font-size:14px;padding:11px 26px;">마인드맵 열기 →</span>
+  </a>
 
   <!-- 마감일지 -->
   <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
@@ -3094,7 +3081,6 @@ loadMemo();
 loadNews();
 loadCalendar();
 loadPDFList();
-loadWdaebon();
 loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
