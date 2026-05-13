@@ -57,6 +57,8 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-quick-q{width:100%;border:0.5px dashed #B4B2A9;background:transparent;border-radius:6px;padding:8px 12px;font-size:13px;outline:none;margin-top:10px;color:#1a1d23;transition:all 0.12s}
 .mm-quick-q:focus{border-color:#1a1d23;background:#fff;border-style:solid}
 .mm-quick-q::placeholder{color:#B4B2A9}
+.mm-shortcuts-hint{font-size:10px;color:#888780;font-family:'DM Mono',monospace;letter-spacing:0.2px;margin-top:6px;line-height:1.5}
+.mm-shortcuts-hint kbd{font-family:inherit;background:#F1EFE8;padding:1px 5px;border-radius:3px;border:0.5px solid #D3D1C7;color:#412402;font-size:9.5px}
 
 .mm-actions{display:flex;gap:6px;align-items:center;align-self:center}
 .mm-onair-wrap{position:relative}
@@ -183,6 +185,20 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-cg-drop:hover, .mm-cg-drop.drag-over{border-color:#1a1d23;background:#FAEEDA;color:#412402}
 .mm-cg-drop .ic{font-size:18px}
 
+/* === 텍스트 카드 (이미지 없이 텍스트만) === */
+.mm-text-card{background:#FAFAF7;border:0.5px solid #D3D1C7}
+.mm-text-card .mm-text-card-head{display:flex;justify-content:space-between;align-items:center;padding:5px 9px;background:rgba(255,255,255,0.7);border-bottom:0.5px solid #E8E5DC;flex-shrink:0}
+.mm-text-card-label{font-size:9px;color:#888780;font-family:'DM Mono',monospace;letter-spacing:0.3px;cursor:grab;user-select:none;padding:2px 6px;background:rgba(255,255,255,0.85);border-radius:3px}
+.mm-text-card-label:active{cursor:grabbing}
+.mm-text-card .mm-cg-del{position:static;opacity:0.6;background:transparent;color:#888780;padding:2px 5px}
+.mm-text-card .mm-cg-del:hover{opacity:1;color:#A32D2D}
+.mm-text-card .mm-cg-caption{font-size:13px;line-height:1.55;min-height:60px;font-weight:500;color:#1a1d23;padding:4px}
+.mm-text-card .mm-cg-caption:focus{background:#fff;border-radius:4px}
+
+.mm-cg-add-text{border:0.5px dashed #B4B2A9;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888780;background:rgba(250,238,218,0.4);gap:5px;min-height:120px;cursor:pointer;transition:all 0.12s;text-align:center;padding:14px 8px;font-size:10.5px;line-height:1.5;font-family:'Noto Sans KR',sans-serif}
+.mm-cg-add-text:hover{border-color:#854F0B;background:#FAEEDA;color:#412402}
+.mm-cg-add-text .ic{font-size:18px}
+
 /* === highlight & bold === */
 .hl{background:#FAC775;color:#412402;padding:0 3px;border-radius:2px;font-weight:500;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .mm-cg-caption i, .mm-cg-caption em, .mm-cg-comment-text i, .mm-cg-comment-text em, .mm-qc-text i, .mm-qc-text em{font-style:italic}
@@ -232,6 +248,9 @@ input,textarea,button{font-family:inherit;color:inherit}
         <input type="text" class="mm-corner-title" id="mm-corner-title" placeholder="코너 제목 (예: 미국 하락 코너)">
         <input type="text" class="mm-corner-sub" id="mm-corner-sub" placeholder="부제목 (선택)">
         <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 추가… (엔터로 1개 / 멀티라인 paste면 자동으로 여러 Q 생성)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
+        <div class="mm-shortcuts-hint">
+          텍스트 입력 중: <kbd>⌘B</kbd> 굵게 · <kbd>⌘I</kbd> 기울임 · <kbd>⌘U</kbd> 밑줄 · <kbd>⌘⇧H</kbd> 하이라이트 · <kbd>⌘⇧↑↓</kbd> 이전/다음 Q
+        </div>
       </div>
       <div class="mm-actions">
         <div class="mm-onair-wrap">
@@ -429,6 +448,10 @@ function renderSection(q, idx){
     '<div class="ic">⬆</div>'+
     '<div>이미지 끌어다 놓기<br>또는 클릭 · Cmd+V</div>'+
   '</div>';
+  html += '<div class="mm-cg-add-text" onclick="addTextCard(\''+q.id+'\')">'+
+    '<div class="ic">📝</div>'+
+    '<div>텍스트 카드 추가<br>(이미지 없이)</div>'+
+  '</div>';
   html += '</div>';
 
   html += '</div>'; // section-body
@@ -437,15 +460,24 @@ function renderSection(q, idx){
 }
 
 function renderCGCard(qId, cg, idx){
-  const imgHtml = cg.image
-    ? '<img src="'+escapeHtml(cg.image)+'" alt="" onclick="openLightbox(this.src)">'
-    : '<div class="mm-cg-img-empty">이미지 없음</div>';
+  const isTextCard = !cg.image;
+  let html = '<div class="mm-cg-card '+(isTextCard?'mm-text-card':'')+'" data-cg-id="'+cg.id+'" data-q-id="'+qId+'">';
 
-  let html = '<div class="mm-cg-card" data-cg-id="'+cg.id+'" data-q-id="'+qId+'">';
-  html += '<div class="mm-cg-img">'+imgHtml+
-    '<span class="mm-cg-num" draggable="true">CG-'+(idx+1)+'</span>'+
-    '<button class="mm-cg-del" onclick="deleteCG(\''+qId+'\',\''+cg.id+'\')" title="삭제">✕</button>'+
+  if(isTextCard){
+    // 텍스트 카드 — 이미지 없이 텍스트만
+    html += '<div class="mm-text-card-head">'+
+      '<span class="mm-text-card-label" draggable="true">📝 NOTE-'+(idx+1)+'</span>'+
+      '<button class="mm-cg-del" onclick="deleteCG(\''+qId+'\',\''+cg.id+'\')" title="삭제">✕</button>'+
     '</div>';
+  } else {
+    // 이미지 카드 (기존)
+    const imgHtml = '<img src="'+escapeHtml(cg.image)+'" alt="" onclick="openLightbox(this.src)">';
+    html += '<div class="mm-cg-img">'+imgHtml+
+      '<span class="mm-cg-num" draggable="true">CG-'+(idx+1)+'</span>'+
+      '<button class="mm-cg-del" onclick="deleteCG(\''+qId+'\',\''+cg.id+'\')" title="삭제">✕</button>'+
+      '</div>';
+  }
+
   html += '<div class="mm-cg-meta">';
   html += '<div class="mm-cg-caption" contenteditable="true" data-placeholder="여기에 자유 입력…" onblur="updateCGField(\''+qId+'\',\''+cg.id+'\',\'caption\',this.innerHTML)">'+(cg.caption||'')+'</div>';
   html += '<div class="mm-cg-comments">';
@@ -616,6 +648,21 @@ function addCG(qId, base64Image){
   render();
   scheduleSave();
 }
+window.addTextCard = function(qId){
+  const q = getQById(qId); if(!q) return;
+  const cg = { id: genId('cg'), image: '', caption: '', comments: [] };
+  q.cgs.push(cg);
+  render();
+  scheduleSave();
+  // 새 카드 캡션에 자동 포커스
+  setTimeout(()=>{
+    const cardEl = document.querySelector('[data-cg-id="'+cg.id+'"]');
+    if(cardEl){
+      const cap = cardEl.querySelector('.mm-cg-caption');
+      if(cap) cap.focus();
+    }
+  }, 80);
+};
 function addCGComment(qId, cgId, text){
   if(!text || !text.trim()) return;
   const q = getQById(qId); if(!q) return;
@@ -681,7 +728,7 @@ document.getElementById('mm-file-input').addEventListener('change', async (e) =>
   _pendingDropQId = null;
 });
 
-function resizeImage(file, maxW=1100, maxH=750, quality=0.78){
+function resizeImage(file, maxW=800, maxH=540, quality=0.72){
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -696,8 +743,8 @@ function resizeImage(file, maxW=1100, maxH=750, quality=0.78){
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
-        resolve(canvas.toDataURL(mime, quality));
+        // 항상 JPEG로 변환 (PNG도 압축 적용되게 — 알파 채널은 흰 배경으로 채움)
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -790,7 +837,7 @@ document.addEventListener('dragstart', (e) => {
   if(t.classList.contains('mm-section-grip')){
     _draggingEl = t.closest('.mm-section');
     _draggingKind = 'q-section';
-  } else if(t.classList.contains('mm-cg-num')){
+  } else if(t.classList.contains('mm-cg-num') || t.classList.contains('mm-text-card-label')){
     _draggingEl = t.closest('.mm-cg-card');
     _draggingKind = 'cg-card';
   } else if(t.classList.contains('mm-grip')){
