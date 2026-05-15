@@ -833,9 +833,37 @@ document.addEventListener('paste', async (e) => {
   const items = (e.clipboardData || window.clipboardData)?.items || [];
   for(const item of items){
     if(item.type && item.type.startsWith('image/')){
-      // 활성 Q 결정 — 포커스된 섹션 또는 첫 번째 펼친 섹션
+      // 활성 Q 결정 (우선순위)
+      let qId = null;
+      // 1. 포커스된 element의 section
       const focusSection = document.activeElement ? document.activeElement.closest('.mm-section') : null;
-      let qId = focusSection ? focusSection.dataset.qId : null;
+      if(focusSection) qId = focusSection.dataset.qId;
+      // 2. 선택된 카드의 section
+      if(!qId && _selectedCardId){
+        const cardEl = document.querySelector('[data-cg-id="'+_selectedCardId+'"]');
+        if(cardEl){
+          const sec = cardEl.closest('.mm-section');
+          if(sec) qId = sec.dataset.qId;
+        }
+      }
+      // 3. 마지막 클릭한 Q (펼쳐 있어야)
+      if(!qId && _lastClickedQId){
+        const q = getQById(_lastClickedQId);
+        if(q && !q.collapsed) qId = _lastClickedQId;
+      }
+      // 4. 화면 중앙에 가까운 펼친 Q
+      if(!qId){
+        const vh = window.innerHeight;
+        let best = null, bestDist = Infinity;
+        document.querySelectorAll('.mm-section:not(.collapsed)').forEach(sec => {
+          const r = sec.getBoundingClientRect();
+          if(r.bottom < 0 || r.top > vh) return;
+          const d = Math.abs((r.top + r.height/2) - vh/2);
+          if(d < bestDist){ bestDist = d; best = sec; }
+        });
+        if(best) qId = best.dataset.qId;
+      }
+      // 5. fallback: 첫 번째 펼친 Q
       if(!qId){
         const firstOpen = MD.corner.questions.find(q => !q.collapsed);
         if(firstOpen) qId = firstOpen.id;
@@ -846,6 +874,15 @@ document.addEventListener('paste', async (e) => {
         e.preventDefault();
         const data = await resizeImage(f);
         addCG(qId, data);
+        // 어느 Q에 들어갔는지 잠깐 알림
+        const q = getQById(qId);
+        const indEl = document.getElementById('save-ind');
+        if(indEl && q){
+          indEl.textContent = '✓ '+(q.number||'Q')+' 에 이미지 추가';
+          indEl.className = 'save-ind saved';
+          indEl.style.opacity = 1;
+          setTimeout(()=>{indEl.style.opacity = 0;}, 1500);
+        }
       }
     }
   }
@@ -946,6 +983,7 @@ window.closeLightbox = function(){
 
 // === 카드 선택 + 화살표 키 정렬 ===
 let _selectedCardId = null;
+let _lastClickedQId = null;  // 마지막 클릭한 Q 섹션 (paste 시 활용)
 
 function selectCardForReorder(cgId){
   _selectedCardId = cgId;
@@ -979,6 +1017,9 @@ function moveSelectedCard(direction){
 
 // 카드 클릭 → 선택 (편집 영역/삭제버튼/드롭존 제외)
 document.addEventListener('click', (e) => {
+  // 활성 Q 추적 (paste 등에서 사용)
+  const section = e.target.closest('.mm-section');
+  if(section) _lastClickedQId = section.dataset.qId;
   // 빠른Q, lightbox close 등 다른 클릭은 무시
   const card = e.target.closest('.mm-cg-card');
   if(!card){
