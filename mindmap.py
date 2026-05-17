@@ -81,6 +81,8 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-new-q:hover{background:#2C2C2A}
 .mm-reset-btn{font-size:13px;padding:6px 10px;background:transparent;border:0.5px solid #D3D1C7;border-radius:6px;cursor:pointer;color:#888780;line-height:1;align-self:center}
 .mm-reset-btn:hover{border-color:#A32D2D;background:#FCEBEB;color:#A32D2D}
+.mm-preview-trigger{font-size:12px;padding:6px 11px;background:transparent;border:0.5px solid #D3D1C7;border-radius:6px;cursor:pointer;color:#5F5E5A;line-height:1;align-self:center;font-family:inherit;display:flex;align-items:center;gap:4px}
+.mm-preview-trigger:hover{border-color:#1a1d23;background:#FDF7EC;color:#1a1d23}
 
 /* === Q 섹션 데크 === */
 .mm-sections{display:flex;flex-direction:column;gap:12px}
@@ -229,6 +231,43 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-lightbox-close{position:absolute;top:18px;right:24px;background:rgba(255,255,255,0.15);color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer}
 .mm-lightbox-close:hover{background:rgba(255,255,255,0.25)}
 
+/* === preview (순서대로 보기) === */
+.mm-preview{position:fixed;inset:0;background:#fff;z-index:300;display:none;flex-direction:column}
+.mm-preview.show{display:flex}
+.mm-preview-bar{padding:11px 22px;background:#1a1d23;color:#fff;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;border-bottom:3px solid #e8b84b}
+.mm-preview-title{font-size:14px;font-weight:500;color:#fff;letter-spacing:-0.2px}
+.mm-preview-title span{color:#e8b84b;font-size:11px;font-family:'DM Mono',monospace;margin-left:8px}
+.mm-preview-actions{display:flex;gap:8px}
+.mm-preview-btn{font-size:12px;padding:6px 13px;background:transparent;color:#e8b84b;border:0.5px solid #e8b84b;border-radius:6px;cursor:pointer;font-family:inherit}
+.mm-preview-btn:hover{background:#e8b84b;color:#1a1d23}
+.mm-preview-body{flex:1;overflow-y:auto;padding:28px 36px 80px;max-width:900px;margin:0 auto;width:100%;background:#fff}
+.mm-pv-corner{font-size:22px;font-weight:700;margin-bottom:4px;color:#1a1d23;letter-spacing:-0.3px}
+.mm-pv-corner-sub{font-size:13px;color:#7a8099;margin-bottom:30px;line-height:1.5}
+.mm-pv-section{margin-bottom:36px;border-top:2px solid #1a1d23;padding-top:18px}
+.mm-pv-q-head{display:flex;gap:9px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.mm-pv-q-num{font-size:12px;background:#1a1d23;color:#e8b84b;padding:3px 10px;border-radius:5px;font-family:'DM Mono',monospace;font-weight:500}
+.mm-pv-q-guest{font-size:11px;color:#633806;background:#FAEEDA;padding:3px 9px;border-radius:4px;font-family:'DM Mono',monospace}
+.mm-pv-q-title{font-size:16px;font-weight:600;color:#1a1d23;line-height:1.4;flex:1}
+.mm-pv-q-intent{font-size:12px;color:#5F5E5A;margin-bottom:18px;padding:6px 10px;background:#FDF7EC;border-left:2px solid #BA7517;border-radius:3px}
+.mm-pv-cg{margin-bottom:22px;page-break-inside:avoid;break-inside:avoid}
+.mm-pv-cg-label{font-size:10px;color:#888780;font-family:'DM Mono',monospace;margin-bottom:6px;letter-spacing:0.4px}
+.mm-pv-cg img{max-width:100%;display:block;border-radius:6px;margin-bottom:8px;border:0.5px solid #D3D1C7}
+.mm-pv-cg-caption{font-size:13.5px;line-height:1.55;margin-bottom:7px;color:#1a1d23;padding:0 2px}
+.mm-pv-cg-caption .hl{background:#FAC775;color:#412402;padding:0 3px;border-radius:2px}
+.mm-pv-cg-comment{font-size:12.5px;color:#2d3436;padding:5px 10px;background:#FAFAF7;border-radius:4px;margin-bottom:3px;line-height:1.5}
+.mm-pv-text-card{padding:14px 16px;background:#FAFAF7;border-left:3px solid #B4B2A9;border-radius:6px}
+.mm-pv-empty{text-align:center;padding:60px 20px;color:#888780;font-size:13px}
+
+/* 인쇄 (PDF 저장) */
+@media print {
+  body{background:#fff !important}
+  body > *:not(.mm-preview){display:none !important}
+  .mm-preview-bar{display:none !important}
+  .mm-preview{position:static !important;display:block !important;background:#fff}
+  .mm-preview-body{padding:18px 28px !important;overflow:visible !important;max-width:none !important}
+  .mm-pv-section{border-top-color:#000 !important}
+}
+
 /* === responsive === */
 @media (max-width: 700px){
   .wrap{padding:10px}
@@ -264,6 +303,7 @@ input,textarea,button{font-family:inherit;color:inherit}
         </div>
       </div>
       <div class="mm-actions">
+        <button class="mm-preview-trigger" onclick="openPreview()" title="CG를 순서대로 보기 / PDF 저장">👁 미리보기</button>
         <button class="mm-reset-btn" onclick="resetMindmap()" title="마인드맵 전체 초기화">🗑</button>
         <button class="mm-new-q" onclick="addQuestion()"><span style="font-size:14px;line-height:1">＋</span>새 Q</button>
       </div>
@@ -276,6 +316,17 @@ input,textarea,button{font-family:inherit;color:inherit}
 <div class="mm-lightbox" id="mm-lightbox" onclick="closeLightbox()">
   <button class="mm-lightbox-close" onclick="event.stopPropagation();closeLightbox()">✕ 닫기 (ESC)</button>
   <img id="mm-lightbox-img" src="" alt="">
+</div>
+
+<div class="mm-preview" id="mm-preview">
+  <div class="mm-preview-bar">
+    <div class="mm-preview-title" id="mm-preview-title">📋 마인드맵 미리보기 <span id="mm-preview-count"></span></div>
+    <div class="mm-preview-actions">
+      <button class="mm-preview-btn" onclick="window.print()">🖨 인쇄 / PDF 저장</button>
+      <button class="mm-preview-btn" onclick="closePreview()">✕ 닫기 (ESC)</button>
+    </div>
+  </div>
+  <div class="mm-preview-body" id="mm-preview-body"></div>
 </div>
 
 <input type="file" id="mm-file-input" accept="image/*" style="display:none" multiple>
@@ -981,6 +1032,70 @@ window.closeLightbox = function(){
   document.getElementById('mm-lightbox').classList.remove('show');
 };
 
+// === 미리보기 (순서대로 보기 + 인쇄/PDF) ===
+window.openPreview = function(){
+  const body = document.getElementById('mm-preview-body');
+  const titleEl = document.getElementById('mm-preview-title');
+  const countEl = document.getElementById('mm-preview-count');
+  let totalCG = 0, totalText = 0;
+  MD.corner.questions.forEach(q => {
+    (q.cgs||[]).forEach(cg => {
+      if(cg.image) totalCG++; else totalText++;
+    });
+  });
+  if(countEl){
+    const cornerName = MD.corner.title ? '· '+MD.corner.title : '';
+    countEl.textContent = 'Q '+MD.corner.questions.length+' · CG '+totalCG+(totalText?' · 텍스트 '+totalText:'')+' '+cornerName;
+  }
+  let html = '';
+  if(MD.corner.title){
+    html += '<div class="mm-pv-corner">'+escapeHtml(MD.corner.title)+'</div>';
+  }
+  if(MD.corner.subtitle){
+    html += '<div class="mm-pv-corner-sub">'+escapeHtml(MD.corner.subtitle)+'</div>';
+  }
+  if(!MD.corner.questions.length){
+    html += '<div class="mm-pv-empty">아직 질문이 없어요</div>';
+  }
+  MD.corner.questions.forEach((q, qIdx) => {
+    html += '<div class="mm-pv-section">';
+    html += '<div class="mm-pv-q-head">';
+    html += '<span class="mm-pv-q-num">'+escapeHtml(q.number||('Q'+(qIdx+1)))+'</span>';
+    if(q.guest) html += '<span class="mm-pv-q-guest">'+escapeHtml(q.guest)+'</span>';
+    html += '<span class="mm-pv-q-title">'+escapeHtml(q.title||'(제목 없음)')+'</span>';
+    html += '</div>';
+    if(q.intent){
+      html += '<div class="mm-pv-q-intent">🎯 '+escapeHtml(q.intent)+'</div>';
+    }
+    const cgs = q.cgs || [];
+    if(!cgs.length){
+      html += '<div style="font-size:11px;color:#B4B2A9;padding:8px 0;font-style:italic">— 카드 없음 —</div>';
+    }
+    cgs.forEach((cg, cgIdx) => {
+      const isText = !cg.image;
+      html += '<div class="mm-pv-cg'+(isText?' mm-pv-text-card':'')+'">';
+      html += '<div class="mm-pv-cg-label">'+(isText?'📝 NOTE-':'CG-')+(cgIdx+1)+'</div>';
+      if(cg.image){
+        html += '<img src="'+escapeHtml(cg.image)+'" alt="">';
+      }
+      if(cg.caption){
+        html += '<div class="mm-pv-cg-caption">'+cg.caption+'</div>';
+      }
+      (cg.comments||[]).forEach(cc => {
+        if(cc.text) html += '<div class="mm-pv-cg-comment">'+escapeHtml(cc.text)+'</div>';
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  body.innerHTML = html;
+  document.getElementById('mm-preview').classList.add('show');
+  body.scrollTop = 0;
+};
+window.closePreview = function(){
+  document.getElementById('mm-preview').classList.remove('show');
+};
+
 // === 카드 선택 + 화살표 키 정렬 ===
 let _selectedCardId = null;
 let _lastClickedQId = null;  // 마지막 클릭한 Q 섹션 (paste 시 활용)
@@ -1133,6 +1248,8 @@ function toggleHighlight(){
 // === 단축키 ===
 document.addEventListener('keydown', (e) => {
   if(e.key === 'Escape'){
+    const preview = document.getElementById('mm-preview');
+    if(preview && preview.classList.contains('show')){ closePreview(); return; }
     const lb = document.getElementById('mm-lightbox');
     if(lb && lb.classList.contains('show')){ closeLightbox(); return; }
     if(_selectedCardId){ deselectCardForReorder(); return; }
