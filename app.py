@@ -2708,16 +2708,21 @@ function _escapeHtml(s){
 function _linkifyText(text){
   // 1. HTML escape (XSS 차단)
   let s = _escapeHtml(text);
-  // 2. markdown link [label](URL) → 안전한 <a> 변환 (http/https만 허용)
+  const linkStyle = 'color:#1a73e8;text-decoration:none;border-bottom:1px dotted #1a73e8;font-weight:500;';
+  // 2. 봇 자체 마커 [[LINK:URL]] → 🔗 링크
+  s = s.replace(/\[\[LINK:(https?:\/\/[^\]\s]+)\]\]/g, function(_, url){
+    const safeUrl = url.replace(/"/g, '&quot;');
+    return '<a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="'+linkStyle+'">🔗</a>';
+  });
+  // 3. markdown [label](URL) → 안전한 <a> (http/https만 허용)
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, function(_, label, url){
     const safeUrl = url.replace(/"/g, '&quot;');
-    return '<a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="color:#1a73e8;text-decoration:none;border-bottom:1px dotted #1a73e8;font-weight:500;">'+label+'</a>';
+    return '<a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="'+linkStyle+'">'+label+'</a>';
   });
-  // 3. 평문 URL (http/https) 자동 링크화 — 단 markdown으로 이미 변환된 건 안 건드림
-  //    이미 <a> 안에 있는 URL은 안 잡히게 negative lookbehind
+  // 4. 평문 URL (http/https) → 🔗 링크 — 이미 <a href> 안에 들어간 건 제외
   s = s.replace(/(?<!href=")(https?:\/\/[^\s<]+)/g, function(url){
     const safeUrl = url.replace(/"/g, '&quot;');
-    return '<a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="color:#1a73e8;text-decoration:none;border-bottom:1px dotted #1a73e8;font-weight:500;">🔗</a>';
+    return '<a href="'+safeUrl+'" target="_blank" rel="noopener noreferrer" style="'+linkStyle+'">🔗</a>';
   });
   return s;
 }
