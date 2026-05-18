@@ -2679,7 +2679,8 @@ function parseSection(text, headers){
   for(let i=0;i<lines.length;i++){
     const l = lines[i];
     const isHeader = headers.some(h=>l.includes(h));
-    const isOtherHeader = !isHeader && /^(📌|📊|🇺🇸|📡|美증시|미증시|시장\s*시그널)/.test(l);
+    // 헤더 줄은 반드시 이모지로 시작 (본문 단어 "미증시/" 등이 헤더로 오인되지 않게)
+    const isOtherHeader = !isHeader && /^(📌|📊|🇺🇸|📡)/.test(l);
     if(isHeader){ capturing=true; result.push(l); continue; }
     if(capturing){
       if(isOtherHeader) break;
@@ -2717,7 +2718,7 @@ function _parseSectorCards(text){
   for(const raw of lines){
     let l = raw.trim();
     if(!l) continue;
-    if(l.startsWith('📌')) continue;
+    if(/^(📌|📊|🇺🇸|📡)/.test(l)) continue;
     if(/^[✔️✔✓☑️☑✅]\s*/.test(l)){
       if(cur) cards.push(cur);
       const name = l.replace(/^[✔️✔✓☑️☑✅\s]+/,'').trim();
@@ -2760,7 +2761,7 @@ function _parseStockCards(text){
       }
       continue;
     }
-    if(l.startsWith('📌')) continue;
+    if(/^(📌|📊|🇺🇸|📡)/.test(l)) continue;
     if(noiseKeywords.some(k => l.includes(k))) continue;
     if(l.startsWith('-')||l.startsWith('•')){
       if(!cur) cur = {name:'',bullets:[]};
@@ -2780,7 +2781,7 @@ function _parseIndicatorCards(text){
   for(const raw of lines){
     const l = raw.trim();
     if(!l) continue;
-    if(l.startsWith('📌')) continue;
+    if(/^(📌|📊|🇺🇸|📡)/.test(l)) continue;
     const m = l.match(/^([A-Za-z가-힣0-9&·]+(?:\s+[A-Za-z가-힣0-9&·]+)?)\s+(.+)$/);
     if(m){
       const [, name, rest] = m;
@@ -2851,6 +2852,14 @@ function _renderIndicatorCards(cards){
     }).join('') + '</div>';
 }
 
+function _renderTextBlock(text){
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l && !/^(📌|📊|🇺🇸|📡)/.test(l));
+  if(!lines.length) return '<span class="content-empty">내용이 없어요</span>';
+  return '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;margin-top:8px;">' +
+    lines.map(l => '<div style="font-size:13px;color:#2d3436;line-height:1.7;padding:2px 0;">'+_formatStockLine(l)+'</div>').join('') +
+    '</div>';
+}
+
 function cpTab(btn, key){
   document.querySelectorAll('#cp-tabs .tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
@@ -2866,12 +2875,12 @@ function cpTab(btn, key){
     const usm = parseSection(_cpRaw, CP_SECTIONS.us_market);
     if(usm){
       html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">🇺🇸 미증시 마감</div>';
-      html += _renderGenericCards(_parseGenericCards(usm), '');
+      html += _renderTextBlock(usm);
     }
     const sig = parseSection(_cpRaw, CP_SECTIONS.signal);
     if(sig){
       html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📡 시장 시그널</div>';
-      html += _renderGenericCards(_parseGenericCards(sig), '');
+      html += _renderTextBlock(sig);
     }
     const sec = parseSection(_cpRaw, CP_SECTIONS.sector);
     if(sec){
@@ -2901,7 +2910,7 @@ function cpTab(btn, key){
   if(key==='indicator'){
     html = _renderIndicatorCards(_parseIndicatorCards(sec));
   } else if(key==='us_market' || key==='signal'){
-    html = _renderGenericCards(_parseGenericCards(sec), '');
+    html = _renderTextBlock(sec);
   } else if(key==='sector'){
     html = _renderSectorCards(_parseSectorCards(sec));
   } else if(key==='kospi'){
@@ -2923,7 +2932,7 @@ function _parseGenericCards(text){
   for(const raw of lines){
     const l = raw.trim();
     if(!l) continue;
-    if(l.startsWith('📌')) continue;
+    if(/^(📌|📊|🇺🇸|📡)/.test(l)) continue;
     if(l.startsWith('✔️')||l.startsWith('✔')||l.startsWith('✓')||l.startsWith('☑️')||l.startsWith('☑')){
       if(cur) cards.push(cur);
       cur = {name: l.replace(/^[✔️✔✓☑️☑]\s*/,'').trim(), bullets:[]};
@@ -2965,7 +2974,7 @@ function _parseMarkerStockCards(text){
   for(const raw of lines){
     const l = raw.trim();
     if(!l) continue;
-    if(l.startsWith('📌')) continue;
+    if(/^(📌|📊|🇺🇸|📡)/.test(l)) continue;
     let line = l.replace(/^[-•]\s*/,'');
     const m = line.match(/^(.+?)\s*[\(]?\s*([+-]?\d+\.?\d*%)\s*[\)]?\s*[:：]\s*(.+)$/);
     if(m){
