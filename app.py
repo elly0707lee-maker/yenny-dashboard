@@ -1221,8 +1221,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       </div>
       <div class="tab-bar" id="cp-tabs">
         <button class="tab active" onclick="cpTab(this,'all')">전체</button>
-        <button class="tab" onclick="cpTab(this,'indicator')">📌지표</button>
-        <button class="tab" onclick="cpTab(this,'sector')">📌섹터</button>
+        <button class="tab" onclick="cpTab(this,'indicator')">📊지표</button>
+        <button class="tab" onclick="cpTab(this,'us_market')">🇺🇸美증시</button>
+        <button class="tab" onclick="cpTab(this,'signal')">📡시그널</button>
+        <button class="tab" onclick="cpTab(this,'sector')">📌Sector</button>
         <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
         <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
       </div>
@@ -2654,7 +2656,9 @@ async function searchGuest(){
   btn.classList.remove('ls'); btn.innerHTML='검색';
 }
 const CP_SECTIONS = {
-  indicator: ['📌지표','📌 지표'],
+  indicator: ['📊지표','📊 지표','📌지표','📌 지표'],
+  us_market: ['🇺🇸美증시 마감','🇺🇸美증시','🇺🇸 美증시 마감','🇺🇸 美증시','美증시 마감','미증시 마감'],
+  signal: ['📡시장 시그널','📡 시장 시그널','📡시장시그널','📡 시장시그널','시장 시그널'],
   sector: ['📌Sector','📌sector','📌 Sector','📌 sector','📌섹터','📌 섹터'],
   kospi: ['📌코스피','📌 코스피'],
   kosdaq: ['📌코스닥','📌 코스닥']
@@ -2675,7 +2679,7 @@ function parseSection(text, headers){
   for(let i=0;i<lines.length;i++){
     const l = lines[i];
     const isHeader = headers.some(h=>l.includes(h));
-    const isOtherHeader = l.match(/^📌/) && !isHeader;
+    const isOtherHeader = !isHeader && /^(📌|📊|🇺🇸|📡|美증시|미증시|시장\s*시그널)/.test(l);
     if(isHeader){ capturing=true; result.push(l); continue; }
     if(capturing){
       if(isOtherHeader) break;
@@ -2856,8 +2860,18 @@ function cpTab(btn, key){
     let html = '';
     const ind = parseSection(_cpRaw, CP_SECTIONS.indicator);
     if(ind){
-      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:6px 0 4px;">📌 지표</div>';
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:6px 0 4px;">📊 지표</div>';
       html += _renderIndicatorCards(_parseIndicatorCards(ind));
+    }
+    const usm = parseSection(_cpRaw, CP_SECTIONS.us_market);
+    if(usm){
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">🇺🇸 미증시 마감</div>';
+      html += _renderGenericCards(_parseGenericCards(usm), '');
+    }
+    const sig = parseSection(_cpRaw, CP_SECTIONS.signal);
+    if(sig){
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📡 시장 시그널</div>';
+      html += _renderGenericCards(_parseGenericCards(sig), '');
     }
     const sec = parseSection(_cpRaw, CP_SECTIONS.sector);
     if(sec){
@@ -2886,6 +2900,8 @@ function cpTab(btn, key){
   let html = '';
   if(key==='indicator'){
     html = _renderIndicatorCards(_parseIndicatorCards(sec));
+  } else if(key==='us_market' || key==='signal'){
+    html = _renderGenericCards(_parseGenericCards(sec), '');
   } else if(key==='sector'){
     html = _renderSectorCards(_parseSectorCards(sec));
   } else if(key==='kospi'){
