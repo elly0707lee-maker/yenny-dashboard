@@ -762,6 +762,42 @@ def encyc_search():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/encyc/add", methods=["POST"])
+@requires_auth
+def encyc_add():
+    """대시보드에서 입력한 새 표현을 Apps Script Webhook을 통해 시트에 append."""
+    data = request.get_json(silent=True) or {}
+    expr = (data.get("표현") or "").strip()
+    if not expr:
+        return jsonify({"error": "표현은 필수에요"}), 400
+    situation = (data.get("상황") or "").strip()
+    topic = (data.get("주제") or "").strip()
+
+    webhook_url = os.environ.get("ENCYC_WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        return jsonify({"error": "ENCYC_WEBHOOK_URL 환경변수가 없어요 (Apps Script 배포 URL 필요)"}), 500
+
+    webhook_secret = os.environ.get("ENCYC_WEBHOOK_SECRET", "anchoryen")
+    payload = {
+        "secret": webhook_secret,
+        "상황": situation,
+        "주제": topic,
+        "표현": expr,
+    }
+    try:
+        r = requests.post(webhook_url, json=payload, timeout=10)
+        # Apps Script가 JSON으로 응답하면 파싱, 아니면 단순 OK
+        try:
+            j = r.json()
+            if isinstance(j, dict) and j.get("error"):
+                return jsonify({"error": "시트 측 오류: " + str(j["error"])}), 500
+        except Exception:
+            pass
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": "Webhook 호출 실패: " + str(e)}), 500
+
+
 @app.route("/api/guest/search")
 @requires_auth
 def guest_search():
@@ -1365,8 +1401,22 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <span class="content-title">📖 Encyclopedia</span>
       <a href="https://docs.google.com/spreadsheets/d/1_2hIjvp2MqjHNLcv0JTn1yWgC4vB5zIzwkUS_c4cqUs/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 사전 바로가기</a>
     </div>
+    <!-- 새 표현 추가 -->
+    <div style="background:#FAFAF7;border:0.5px solid #E5E1D6;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+      <div style="font-size:11px;color:#5F5E5A;font-weight:600;margin-bottom:8px;letter-spacing:0.3px;">✏️ 새 표현 추가</div>
+      <div style="display:grid;grid-template-columns:120px 160px 1fr auto;gap:6px;align-items:center;">
+        <input class="input-line" id="encyc-add-situation" placeholder="상황 (예: 강세)" style="font-size:12px;"
+          onkeydown="if(event.key==='Enter')addEncyc()"/>
+        <input class="input-line" id="encyc-add-topic" placeholder="주제 (선택)" style="font-size:12px;"
+          onkeydown="if(event.key==='Enter')addEncyc()"/>
+        <input class="input-line" id="encyc-add-expr" placeholder="표현 (필수) — Enter로 빠르게 추가" style="font-size:12px;"
+          onkeydown="if(event.key==='Enter')addEncyc()"/>
+        <button class="btn btn-primary" onclick="addEncyc()" id="encyc-add-btn" style="font-size:12px;padding:6px 14px;">＋ 추가</button>
+      </div>
+      <div id="encyc-add-msg" style="font-size:11px;color:#7a8099;margin-top:6px;min-height:14px;"></div>
+    </div>
     <div class="input-row">
-      <input class="input-line" id="encyc-input" placeholder="예) 급락 / 금리인상 / 반도체" style="flex:1;"
+      <input class="input-line" id="encyc-input" placeholder="🔍 검색 — 예) 급락 / 금리인상 / 반도체" style="flex:1;"
         onkeydown="if(event.key==='Enter')searchEncyc()"/>
       <button class="btn btn-primary" onclick="searchEncyc()" id="encyc-btn">검색</button>
     </div>
@@ -2684,6 +2734,54 @@ async function searchThemePrices(){
     result.innerHTML='<span class="content-empty">네트워크 오류</span>';
   }
   btn.classList.remove('ls'); btn.innerHTML='조회';
+}
+
+async function addEncyc(){
+  const exprEl = document.getElementById('encyc-add-expr');
+  const sitEl = document.getElementById('encyc-add-situation');
+  const topEl = document.getElementById('encyc-add-topic');
+  const msgEl = document.getElementById('encyc-add-msg');
+  const btn = document.getElementById('encyc-add-btn');
+  const expr = (exprEl.value||'').trim();
+  if(!expr){
+    msgEl.textContent = '표현은 필수에요';
+    msgEl.style.color = '#d63031';
+    exprEl.focus();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '추가중…';
+  msgEl.textContent = '';
+  try{
+    const r = await fetch('/api/encyc/add', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        '상황': (sitEl.value||'').trim(),
+        '주제': (topEl.value||'').trim(),
+        '표현': expr
+      })
+    });
+    const d = await r.json();
+    if(d && d.ok){
+      msgEl.textContent = '✓ 추가됨 — '+expr.slice(0,30)+(expr.length>30?'…':'');
+      msgEl.style.color = '#00b894';
+      // 입력 폼 초기화 (상황/주제는 유지 — 연달아 같은 카테고리 입력하기 편하게)
+      exprEl.value = '';
+      exprEl.focus();
+      // 5초 후 메시지 사라짐
+      setTimeout(()=>{ if(msgEl.textContent.startsWith('✓')) msgEl.textContent=''; }, 5000);
+    } else {
+      msgEl.textContent = '❌ '+(d && d.error ? d.error : '추가 실패');
+      msgEl.style.color = '#d63031';
+    }
+  } catch(e){
+    msgEl.textContent = '❌ 네트워크 오류 — '+String(e);
+    msgEl.style.color = '#d63031';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '＋ 추가';
+  }
 }
 
 async function searchEncyc(){
