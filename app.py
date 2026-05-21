@@ -931,6 +931,19 @@ body{font-family:'Noto Sans KR',sans-serif;background:#f0f2f5;color:#1a1d23;min-
 #clock{font-family:'DM Mono',monospace;font-size:13px;color:#e8b84b;letter-spacing:.05em}
 .container{padding:20px;max-width:1100px;margin:0 auto}
 .section-label{font-size:11px;font-weight:700;color:#7a8099;letter-spacing:.12em;text-transform:uppercase;margin:24px 0 10px;padding-left:2px}
+.grid-cp-note{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+@media (max-width:760px){
+  .grid-cp-note{grid-template-columns:1fr!important}
+}
+.note-tab{font-size:11px;padding:4px 10px;background:#F8F7F0;border:0.5px solid #E5E1D6;border-radius:5px;cursor:pointer;color:#5F5E5A;font-family:inherit;display:inline-flex;align-items:center;gap:5px;line-height:1.4;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note-tab:hover{background:#F1EFE5;border-color:#D3D1C7}
+.note-tab.active{background:#1a1d23;color:#e8b84b;border-color:#1a1d23;font-weight:500}
+.note-tab .close-x{font-size:11px;color:#999;cursor:pointer;padding:0 2px;border-radius:2px;line-height:1;display:none}
+.note-tab:hover .close-x{display:inline}
+.note-tab.active .close-x{color:#e8b84b;display:inline}
+.note-tab .close-x:hover{background:rgba(255,255,255,0.18);color:#e8b84b}
+.note-tab-add{font-size:11px;padding:4px 9px;background:transparent;border:0.5px dashed #C2BFB1;border-radius:5px;cursor:pointer;color:#888780;font-family:inherit}
+.note-tab-add:hover{background:#FAFAF7;border-color:#5F5E5A;color:#1a1d23}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
@@ -1211,9 +1224,9 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="theme-price-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- 체크포인트 + 노트 2분할 -->
+  <!-- 체크포인트 + 노트 2:1 분할 -->
   <div class="section-label">체크포인트 / 노트</div>
-  <div class="grid2" style="align-items:stretch;margin-bottom:10px;">
+  <div class="grid-cp-note" style="display:grid;grid-template-columns:2fr 1fr;gap:10px;align-items:stretch;margin-bottom:10px;">
     <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">☑ 오늘 체크포인트</span>
@@ -1239,6 +1252,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
           <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
         </div>
       </div>
+      <div class="note-tab-bar" id="note-tab-bar" style="display:flex;gap:4px;flex-wrap:wrap;padding:6px 0 6px;border-bottom:1px solid #eee9da;margin-bottom:6px;align-items:center;"></div>
       <div class="richtext-toolbar" data-target="note-rich">
         <button onclick="rtCmd(this,'bold')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>
         <button onclick="rtCmd(this,'italic')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>
@@ -1887,30 +1901,135 @@ document.addEventListener('keydown', function(e){
   }
 }, true);
 
-async function saveNote(){
+// === 노트 (멀티 탭) ===
+// 데이터 모델: {tabs:[{id,name,content}], activeId}
+// 백엔드에는 JSON 문자열로 저장. 옛 단일 텍스트 노트는 자동 마이그레이션.
+let _noteData = {tabs:[], activeId:null};
+
+function _newNoteId(){ return 't'+Date.now()+Math.random().toString(36).slice(2,5); }
+
+function parseNoteData(raw){
+  if(!raw) return {tabs:[{id:_newNoteId(),name:'기본',content:''}], activeId:null};
+  // JSON 시도
+  if(typeof raw === 'string' && raw.trim().startsWith('{')){
+    try{
+      const j = JSON.parse(raw);
+      if(j && Array.isArray(j.tabs) && j.tabs.length){
+        if(!j.activeId || !j.tabs.find(t=>t.id===j.activeId)) j.activeId = j.tabs[0].id;
+        return j;
+      }
+    }catch(e){}
+  }
+  // 옛 포맷 (단일 HTML) → 첫 탭으로 마이그레이션
+  const id = _newNoteId();
+  return {tabs:[{id:id,name:'기본',content:String(raw)}], activeId:id};
+}
+
+function renderNoteTabs(){
+  const bar = document.getElementById('note-tab-bar');
+  if(!bar) return;
+  let html = '';
+  _noteData.tabs.forEach(t => {
+    const active = t.id === _noteData.activeId ? ' active' : '';
+    const safeName = (t.name||'노트').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+    html += '<span class="note-tab'+active+'" data-tid="'+t.id+'" onclick="switchNoteTab(\''+t.id+'\')" ondblclick="renameNoteTab(\''+t.id+'\')" title="더블클릭으로 이름변경">'+
+      safeName+
+      '<span class="close-x" onclick="event.stopPropagation();deleteNoteTab(\''+t.id+'\')" title="삭제">✕</span>'+
+      '</span>';
+  });
+  html += '<button class="note-tab-add" onclick="addNoteTab()" title="새 탭 추가">＋</button>';
+  bar.innerHTML = html;
+}
+
+function _syncCurrentEditorToData(){
   const el = document.getElementById('note-rich');
-  const val = el ? el.innerHTML : '';
+  if(!el || !_noteData.activeId) return;
+  const tab = _noteData.tabs.find(t => t.id === _noteData.activeId);
+  if(tab) tab.content = el.innerHTML;
+}
+
+function _loadActiveTabToEditor(){
+  const el = document.getElementById('note-rich');
+  if(!el) return;
+  const tab = _noteData.tabs.find(t => t.id === _noteData.activeId);
+  el.innerHTML = tab ? (tab.content||'') : '';
+}
+
+window.switchNoteTab = function(id){
+  if(id === _noteData.activeId) return;
+  _syncCurrentEditorToData();
+  _noteData.activeId = id;
+  renderNoteTabs();
+  _loadActiveTabToEditor();
+};
+
+window.addNoteTab = function(){
+  _syncCurrentEditorToData();
+  const name = prompt('새 탭 이름', '노트'+(_noteData.tabs.length+1));
+  if(name === null) return;
+  const id = _newNoteId();
+  _noteData.tabs.push({id:id, name:(name.trim()||'노트'+(_noteData.tabs.length+1)), content:''});
+  _noteData.activeId = id;
+  renderNoteTabs();
+  _loadActiveTabToEditor();
+  saveNote();
+};
+
+window.deleteNoteTab = function(id){
+  if(_noteData.tabs.length <= 1){
+    alert('탭은 최소 1개는 있어야 해요. 내용을 비우려면 ↺ 초기화를 사용하세요.');
+    return;
+  }
+  const t = _noteData.tabs.find(x=>x.id===id);
+  if(!t) return;
+  if(!confirm('"'+t.name+'" 탭을 삭제할까요? 안의 내용도 같이 사라져요.')) return;
+  _noteData.tabs = _noteData.tabs.filter(x=>x.id!==id);
+  if(_noteData.activeId === id) _noteData.activeId = _noteData.tabs[0].id;
+  renderNoteTabs();
+  _loadActiveTabToEditor();
+  saveNote();
+};
+
+window.renameNoteTab = function(id){
+  const t = _noteData.tabs.find(x=>x.id===id);
+  if(!t) return;
+  const name = prompt('탭 이름 변경', t.name);
+  if(name === null) return;
+  t.name = name.trim() || t.name;
+  renderNoteTabs();
+  saveNote();
+};
+
+async function saveNote(){
+  _syncCurrentEditorToData();
+  const payload = JSON.stringify(_noteData);
   await fetch('/api/post/note',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({content:val,date:new Date().toISOString().slice(0,10)})});
+    body:JSON.stringify({content:payload,date:new Date().toISOString().slice(0,10)})});
   const badge=document.getElementById('note-badge');
-  badge.style.display='inline';setTimeout(()=>badge.style.display='none',2000);
+  if(badge){ badge.style.display='inline'; setTimeout(()=>badge.style.display='none',2000); }
 }
 
 async function clearNote(){
-  if(!confirm('노트 초기화할까요?'))return;
-  await fetch('/api/note/clear',{method:'POST'});
+  const tab = _noteData.tabs.find(t => t.id === _noteData.activeId);
+  if(!confirm('"'+(tab?tab.name:'현재')+'" 탭 내용을 초기화할까요? (다른 탭은 그대로)')) return;
+  if(tab) tab.content = '';
   const el = document.getElementById('note-rich');
-  if(el) el.innerHTML='';
+  if(el) el.innerHTML = '';
+  saveNote();
 }
 
 async function loadNote(){
   try{
-    const d=await fetch('/api/post/note').then(r=>r.json());
-    if(d.content){
-      const el = document.getElementById('note-rich');
-      if(el) el.innerHTML = d.content;
-    }
-  }catch(e){}
+    const d = await fetch('/api/post/note').then(r=>r.json());
+    _noteData = parseNoteData(d ? d.content : '');
+    if(!_noteData.activeId && _noteData.tabs.length) _noteData.activeId = _noteData.tabs[0].id;
+    renderNoteTabs();
+    _loadActiveTabToEditor();
+  }catch(e){
+    _noteData = parseNoteData('');
+    renderNoteTabs();
+    _loadActiveTabToEditor();
+  }
 }
 let _calData = null;
 
