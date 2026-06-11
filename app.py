@@ -289,14 +289,19 @@ def save_post(t, content, date):
         t=t, c=content, d=date, ca=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     keep = POST_TYPE_KEEP.get(t)
     if keep:
-        # 같은 type의 최신 keep개만 남기고 옛 행 자동 삭제
+        # 같은 type의 최신 keep개만 남기고 옛 행 자동 삭제 (2단계 — pg8000 호환)
         try:
-            conn.run(
-                "DELETE FROM posts WHERE type=:t AND id NOT IN "
-                "(SELECT id FROM posts WHERE type=:t ORDER BY id DESC LIMIT :k)",
-                t=t, k=keep)
+            keep_rows = list(conn.run(
+                f"SELECT id FROM posts WHERE type=:t ORDER BY id DESC LIMIT {int(keep)}",
+                t=t))
+            if keep_rows:
+                keep_ids_csv = ",".join(str(r[0]) for r in keep_rows)
+                result = conn.run(
+                    f"DELETE FROM posts WHERE type=:t AND id NOT IN ({keep_ids_csv})",
+                    t=t)
+                print(f"[save_post auto-cleanup] {t}: kept latest {keep}, deleted older rows")
         except Exception as e:
-            print(f"[save_post auto-cleanup] {t}: {e}")
+            print(f"[save_post auto-cleanup] ERROR {t}: {e}")
     conn.close()
 
 
