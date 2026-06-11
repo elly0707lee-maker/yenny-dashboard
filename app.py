@@ -762,6 +762,101 @@ def encyc_search():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/admin/db-stats")
+@requires_auth
+def db_stats():
+    """DB 사용량 진단 — type별 row 수, 총 크기, 평균/최대 크기"""
+    conn = get_db()
+    try:
+        rows = list(conn.run("""
+            SELECT type,
+                   COUNT(*)::int as cnt,
+                   SUM(LENGTH(content))::bigint as total_bytes,
+                   AVG(LENGTH(content))::bigint as avg_bytes,
+                   MAX(LENGTH(content))::bigint as max_bytes
+            FROM posts
+            GROUP BY type
+            ORDER BY total_bytes DESC NULLS LAST
+        """))
+        # row는 (type, cnt, total, avg, max) 튜플
+        def mb(n): return round((n or 0)/1024/1024, 2)
+        result = []
+        grand_total = 0
+        for r in rows:
+            t, cnt, total, avg, mx = r
+            grand_total += (total or 0)
+            result.append({
+                "type": t,
+                "rows": cnt,
+                "total_MB": mb(total),
+                "avg_KB": round((avg or 0)/1024, 1),
+                "max_MB": mb(mx),
+            })
+        # 마인드맵 중복 분석 — 최신 1개 빼고 얼마나 회수 가능한지
+        mm_recoverable = 0
+        try:
+            mm_rows = list(conn.run("""
+                SELECT id, LENGTH(content)::bigint FROM posts
+                WHERE type='mindmap' ORDER BY id DESC
+            """))
+            if len(mm_rows) > 1:
+                # 최신 1개 제외 합
+                mm_recoverable = sum(r[1] for r in mm_rows[1:])
+        except Exception:
+            pass
+        return jsonify({
+            "by_type": result,
+            "grand_total_MB": mb(grand_total),
+            "mindmap_recoverable_MB_if_keep_latest_1": mb(mm_recoverable),
+        })
+    finally:
+        conn.close()
+
+
+@app.route("/admin/db-cleanup-mindmap", methods=["GET", "POST"])
+@requires_auth
+def db_cleanup_mindmap():
+    """마인드맵 type의 과거 스냅샷 삭제 (최신 N개만 유지). 다른 type은 안 건드림.
+    
+    안전 장치:
+    - GET 요청은 무조건 dry-run (실제 삭제 X)
+    - POST + confirm=YES 일 때만 진짜 삭제
+    """
+    keep = max(1, int(request.args.get("keep", "3")))
+    is_real = (request.method == "POST" and request.args.get("confirm") == "YES")
+    conn = get_db()
+    try:
+        to_delete = list(conn.run("""
+            SELECT id, LENGTH(content)::bigint FROM posts
+            WHERE type='mindmap'
+            AND id NOT IN (
+                SELECT id FROM posts WHERE type='mindmap' ORDER BY id DESC LIMIT :k
+            )
+            ORDER BY id
+        """, k=keep))
+        bytes_to_free = sum(r[1] for r in to_delete)
+        count = len(to_delete)
+        if not is_real:
+            return jsonify({
+                "dry_run": True,
+                "would_delete_rows": count,
+                "would_free_MB": round(bytes_to_free/1024/1024, 2),
+                "keep_latest": keep,
+                "to_actually_delete": "POST 요청 + ?confirm=YES 추가",
+            })
+        if count > 0:
+            ids_csv = ",".join(str(r[0]) for r in to_delete)
+            conn.run(f"DELETE FROM posts WHERE id IN ({ids_csv})")
+        return jsonify({
+            "deleted_rows": count,
+            "freed_MB": round(bytes_to_free/1024/1024, 2),
+            "kept_latest": keep,
+            "note": "디스크 실제 회수는 PG autovacuum이 처리 (몇 분~수 시간).",
+        })
+    finally:
+        conn.close()
+
+
 @app.route("/api/cgdb/search")
 @requires_auth
 def cgdb_search():
@@ -780,8 +875,8 @@ def cgdb_search():
         r.encoding = "utf-8"
         rows = list(csv.DictReader(_io.StringIO(r.text)))
         if not query:
-            # 검색어 없으면 최신 30행만
-            results = list(reversed(rows))[:30]
+            # 검색어 없으면 최신 30행만 (시트가 이미 최신순)
+            results = rows[:30]
         else:
             terms = [t.strip().lower() for t in re.split(r'[/,\s]+', query) if t.strip()]
             results = []
@@ -789,7 +884,7 @@ def cgdb_search():
                 row_text = " ".join(str(v or "") for v in row.values()).lower()
                 if all(term in row_text for term in terms):
                     results.append(row)
-            results = list(reversed(results))[:80]  # 최근 매칭 우선, 최대 80건
+            results = results[:80]  # 시트 순서 그대로 (최신 우선), 최대 80건
         return jsonify({"results": results, "query": query, "total": len(rows)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
