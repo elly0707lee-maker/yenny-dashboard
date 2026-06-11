@@ -275,11 +275,28 @@ def get_global_market():
     return {k: get_yahoo_quote(v) for k, v in syms.items()}
 
 
+# 자동 청소 — type별로 유지할 최신 행 개수
+# 이미지를 base64로 담는 무거운 타입은 1개만 유지하여 DB 폭증 방지
+POST_TYPE_KEEP = {
+    "mindmap": 1,    # 이미지 base64 포함 (행당 평균 700KB+)
+    "wdaebon": 3,    # 보통 텍스트지만 보수적으로 3개
+}
+
 def save_post(t, content, date):
     conn = get_db()
     conn.run(
         "INSERT INTO posts (type,content,date,created_at) VALUES (:t,:c,:d,:ca)",
         t=t, c=content, d=date, ca=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    keep = POST_TYPE_KEEP.get(t)
+    if keep:
+        # 같은 type의 최신 keep개만 남기고 옛 행 자동 삭제
+        try:
+            conn.run(
+                "DELETE FROM posts WHERE type=:t AND id NOT IN "
+                "(SELECT id FROM posts WHERE type=:t ORDER BY id DESC LIMIT :k)",
+                t=t, k=keep)
+        except Exception as e:
+            print(f"[save_post auto-cleanup] {t}: {e}")
     conn.close()
 
 
@@ -823,7 +840,7 @@ def db_cleanup_mindmap():
     - POST + confirm=YES 일 때만 진짜 삭제
     """
     keep = max(1, int(request.args.get("keep", "3")))
-    is_real = (request.method == "POST" and request.args.get("confirm") == "YES")
+    is_real = (request.args.get("confirm") == "YES")
     conn = get_db()
     try:
         to_delete = list(conn.run("""
