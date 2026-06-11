@@ -762,7 +762,40 @@ def encyc_search():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/encyc/add", methods=["POST"])
+@app.route("/api/cgdb/search")
+@requires_auth
+def cgdb_search():
+    """CG DB 시트(날짜·CG 제목·키워드·유형)에서 키워드 검색"""
+    query = request.args.get("q", "").strip()
+    CG_DB_SHEET_ID = os.environ.get("CG_DB_SHEET_ID", "")
+    CG_DB_GID = os.environ.get("CG_DB_GID", "0").strip() or "0"
+    if not CG_DB_SHEET_ID:
+        return jsonify({"error": "CG_DB_SHEET_ID 환경변수 없음"}), 500
+
+    import csv, io as _io, re
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{CG_DB_SHEET_ID}/export?format=csv&gid={CG_DB_GID}"
+
+    try:
+        r = requests.get(sheet_url, timeout=10)
+        r.encoding = "utf-8"
+        rows = list(csv.DictReader(_io.StringIO(r.text)))
+        if not query:
+            # 검색어 없으면 최신 30행만
+            results = list(reversed(rows))[:30]
+        else:
+            terms = [t.strip().lower() for t in re.split(r'[/,\s]+', query) if t.strip()]
+            results = []
+            for row in rows:
+                row_text = " ".join(str(v or "") for v in row.values()).lower()
+                if all(term in row_text for term in terms):
+                    results.append(row)
+            results = list(reversed(results))[:80]  # 최근 매칭 우선, 최대 80건
+        return jsonify({"results": results, "query": query, "total": len(rows)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
 @requires_auth
 def encyc_add():
     """대시보드에서 입력한 새 표현을 Apps Script Webhook을 통해 시트에 append."""
@@ -1421,6 +1454,22 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <button class="btn btn-primary" onclick="searchEncyc()" id="encyc-btn">검색</button>
     </div>
     <div id="encyc-result" style="margin-top:14px;"></div>
+  </div>
+
+  <!-- CG DB 검색 -->
+  <div class="section-label">🎬 CG DB</div>
+  <div class="content-card">
+    <div class="content-header">
+      <span class="content-title">🎬 CG DB</span>
+      <a href="https://docs.google.com/spreadsheets/d/1XbuQwCEg43OR1yAlp2YTGIo0PVx1FFzFewXftMkGd_4/edit" target="_blank" class="btn" style="font-size:12px;padding:6px 12px;">📊 시트 바로가기</a>
+    </div>
+    <div class="input-row">
+      <input class="input-line" id="cgdb-input" placeholder="🔍 검색 — 예) 반도체 / 트럼프 이란 / CPI / 실적" style="flex:1;"
+        onkeydown="if(event.key==='Enter')searchCGDB()"/>
+      <button class="btn btn-primary" onclick="searchCGDB()" id="cgdb-btn">검색</button>
+      <button class="btn" onclick="loadRecentCGDB()" title="최근 추가된 CG 30개" style="font-size:12px;">최근</button>
+    </div>
+    <div id="cgdb-result" style="margin-top:14px;"></div>
   </div>
 
     <div style="height:32px;"></div>
@@ -2784,8 +2833,7 @@ async function addEncyc(){
   }
 }
 
-async function searchEncyc(){
-  const q = document.getElementById('encyc-input').value.trim();
+async function searchEncyc(){  const q = document.getElementById('encyc-input').value.trim();
   if(!q) return;
   const btn = document.getElementById('encyc-btn');
   const result = document.getElementById('encyc-result');
@@ -2817,6 +2865,78 @@ async function searchEncyc(){
     result.innerHTML='<span class="content-empty">네트워크 오류</span>';
   }
   btn.classList.remove('ls'); btn.innerHTML='검색';
+}
+
+// === CG DB 검색 ===
+function _cgdbTypeColor(type){
+  // 유형별 색깔 배지
+  const map = {
+    '발언':'#A32D2D','지표':'#0C447C','금리':'#854F0B','등락':'#085041',
+    '일정':'#5F5E5A','실적':'#3C3489','변동성':'#A32D2D','밸류에이션':'#0C447C',
+    '코멘트':'#085041','정책':'#412402','전망':'#3C3489'
+  };
+  return map[type] || '#5F5E5A';
+}
+function _cgdbTypeBg(type){
+  const map = {
+    '발언':'#FCEBEB','지표':'#E6F1FB','금리':'#FDF1DF','등락':'#E1F5EE',
+    '일정':'#F1EFE5','실적':'#EEEDFE','변동성':'#FCEBEB','밸류에이션':'#E6F1FB',
+    '코멘트':'#E1F5EE','정책':'#FAEEDA','전망':'#EEEDFE'
+  };
+  return map[type] || '#F1EFE5';
+}
+function _renderCGDBResults(d, fromRecent){
+  const result = document.getElementById('cgdb-result');
+  if(d.error){ result.innerHTML = '<span class="content-empty">오류: '+d.error+'</span>'; return; }
+  if(!d.results || !d.results.length){
+    result.innerHTML = '<span class="content-empty">'+(fromRecent?'CG DB가 비어있어요':'매칭되는 CG가 없어요')+'</span>';
+    return;
+  }
+  const header = fromRecent
+    ? '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">최근 '+d.results.length+'건 (전체 '+(d.total||d.results.length)+'건)</div>'
+    : '<div style="font-size:11px;color:#7a8099;margin-bottom:10px;">"'+(d.query||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))+'" 검색 결과 '+d.results.length+'건</div>';
+  let html = header;
+  d.results.forEach(row => {
+    const date = row['날짜'] || '';
+    const title = row['CG 제목'] || row['제목'] || '';
+    const keyword = row['키워드'] || '';
+    const type = row['유형'] || '';
+    const typeColor = _cgdbTypeColor(type);
+    const typeBg = _cgdbTypeBg(type);
+    const esc = s => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:#fff;border:0.5px solid #E5E1D6;border-radius:8px;margin-bottom:6px;">';
+    html += '<span style="font-size:10px;color:#888780;font-family:\'DM Mono\',monospace;white-space:nowrap;min-width:74px;">'+esc(date)+'</span>';
+    if(type) html += '<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:'+typeBg+';color:'+typeColor+';font-weight:500;white-space:nowrap;">'+esc(type)+'</span>';
+    html += '<span style="font-size:13px;color:#1a1d23;flex:1;line-height:1.4;font-weight:500;">'+esc(title)+'</span>';
+    if(keyword) html += '<span style="font-size:11px;color:#7a8099;font-style:italic;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="'+esc(keyword)+'">'+esc(keyword)+'</span>';
+    html += '</div>';
+  });
+  result.innerHTML = html;
+}
+async function searchCGDB(){
+  const q = document.getElementById('cgdb-input').value.trim();
+  if(!q){ loadRecentCGDB(); return; }
+  const btn = document.getElementById('cgdb-btn');
+  const result = document.getElementById('cgdb-result');
+  btn.classList.add('ls'); btn.innerHTML = '<span class="spinner"></span>';
+  result.innerHTML = '<span class="content-empty">검색 중...</span>';
+  try{
+    const d = await fetch('/api/cgdb/search?q='+encodeURIComponent(q)).then(r=>r.json());
+    _renderCGDBResults(d, false);
+  }catch(e){
+    result.innerHTML = '<span class="content-empty">네트워크 오류</span>';
+  }
+  btn.classList.remove('ls'); btn.innerHTML = '검색';
+}
+async function loadRecentCGDB(){
+  const result = document.getElementById('cgdb-result');
+  result.innerHTML = '<span class="content-empty">불러오는 중...</span>';
+  try{
+    const d = await fetch('/api/cgdb/search?q=').then(r=>r.json());
+    _renderCGDBResults(d, true);
+  }catch(e){
+    result.innerHTML = '<span class="content-empty">네트워크 오류</span>';
+  }
 }
 
 async function searchGuest(){
