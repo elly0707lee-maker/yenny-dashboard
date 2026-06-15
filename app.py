@@ -3210,14 +3210,23 @@ function parseSection(text, headers){
   if(!text) return null;
   const lines = text.split('\n');
   let capturing = false, result = [];
+  let headerAdded = false;
   for(let i=0;i<lines.length;i++){
     const l = lines[i];
     const isHeader = headers.some(h=>l.includes(h));
-    // 헤더 줄은 반드시 이모지로 시작 (본문 단어 "미증시/" 등이 헤더로 오인되지 않게)
     const isOtherHeader = !isHeader && /^(📌|📊|🇺🇸|📡)/.test(l);
-    if(isHeader){ capturing=true; result.push(l); continue; }
+    if(isHeader){
+      // 같은 헤더가 본문에 여러 번 등장하면: 헤더 줄은 한 번만, 캡쳐는 다시 시작
+      if(!headerAdded){ result.push(l); headerAdded = true; }
+      capturing = true;
+      continue;
+    }
+    if(isOtherHeader){
+      // 다른 헤더 만나면 캡쳐 잠시 멈춤. 같은 헤더 다시 만날 수 있으니 break 안 함.
+      capturing = false;
+      continue;
+    }
     if(capturing){
-      if(isOtherHeader) break;
       result.push(l);
     }
   }
@@ -3711,21 +3720,26 @@ function enterCpEdit() {
 
 async function saveCpEdit() {
   const ta = document.getElementById('cp-edit-textarea');
-  if(!ta) return;
+  if(!ta) { alert('❌ textarea 못 찾음'); return; }
   const rawText = cpEditToRaw(ta.value);
+  const url = '/api/post/checkpoint/replace';
+  const payload = {content: rawText, date: new Date().toISOString().slice(0,10)};
   try{
-    const res = await fetch('/api/post/checkpoint/replace', {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: rawText, date: new Date().toISOString().slice(0,10)})
+      body: JSON.stringify(payload)
     });
-    if(!res.ok){ alert('저장 실패 HTTP ' + res.status); return; }
-    const result = await res.json().catch(()=>({}));
-    if(!result.ok){ alert('저장 실패 — 서버 응답: ' + JSON.stringify(result)); return; }
-    // 저장 성공 → 강제 새로고침으로 서버 최신 본문 받아옴
+    let bodyTxt = '';
+    try { bodyTxt = await res.text(); } catch(_){}
+    if(!res.ok){
+      alert('❌ 저장 실패 HTTP ' + res.status + '\n응답: ' + bodyTxt.slice(0, 300));
+      return;
+    }
+    // 성공 — 강제 새로고침
     window.location.reload();
   } catch(e) {
-    alert('저장 실패: ' + e.message);
+    alert('❌ 네트워크/JS 오류: ' + (e && e.message ? e.message : e));
   }
 }
 
