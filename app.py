@@ -441,18 +441,32 @@ def api_save_post(pt):
         if pt != "mindmap":
             return jsonify({"error": "content required"}), 400
 
-    # 체크포인트: 봇이 같은 날짜 메시지 보내면 기존 내용 끝에 append (사용자 편집 보존)
-    # 사용자 편집(브라우저 세션)은 그대로 replace
+    # 체크포인트: 봇이 보낸 메시지 — 직전 체크포인트가 최근 12시간 이내면 append
+    #              (시간대/날짜 형식 무관, 사용자 편집 보존)
+    # 사용자 편집(브라우저 세션)은 그대로 replace.
     if pt == "checkpoint" and is_bot:
-        existing = get_latest_post("checkpoint")
-        if existing and existing.get("date") == date:
-            new_block = (content or "").strip()
-            old_block = (existing.get("content") or "").rstrip()
-            # 이미 끝에 같은 내용이 있으면 중복 방지
-            if new_block and new_block not in old_block:
-                content = old_block + "\n\n" + new_block
-            else:
-                content = old_block  # 변화 없음
+        try:
+            _c = get_db()
+            _rows = list(_c.run(
+                "SELECT content, created_at FROM posts WHERE type='checkpoint' ORDER BY id DESC LIMIT 1"
+            ))
+            _c.close()
+            if _rows:
+                _old_content, _created_at_str = _rows[0]
+                try:
+                    _ts = datetime.strptime(_created_at_str, "%Y-%m-%d %H:%M:%S")
+                    _age_hours = (datetime.now() - _ts).total_seconds() / 3600.0
+                    if _age_hours < 12:
+                        _new_block = (content or "").strip()
+                        _old_block = (_old_content or "").rstrip()
+                        if _new_block and _new_block not in _old_block:
+                            content = _old_block + "\n\n" + _new_block
+                        elif _old_block:
+                            content = _old_block  # 중복이면 기존 그대로
+                except Exception as _e:
+                    print(f"[checkpoint append parse] {_e}")
+        except Exception as _e:
+            print(f"[checkpoint append] {_e}")
 
     save_post(pt, content, date)
     return jsonify({"ok": True})
