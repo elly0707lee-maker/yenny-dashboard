@@ -430,7 +430,8 @@ def api_save_post(pt):
     # 대시보드 직접 저장은 인증 필요
     auth = request.authorization
     bot_secret = request.headers.get("X-API-Secret", "")
-    if bot_secret != API_SECRET and (not auth or auth.password != DASHBOARD_PASSWORD):
+    is_bot = (bot_secret == API_SECRET)
+    if not is_bot and (not auth or auth.password != DASHBOARD_PASSWORD):
         return jsonify({"error": "unauthorized"}), 401
     body = request.json or {}
     content = body.get("content", "")
@@ -439,6 +440,20 @@ def api_save_post(pt):
         # mindmap은 빈 콘텐츠 저장 허용 (초기화용)
         if pt != "mindmap":
             return jsonify({"error": "content required"}), 400
+
+    # 체크포인트: 봇이 같은 날짜 메시지 보내면 기존 내용 끝에 append (사용자 편집 보존)
+    # 사용자 편집(브라우저 세션)은 그대로 replace
+    if pt == "checkpoint" and is_bot:
+        existing = get_latest_post("checkpoint")
+        if existing and existing.get("date") == date:
+            new_block = (content or "").strip()
+            old_block = (existing.get("content") or "").rstrip()
+            # 이미 끝에 같은 내용이 있으면 중복 방지
+            if new_block and new_block not in old_block:
+                content = old_block + "\n\n" + new_block
+            else:
+                content = old_block  # 변화 없음
+
     save_post(pt, content, date)
     return jsonify({"ok": True})
 @app.route("/api/news")
@@ -1411,8 +1426,8 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   </div>
 
   <!-- 체크포인트 + 노트 2:1 분할 -->
-  <div class="section-label">체크포인트 / 노트</div>
-  <div class="grid-cp-note" style="display:grid;grid-template-columns:2fr 1fr;gap:10px;align-items:stretch;margin-bottom:10px;">
+  <div class="section-label">체크포인트</div>
+  <div style="margin-bottom:10px;">
     <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">☑ 오늘 체크포인트</span>
@@ -1431,43 +1446,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
       </div>
       <div class="content-body" id="checkpoint-body" style="flex:1;min-height:400px;"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
-    </div>
-    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
-      <div class="content-header">
-        <span class="content-title">📓 오늘의 노트</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span class="saved-badge" id="note-badge">✓ 저장됨</span>
-          <button class="btn btn-green" onclick="saveNote()">저장</button>
-          <button class="btn" onclick="clearNote()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-        </div>
-      </div>
-      <div class="note-tab-bar" id="note-tab-bar" style="display:flex;gap:4px;flex-wrap:wrap;padding:6px 0 6px;border-bottom:1px solid #eee9da;margin-bottom:6px;align-items:center;"></div>
-      <div class="richtext-toolbar" data-target="note-rich">
-        <button onclick="rtCmd(this,'bold')" title="굵게 (Cmd/Ctrl+B)"><b>B</b></button>
-        <button onclick="rtCmd(this,'italic')" title="기울임 (Cmd/Ctrl+I)"><i>I</i></button>
-        <button onclick="rtCmd(this,'underline')" title="밑줄 (Cmd/Ctrl+U)"><u>U</u></button>
-        <button onclick="rtCmd(this,'strikeThrough')" title="취소선"><s>S</s></button>
-        <span class="rt-sep"></span>
-        <button onclick="rtHighlight(this,'#fff3a0')" title="노란색 하이라이트 (Cmd/Ctrl+Shift+H)" style="background:#fff3a0;">H</button>
-        <button onclick="rtHighlight(this,'#ffd6d6')" title="분홍색 하이라이트" style="background:#ffd6d6;">H</button>
-        <button onclick="rtHighlight(this,'#d6f0ff')" title="파란색 하이라이트" style="background:#d6f0ff;">H</button>
-        <button onclick="rtHighlight(this,'transparent')" title="하이라이트 제거" style="background:white;">✕</button>
-        <span class="rt-sep"></span>
-        <button onclick="rtColor(this,'#d63031')" title="빨간 글자" style="color:#d63031;">A</button>
-        <button onclick="rtColor(this,'#0984e3')" title="파란 글자 (Cmd/Ctrl+Shift+B)" style="color:#0984e3;">A</button>
-        <button onclick="rtColor(this,'#00b894')" title="초록 글자 (Cmd/Ctrl+Shift+G)" style="color:#00b894;">A</button>
-        <button onclick="rtColor(this,'#2d3436')" title="기본색">A</button>
-        <span class="rt-sep"></span>
-        <button onclick="rtSize(this,'5')" title="큰 글씨 (Cmd/Ctrl+Shift+L)" style="font-size:16px;">A⁺</button>
-        <button onclick="rtSize(this,'3')" title="기본 크기">A</button>
-        <button onclick="rtSize(this,'2')" title="작은 글씨" style="font-size:10px;">A⁻</button>
-        <span class="rt-sep"></span>
-        <button onclick="rtBox(this,'pink')" title="분홍 박스 (Cmd/Ctrl+Shift+K)" style="background:#FBEAF0;color:#993556;width:auto;padding:0 8px;font-size:10px;font-weight:700;">분홍</button>
-        <button onclick="rtBox(this,'blue')" title="파랑 박스 (Cmd/Ctrl+Shift+E)" style="background:#E6F1FB;color:#185FA5;width:auto;padding:0 8px;font-size:10px;font-weight:700;">파랑</button>
-        <span style="flex:1;"></span>
-        <span style="font-size:10px;color:#7a8099;align-self:center;padding-right:6px;">⌘/Ctrl + B/I/U · ⇧+H(노랑) ⇧+L(크게) ⇧+B(파랑) ⇧+G(초록) ⇧+K(분홍박스) ⇧+E(파랑박스)</span>
-      </div>
-      <div class="rich-editor" id="note-rich" contenteditable="true" data-placeholder="새로운 뉴스, 메모, 아이디어 등 자유롭게..." style="flex:1;min-height:400px;"></div>
     </div>
   </div>
 
@@ -3668,7 +3646,6 @@ loadAll();
 loadFutures();
 loadAutoFutures();
 loadReport();
-loadNote();
 loadTodo();
 loadMemo();
 loadNews();
