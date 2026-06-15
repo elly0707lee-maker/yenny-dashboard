@@ -1532,6 +1532,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <span class="content-title">☑ 오늘 체크포인트</span>
         <div style="display:flex;gap:6px;align-items:center;">
           <span class="content-date" id="checkpoint-date"></span>
+          <button class="btn" onclick="loadPost('checkpoint','checkpoint-body','checkpoint-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
           <button class="btn" onclick="enterCpEdit()" id="cp-edit-btn" style="font-size:11px;padding:5px 10px;">✏️ 편집</button>
         </div>
       </div>
@@ -1563,7 +1564,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div class="content-card" style="margin-bottom:0;">
     <div class="content-header">
       <span class="content-title">📋 마감일지</span>
-      <span class="content-date" id="closing-date"></span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="content-date" id="closing-date"></span>
+        <button class="btn" onclick="loadPost('closing','closing-body','closing-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
+      </div>
     </div>
     <div class="tab-bar" id="cl-tabs">
       <button class="tab active" onclick="clTab(this,'all')">전체</button>
@@ -3662,6 +3666,7 @@ async function loadAll(){
 
 // ── 체크포인트 인라인 편집 ─────────────────────────────
 let _cpLinkMap = [];
+let _cpEditing = false;  // 편집 모드 플래그 — polling이 편집 화면 덮지 않게
 
 function cpRawToEdit(raw) {
   _cpLinkMap = [];
@@ -3680,6 +3685,7 @@ function cpEditToRaw(editText) {
 }
 
 function enterCpEdit() {
+  _cpEditing = true;
   const editText = cpRawToEdit(_cpRaw || '');
   const body = document.getElementById('checkpoint-body');
   const tabs = document.getElementById('cp-tabs');
@@ -3744,6 +3750,7 @@ async function saveCpEdit() {
 }
 
 function cancelCpEdit() {
+  _cpEditing = false;
   const tabs = document.getElementById('cp-tabs');
   const editBtn = document.getElementById('cp-edit-btn');
   if(tabs) tabs.style.display = '';
@@ -3768,11 +3775,7 @@ loadPost('checkpoint','checkpoint-body','checkpoint-date');
 loadPost('closing','closing-body','closing-date');
 loadPost('briefing','briefing-body','briefing-date');
 setInterval(loadAll,5*60*1000);
-setInterval(()=>{
-  loadPost('checkpoint','checkpoint-body','checkpoint-date');
-  loadPost('closing','closing-body','closing-date');
-  loadPost('briefing','briefing-body','briefing-date');
-},30*1000);
+// 체크포인트/마감일지/브리핑 자동 polling 제거 — 카드 헤더의 ↻ 새로고침 버튼으로 수동 갱신
 </script>
 <script>
 if('serviceWorker' in navigator){
