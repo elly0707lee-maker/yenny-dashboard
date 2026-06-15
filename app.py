@@ -422,6 +422,28 @@ def debug_post(pt):
     )
 
 
+@app.route("/api/post/checkpoint/replace", methods=["POST"])
+def api_save_checkpoint_replace():
+    """사용자 편집 전용 — append 로직 절대 안 발동, 무조건 replace.
+    
+    fetch wrapper가 X-API-Secret을 자동으로 붙여서 서버가 봇/사용자 구분이 깨지는
+    문제를 우회하기 위한 명시적 경로.
+    """
+    auth = request.authorization
+    bot_secret = request.headers.get("X-API-Secret", "")
+    is_bot = (bot_secret == API_SECRET)
+    if not is_bot and (not auth or auth.password != DASHBOARD_PASSWORD):
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.json or {}
+    content = body.get("content", "")
+    date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
+    if not content:
+        return jsonify({"error": "content required"}), 400
+    save_post("checkpoint", content, date)
+    print(f"[/api/post/checkpoint/replace] saved {len(content)} chars, date={date}")
+    return jsonify({"ok": True, "saved_len": len(content)})
+
+
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
     valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap")
@@ -3699,26 +3721,16 @@ async function saveCpEdit() {
   if(!ta) return;
   const rawText = cpEditToRaw(ta.value);
   try{
-    const res = await fetch('/api/post/checkpoint', {
+    const res = await fetch('/api/post/checkpoint/replace', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: rawText, date: new Date().toISOString().slice(0,10), source: 'user_edit'})
+      body: JSON.stringify({content: rawText, date: new Date().toISOString().slice(0,10)})
     });
     if(!res.ok){ alert('저장 실패 HTTP ' + res.status); return; }
-    // 저장 후 서버에서 최신 본문을 다시 받아와 _cpRaw 강제 동기화 (이게 화면의 진실)
-    try{
-      const fresh = await fetch('/api/post/checkpoint').then(r=>r.json());
-      _cpRaw = (fresh && fresh.content) ? fresh.content : rawText;
-      // 저장 직후 서버 본문에 내 편집이 안 들어갔으면 → 다른 요청에 덮였다는 뜻
-      if (rawText && !_cpRaw.includes(rawText.slice(0, Math.min(40, rawText.length)))) {
-        alert('⚠️ 저장은 됐는데 서버 본문에 내 편집이 안 보여요. 봇 메시지가 동시에 들어왔을 수 있어요. 한 번 더 시도해보세요.');
-      }
-    }catch(e){
-      _cpRaw = rawText;
-    }
-    const badge = document.getElementById('cp-edit-badge');
-    if(badge){ badge.style.display='inline'; }
-    setTimeout(() => cancelCpEdit(), 600);
+    const result = await res.json().catch(()=>({}));
+    if(!result.ok){ alert('저장 실패 — 서버 응답: ' + JSON.stringify(result)); return; }
+    // 저장 성공 → 강제 새로고침으로 서버 최신 본문 받아옴
+    window.location.reload();
   } catch(e) {
     alert('저장 실패: ' + e.message);
   }
