@@ -443,8 +443,9 @@ def api_save_post(pt):
 
     # 체크포인트: 봇이 보낸 메시지 — 직전 체크포인트가 최근 12시간 이내면 append
     #              (시간대/날짜 형식 무관, 사용자 편집 보존)
-    # 사용자 편집(브라우저 세션)은 그대로 replace.
-    if pt == "checkpoint" and is_bot:
+    # 사용자 편집(body에 source='user_edit' 플래그)은 무조건 replace.
+    is_user_edit = (body.get("source") == "user_edit")
+    if pt == "checkpoint" and is_bot and not is_user_edit:
         try:
             _c = get_db()
             _rows = list(_c.run(
@@ -3702,7 +3703,7 @@ async function saveCpEdit() {
     const res = await fetch('/api/post/checkpoint', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: rawText, date: new Date().toISOString().slice(0,10)})
+      body: JSON.stringify({content: rawText, date: new Date().toISOString().slice(0,10), source: 'user_edit'})
     });
     if(!res.ok){ alert('저장 실패 HTTP ' + res.status); return; }
     const badge = document.getElementById('cp-edit-badge');
