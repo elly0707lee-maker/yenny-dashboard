@@ -463,31 +463,24 @@ def api_save_post(pt):
         if pt != "mindmap":
             return jsonify({"error": "content required"}), 400
 
-    # 체크포인트: 봇이 보낸 메시지 — 직전 체크포인트가 최근 12시간 이내면 append
-    #              (시간대/날짜 형식 무관, 사용자 편집 보존)
-    # 사용자 편집(body에 source='user_edit' 플래그)은 무조건 replace.
-    is_user_edit = (body.get("source") == "user_edit")
-    if pt == "checkpoint" and is_bot and not is_user_edit:
+    # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
+    #   mode="append" → 기존 본문 끝에 조각 추가 (조각 방식)
+    #   mode="replace" 또는 없음 → 통째로 덮어쓰기
+    # 사용자 편집은 /api/post/checkpoint/replace 별도 endpoint 사용.
+    if pt == "checkpoint" and is_bot and body.get("mode") == "append":
         try:
             _c = get_db()
             _rows = list(_c.run(
-                "SELECT content, created_at FROM posts WHERE type='checkpoint' ORDER BY id DESC LIMIT 1"
+                "SELECT content FROM posts WHERE type='checkpoint' ORDER BY id DESC LIMIT 1"
             ))
             _c.close()
             if _rows:
-                _old_content, _created_at_str = _rows[0]
-                try:
-                    _ts = datetime.strptime(_created_at_str, "%Y-%m-%d %H:%M:%S")
-                    _age_hours = (datetime.now() - _ts).total_seconds() / 3600.0
-                    if _age_hours < 12:
-                        _new_block = (content or "").strip()
-                        _old_block = (_old_content or "").rstrip()
-                        if _new_block and _new_block not in _old_block:
-                            content = _old_block + "\n\n" + _new_block
-                        elif _old_block:
-                            content = _old_block  # 중복이면 기존 그대로
-                except Exception as _e:
-                    print(f"[checkpoint append parse] {_e}")
+                _old_content = _rows[0][0] or ""
+                _new_block = (content or "").strip()
+                _old_block = _old_content.rstrip()
+                if _new_block and _old_block:
+                    content = _old_block + "\n\n" + _new_block
+                # 기존 본문 없으면 새 본문이 그대로 content (덮어쓰기 효과)
         except Exception as _e:
             print(f"[checkpoint append] {_e}")
 
