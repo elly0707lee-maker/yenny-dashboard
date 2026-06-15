@@ -3698,7 +3698,6 @@ async function saveCpEdit() {
   const ta = document.getElementById('cp-edit-textarea');
   if(!ta) return;
   const rawText = cpEditToRaw(ta.value);
-  _cpRaw = rawText;
   try{
     const res = await fetch('/api/post/checkpoint', {
       method: 'POST',
@@ -3706,9 +3705,20 @@ async function saveCpEdit() {
       body: JSON.stringify({content: rawText, date: new Date().toISOString().slice(0,10), source: 'user_edit'})
     });
     if(!res.ok){ alert('저장 실패 HTTP ' + res.status); return; }
+    // 저장 후 서버에서 최신 본문을 다시 받아와 _cpRaw 강제 동기화 (이게 화면의 진실)
+    try{
+      const fresh = await fetch('/api/post/checkpoint').then(r=>r.json());
+      _cpRaw = (fresh && fresh.content) ? fresh.content : rawText;
+      // 저장 직후 서버 본문에 내 편집이 안 들어갔으면 → 다른 요청에 덮였다는 뜻
+      if (rawText && !_cpRaw.includes(rawText.slice(0, Math.min(40, rawText.length)))) {
+        alert('⚠️ 저장은 됐는데 서버 본문에 내 편집이 안 보여요. 봇 메시지가 동시에 들어왔을 수 있어요. 한 번 더 시도해보세요.');
+      }
+    }catch(e){
+      _cpRaw = rawText;
+    }
     const badge = document.getElementById('cp-edit-badge');
     if(badge){ badge.style.display='inline'; }
-    setTimeout(() => cancelCpEdit(), 800);
+    setTimeout(() => cancelCpEdit(), 600);
   } catch(e) {
     alert('저장 실패: ' + e.message);
   }
