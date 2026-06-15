@@ -864,6 +864,75 @@ def db_stats():
         conn.close()
 
 
+@app.route("/admin/db-vacuum")
+@requires_auth
+def db_vacuum():
+    """VACUUM FULL — DELETE된 dead tuple 디스크 공간 실제 회수.
+    
+    안전:
+    - GET 호출은 미리보기(현재 크기만 표시)
+    - ?confirm=YES 있을 때만 실제 VACUUM 실행
+    - posts 테이블만 대상 (이미지가 쌓이는 곳)
+    """
+    import time
+    is_real = (request.args.get("confirm") == "YES")
+    conn = get_db()
+    try:
+        # 현재 크기 측정
+        before_rows = list(conn.run(
+            "SELECT pg_size_pretty(pg_database_size(current_database())), "
+            "pg_size_pretty(pg_total_relation_size('posts')), "
+            "pg_database_size(current_database()), "
+            "pg_total_relation_size('posts')"
+        ))
+        db_size_pretty, posts_size_pretty, db_size_bytes, posts_size_bytes = before_rows[0]
+        before = {
+            "db_size": db_size_pretty,
+            "posts_table_size": posts_size_pretty,
+            "db_size_MB": round(db_size_bytes/1024/1024, 2),
+            "posts_table_size_MB": round(posts_size_bytes/1024/1024, 2),
+        }
+        if not is_real:
+            return jsonify({
+                "dry_run": True,
+                "before": before,
+                "to_run_vacuum": "?confirm=YES 추가",
+                "note": "VACUUM FULL은 테이블 락을 걸어요 (몇 초~십수 초). 그 동안 대시보드 잠시 느려질 수 있음.",
+            })
+        # 실제 VACUUM FULL — autocommit 필요 (트랜잭션 안에서 못 돌림)
+        # pg8000: autocommit on
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+        start = time.time()
+        conn.run("VACUUM (FULL, ANALYZE) posts")
+        elapsed = time.time() - start
+        # 후 크기
+        after_rows = list(conn.run(
+            "SELECT pg_size_pretty(pg_database_size(current_database())), "
+            "pg_size_pretty(pg_total_relation_size('posts')), "
+            "pg_database_size(current_database()), "
+            "pg_total_relation_size('posts')"
+        ))
+        ad, ap, adb, apb = after_rows[0]
+        return jsonify({
+            "vacuum_done": True,
+            "elapsed_seconds": round(elapsed, 2),
+            "before": before,
+            "after": {
+                "db_size": ad,
+                "posts_table_size": ap,
+                "db_size_MB": round(adb/1024/1024, 2),
+                "posts_table_size_MB": round(apb/1024/1024, 2),
+            },
+            "freed_MB": round((db_size_bytes - adb)/1024/1024, 2),
+        })
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
 @app.route("/admin/db-cleanup-mindmap", methods=["GET", "POST"])
 @requires_auth
 def db_cleanup_mindmap():
