@@ -3391,6 +3391,21 @@ function _renderSectorCards(cards){
     }).join('') + '</div>';
 }
 
+function _renderSignalCards(cards){
+  if(!cards.length) return '<span class="content-empty">시그널 정보가 없어요</span>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px;">' +
+    cards.map(c=>{
+      let html = '<div style="background:#fff;border:1px solid #e8b84b33;border-radius:10px;padding:12px 14px;">';
+      html += '<div style="font-size:11px;color:#7a8099;font-weight:600;margin-bottom:4px;">시그널</div>';
+      html += '<div style="font-size:14px;font-weight:600;color:#1a1d23;margin-bottom:8px;">☑️ '+_linkifyText(c.name)+'</div>';
+      if(c.bullets.length){
+        html += '<div style="font-size:12px;color:#2d3436;line-height:1.6;">'+c.bullets.map(b=>'• '+_linkifyText(b)).join('<br>')+'</div>';
+      }
+      html += '</div>';
+      return html;
+    }).join('') + '</div>';
+}
+
 function _renderStockCards(cards, label){
   if(!cards.length) return '<span class="content-empty">'+label+' 정보가 없어요</span>';
   return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px;">' +
@@ -3453,7 +3468,7 @@ function cpTab(btn, key){
     const sig = parseSection(_cpRaw, CP_SECTIONS.signal);
     if(sig){
       html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:14px 0 4px;">📡 시장 시그널</div>';
-      html += _renderTextBlock(sig);
+      html += _renderSignalCards(_parseSectorCards(sig));
     }
     const sec = parseSection(_cpRaw, CP_SECTIONS.sector);
     if(sec){
@@ -3482,8 +3497,10 @@ function cpTab(btn, key){
   let html = '';
   if(key==='indicator'){
     html = _renderIndicatorCards(_parseIndicatorCards(sec));
-  } else if(key==='us_market' || key==='signal'){
+  } else if(key==='us_market'){
     html = _renderTextBlock(sec);
+  } else if(key==='signal'){
+    html = _renderSignalCards(_parseSectorCards(sec));
   } else if(key==='sector'){
     html = _renderSectorCards(_parseSectorCards(sec));
   } else if(key==='kospi'){
