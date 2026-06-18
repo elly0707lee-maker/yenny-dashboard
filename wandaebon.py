@@ -206,6 +206,7 @@ body{
   margin:0;padding:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans-serif;
   font-size:14px;line-height:1.6;
+  position:relative;  /* 떠있는 메모의 absolute 기준점 */
 }
 .topbar{
   position:sticky;top:0;z-index:50;background:var(--card);
@@ -347,7 +348,7 @@ body{
 }
 .memo-detached-placeholder:hover{border-color:var(--accent);opacity:1;}
 .floating-memo{
-  position:fixed;width:180px;border-radius:8px;
+  position:absolute;width:180px;border-radius:8px;
   padding:8px 10px;box-shadow:0 3px 12px rgba(0,0,0,0.15);
   cursor:move;z-index:100;background:var(--amber-bg);
   transform:rotate(-2deg);transition:transform .1s ease;
@@ -661,13 +662,12 @@ function deleteMemo(key){
 function detachMemo(key){
   if(!_memos[key]) return;
   _memos[key].floating = true;
-  // 처음 떼면 화면 우측 적당한 위치에 둠
+  // 처음 떼면 현재 보고 있는 화면에 나타나게 (스크롤 위치 반영)
   if(!_memos[key].pos){
-    const offsetX = 80 + Math.random()*60;
-    const offsetY = 120 + (Object.values(_memos).filter(m=>m.floating).length * 30);
+    const stackOffset = Object.values(_memos).filter(m=>m.floating).length * 30;
     _memos[key].pos = {
-      x: window.innerWidth - 220 - offsetX,
-      y: 120 + offsetY
+      x: window.scrollX + window.innerWidth - 220 - 80 - Math.random()*60,
+      y: window.scrollY + 120 + stackOffset
     };
   }
   refreshQRow(key);
@@ -741,8 +741,9 @@ function makeDraggable(el, key){
 
   function onMove(e){
     if(!dragging) return;
-    const x = Math.max(0, Math.min(window.innerWidth - 50, e.clientX - offsetX));
-    const y = Math.max(0, Math.min(window.innerHeight - 30, e.clientY - offsetY));
+    // pageX/pageY = 페이지 좌표 (스크롤 포함) — 종이에 진짜로 붙음
+    const x = Math.max(0, e.pageX - offsetX);
+    const y = Math.max(0, e.pageY - offsetY);
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     if(_memos[key]) _memos[key].pos = {x, y};
