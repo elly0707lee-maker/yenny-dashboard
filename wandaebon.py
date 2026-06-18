@@ -444,9 +444,11 @@ body{
     </div>
   </div>
   <div style="display:flex;gap:6px;align-items:center;">
+    <span id="save-status" style="font-size:11px;color:var(--text-faint);margin-right:8px;">대기 중</span>
     <input type="file" id="file-input" accept=".docx">
     <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">📎 docx 업로드</button>
     <button class="btn" onclick="printPage()" title="인쇄 (Cmd+P)">🖨️ 인쇄</button>
+    <button class="btn" onclick="clearAll()" title="다 비우기 (DB도 청소)" style="color:#d63031;border-color:#fab1a0;">🗑 초기화</button>
   </div>
 </div>
 
@@ -483,15 +485,111 @@ const fileInput = document.getElementById('file-input');
 const contentEl = document.getElementById('content');
 const metaTitleEl = document.getElementById('meta-title');
 
-// 메모는 일단 메모리만 — { "1-Q0": {text, color}, ... }
+// 메모는 일단 메모리만 — { "1-Q0": {text, color, floating, pos}, ... }
 let _memos = {};
 // Q 텍스트 사용자 편집 — { "1-Q0": "수정된 HTML", ... }
 let _qEdits = {};
+// docx 파싱 결과 (저장/복구용)
+let _docData = null;
+
+// ── 자동 저장 (디바운스) ──────────────────────────
+let _saveTimer = null;
+function scheduleSave(){
+  if(_saveTimer) clearTimeout(_saveTimer);
+  setSaveStatus('편집 중...');
+  _saveTimer = setTimeout(saveNow, 800);
+}
+
+async function saveNow(){
+  const state = {
+    docData: _docData,
+    memos: _memos,
+    qEdits: _qEdits,
+    savedAt: new Date().toISOString(),
+  };
+  setSaveStatus('💾 저장 중...');
+  try {
+    const res = await fetch('/api/post/onair', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        content: JSON.stringify(state),
+        date: new Date().toISOString().slice(0,10)
+      })
+    });
+    if(res.ok){
+      const t = new Date();
+      setSaveStatus(`✓ ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')} 저장됨`);
+    } else {
+      setSaveStatus(`⚠️ 저장 실패 (${res.status})`);
+    }
+  } catch(e) {
+    setSaveStatus('⚠️ 저장 실패');
+  }
+}
+
+function setSaveStatus(text){
+  const el = document.getElementById('save-status');
+  if(el) el.textContent = text;
+}
+
+// ── 복구 (페이지 진입 시) ──────────────────────────
+async function loadState(){
+  try {
+    const res = await fetch('/api/post/onair');
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!data || !data.content) return;
+    let state;
+    try { state = JSON.parse(data.content); } catch { return; }
+    if(state.docData) _docData = state.docData;
+    if(state.memos) _memos = state.memos;
+    if(state.qEdits) _qEdits = state.qEdits;
+    if(_docData){
+      renderWandaebon(_docData);
+      // 떠있던 메모 다시 띄움
+      Object.keys(_memos).forEach(k => {
+        if(_memos[k] && _memos[k].floating) renderFloatingMemo(k);
+      });
+      setSaveStatus('✓ 복구됨');
+    }
+  } catch(e){
+    console.error('load failed', e);
+  }
+}
+
+// ── 초기화 (DB도 다 비움) ──────────────────────────
+async function clearAll(){
+  if(!confirm('완대본 페이지를 전부 비울까요?\n메모/편집 다 사라지고 되돌릴 수 없어요.')) return;
+  _docData = null;
+  _memos = {};
+  _qEdits = {};
+  document.querySelectorAll('.floating-memo').forEach(el => el.remove());
+  metaTitleEl.textContent = '완대본 업로드 대기 중';
+  contentEl.innerHTML = `
+    <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+      <div class="upload-icon">📄</div>
+      <div style="font-size:14px;font-weight:600;">완대본 docx 파일을 올려주세요</div>
+      <div class="upload-hint">자동으로 코너 / Q / CG 분리해서 펼쳐드릴게요</div>
+    </div>`;
+  setSaveStatus('💾 초기화 중...');
+  try {
+    await fetch('/api/post/onair', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
+    });
+    setSaveStatus('✓ 초기화 완료');
+  } catch(e){
+    setSaveStatus('⚠️ 초기화 실패');
+  }
+}
 
 // ── 텍스트 도구 ───────────────────────────────────────
 function applyFmt(cmd, value){
   // 도구 버튼은 onmousedown="event.preventDefault()" 로 contenteditable 포커스 유지
   document.execCommand(cmd, false, value || null);
+  scheduleSave();
 }
 
 // 단축키: Cmd/Ctrl + Shift + 숫자
@@ -519,6 +617,7 @@ document.addEventListener('keydown', (e) => {
 
 function saveQEdit(key, html){
   _qEdits[key] = html;
+  scheduleSave();
 }
 
 fileInput.addEventListener('change', async (e) => {
@@ -540,6 +639,8 @@ fileInput.addEventListener('change', async (e) => {
       return;
     }
     renderWandaebon(data);
+    _docData = data;  // 저장용 캐시
+    scheduleSave();
   } catch(err) {
     contentEl.innerHTML = `<div class="err">오류: ${err.message}</div>`;
   }
@@ -637,16 +738,21 @@ function addMemo(key){
     const ta = document.querySelector(`#q-${key} .memo-text`);
     if(ta) ta.focus();
   }, 50);
+  scheduleSave();
 }
 
 function updateMemo(key, val){
   if(_memos[key]) _memos[key].text = val;
+  scheduleSave();
 }
 
 function setMemoColor(key, color){
   if(_memos[key]){
     _memos[key].color = color;
     refreshQRow(key);
+    // 떠있는 메모면 거기도 색 갱신
+    if(_memos[key].floating) renderFloatingMemo(key);
+    scheduleSave();
   }
 }
 
@@ -655,6 +761,7 @@ function deleteMemo(key){
     delete _memos[key];
     removeFloatingMemo(key);
     refreshQRow(key);
+    scheduleSave();
   }
 }
 
@@ -672,6 +779,7 @@ function detachMemo(key){
   }
   refreshQRow(key);
   renderFloatingMemo(key);
+  scheduleSave();
 }
 
 function reattachMemo(key){
@@ -679,6 +787,7 @@ function reattachMemo(key){
   _memos[key].floating = false;
   removeFloatingMemo(key);
   refreshQRow(key);
+  scheduleSave();
 }
 
 function renderFloatingMemo(key){
@@ -712,6 +821,7 @@ function renderFloatingMemo(key){
 function updateFloatingMemo(key, html){
   // 입력 시 _memos만 갱신, DOM은 그대로 (커서 위치 유지)
   if(_memos[key]) _memos[key].text = html;
+  scheduleSave();
 }
 
 function removeFloatingMemo(key){
@@ -753,6 +863,7 @@ function makeDraggable(el, key){
     if(dragging){
       dragging = false;
       el.classList.remove('dragging');
+      scheduleSave();  // 드래그 끝나면 위치 저장
     }
   }
 
@@ -814,6 +925,9 @@ function refreshQRow(key){
     memoCell.innerHTML = `<div class="memo-empty" onclick="addMemo('${key}')">+ 메모 추가</div>`;
   }
 }
+// 페이지 로드 시 자동 복구
+window.addEventListener('DOMContentLoaded', loadState);
+
 </script>
 </body>
 </html>"""
