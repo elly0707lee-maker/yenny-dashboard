@@ -1627,7 +1627,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 완대본 메모</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
-        <a href="/onair" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">📝 완대본 →</a>
+        <a href="/onair" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🎙️ ON AIR →</a>
       </div>
     </div>
   </div>
