@@ -1019,6 +1019,28 @@ def db_cleanup_all():
     return jsonify({"cleanup_done": True, "results": results})
 
 
+@app.route("/debug/closing")
+@requires_auth
+def debug_closing():
+    """마감일지 마지막 entry들 확인 — 언제 멈췄는지 진단용."""
+    conn = get_db()
+    try:
+        rows = list(conn.run(
+            "SELECT id, date, created_at, LENGTH(content) "
+            "FROM posts WHERE type='closing' ORDER BY id DESC LIMIT 15"
+        ))
+    finally:
+        conn.close()
+    return jsonify({
+        "type": "closing",
+        "total_recent_shown": len(rows),
+        "entries": [
+            {"id": r[0], "date": r[1], "created_at": str(r[2]), "content_len": r[3]}
+            for r in rows
+        ]
+    })
+
+
 @app.route("/admin/db-cleanup-mindmap", methods=["GET", "POST"])
 @requires_auth
 def db_cleanup_mindmap():
