@@ -420,7 +420,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -430,7 +430,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -473,7 +473,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
