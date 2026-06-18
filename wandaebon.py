@@ -481,6 +481,25 @@ body{
 </div>
 
 <script>
+// ── fetch wrapper — 모든 요청에 X-API-Secret + credentials 자동 주입 ──
+(function(){
+  const _origFetch = window.fetch.bind(window);
+  const _SECRET = window._API_SECRET || '';
+  window.fetch = function(input, init){
+    init = init || {};
+    init.headers = init.headers || {};
+    if(_SECRET){
+      if(init.headers instanceof Headers){
+        if(!init.headers.has('X-API-Secret')) init.headers.set('X-API-Secret', _SECRET);
+      } else if(!init.headers['X-API-Secret']){
+        init.headers['X-API-Secret'] = _SECRET;
+      }
+    }
+    if(!init.credentials) init.credentials = 'include';
+    return _origFetch(input, init);
+  };
+})();
+
 const fileInput = document.getElementById('file-input');
 const contentEl = document.getElementById('content');
 const metaTitleEl = document.getElementById('meta-title');
@@ -931,3 +950,4 @@ window.addEventListener('DOMContentLoaded', loadState);
 </script>
 </body>
 </html>"""
+
