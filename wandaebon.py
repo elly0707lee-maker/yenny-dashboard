@@ -364,20 +364,20 @@ body{
 
 <div class="toolbar">
   <span class="toolbar-label">텍스트 도구</span>
-  <button class="tool-btn red" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#d63031')" title="빨강">A</button>
-  <button class="tool-btn blue" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#0984e3')" title="파랑">A</button>
-  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#1a1d23')" title="검정">A</button>
+  <button class="tool-btn red" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#d63031')" title="빨강 (⌘⇧1)">A</button>
+  <button class="tool-btn blue" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#0984e3')" title="파랑 (⌘⇧2)">A</button>
+  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#1a1d23')" title="검정 (⌘⇧3)">A</button>
   <div class="tool-divider"></div>
-  <button class="tool-btn hl" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#fff59d')" title="노랑 하이라이트">■</button>
-  <button class="tool-btn" style="background:#ffcdd2;" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#ffcdd2')" title="분홍 하이라이트">■</button>
-  <button class="tool-btn" style="background:#c8e6c9;" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#c8e6c9')" title="민트 하이라이트">■</button>
+  <button class="tool-btn hl" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#fff59d')" title="노랑 하이라이트 (⌘⇧4)">■</button>
+  <button class="tool-btn" style="background:#ffcdd2;" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#ffcdd2')" title="분홍 하이라이트 (⌘⇧5)">■</button>
+  <button class="tool-btn" style="background:#c8e6c9;" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#c8e6c9')" title="민트 하이라이트 (⌘⇧6)">■</button>
   <div class="tool-divider"></div>
-  <button class="tool-btn b" onmousedown="event.preventDefault()" onclick="applyFmt('bold')" title="굵게">B</button>
-  <button class="tool-btn i" onmousedown="event.preventDefault()" onclick="applyFmt('italic')" title="기울임">I</button>
-  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('underline')" title="밑줄"><u>U</u></button>
+  <button class="tool-btn b" onmousedown="event.preventDefault()" onclick="applyFmt('bold')" title="굵게 (⌘B)">B</button>
+  <button class="tool-btn i" onmousedown="event.preventDefault()" onclick="applyFmt('italic')" title="기울임 (⌘I)">I</button>
+  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('underline')" title="밑줄 (⌘U)"><u>U</u></button>
   <div class="tool-divider"></div>
-  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('removeFormat')" title="서식 지우기" style="font-size:11px;">✖</button>
-  <span style="font-size:10px;color:var(--text-faint);margin-left:auto;">💡 텍스트 선택 후 도구 클릭</span>
+  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('removeFormat')" title="서식 지우기 (⌘⇧0)" style="font-size:11px;">✖</button>
+  <span style="font-size:10px;color:var(--text-faint);margin-left:auto;">💡 선택 후 클릭 · 또는 ⌘⇧1~6</span>
 </div>
 
 <div class="container">
@@ -405,6 +405,29 @@ function applyFmt(cmd, value){
   // 도구 버튼은 onmousedown="event.preventDefault()" 로 contenteditable 포커스 유지
   document.execCommand(cmd, false, value || null);
 }
+
+// 단축키: Cmd/Ctrl + Shift + 숫자
+// B/I/U는 브라우저 기본 단축키 (Cmd+B, Cmd+I, Cmd+U)
+document.addEventListener('keydown', (e) => {
+  const active = document.activeElement;
+  if(!active || !active.isContentEditable) return;
+  const isCmd = e.metaKey || e.ctrlKey;
+  if(!isCmd || !e.shiftKey) return;
+  const map = {
+    '1': ['foreColor', '#d63031'],     // 빨강
+    '2': ['foreColor', '#0984e3'],     // 파랑
+    '3': ['foreColor', '#1a1d23'],     // 검정 (원복)
+    '4': ['hiliteColor', '#fff59d'],   // 노랑 하이라이트
+    '5': ['hiliteColor', '#ffcdd2'],   // 분홍 하이라이트
+    '6': ['hiliteColor', '#c8e6c9'],   // 민트 하이라이트
+    '0': ['removeFormat', null],       // 서식 지우기
+  };
+  const hit = map[e.key];
+  if(hit){
+    e.preventDefault();
+    applyFmt(hit[0], hit[1]);
+  }
+});
 
 function saveQEdit(key, html){
   _qEdits[key] = html;
