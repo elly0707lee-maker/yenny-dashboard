@@ -212,6 +212,25 @@ body{
   border-bottom:1px solid var(--border);padding:10px 18px;
   display:flex;justify-content:space-between;align-items:center;
 }
+.toolbar{
+  position:sticky;top:55px;z-index:49;background:#fffdf6;
+  border-bottom:1px solid var(--border);padding:6px 18px;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+.toolbar-label{font-size:10px;color:var(--text-faint);margin-right:4px;letter-spacing:.04em;}
+.tool-btn{
+  background:var(--card);border:1px solid var(--border);border-radius:5px;
+  width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:13px;font-family:inherit;padding:0;
+  transition:all .1s;
+}
+.tool-btn:hover{background:#f5f0e0;border-color:var(--accent);}
+.tool-btn.red{color:#d63031;font-weight:700;}
+.tool-btn.blue{color:#0984e3;font-weight:700;}
+.tool-btn.hl{background:#fff59d;}
+.tool-btn.b{font-weight:700;}
+.tool-btn.i{font-style:italic;}
+.tool-divider{width:1px;height:18px;background:var(--border);margin:0 4px;}
 .topbar-left{display:flex;align-items:center;gap:14px;}
 .brand{font-weight:700;font-size:15px;}
 .brand a{color:var(--text);text-decoration:none;}
@@ -256,7 +275,16 @@ body{
   border-radius:6px;font-weight:600;
 }
 .q-speaker{font-size:11px;color:var(--text-dim);}
-.q-text{font-size:13px;line-height:1.65;margin-bottom:8px;color:var(--text);white-space:pre-wrap;}
+.q-text{
+  font-size:13px;line-height:1.65;margin-bottom:8px;color:var(--text);white-space:pre-wrap;
+  padding:4px 6px;border-radius:4px;outline:none;min-height:1.5em;
+  border:1px dashed transparent;transition:border-color .12s;
+}
+.q-text[contenteditable=true]:hover{border-color:var(--border);}
+.q-text[contenteditable=true]:focus{border-color:var(--accent);background:#fffef8;}
+.q-text[contenteditable=true]:empty:before{
+  content:"질문 입력...";color:#aaa;
+}
 .cg-block{
   border-left:2px solid var(--border);padding:4px 0 4px 10px;margin-top:6px;
 }
@@ -291,9 +319,13 @@ body{
 .memo-color-dot.active{border-color:#000;}
 .memo-detach{cursor:pointer;font-size:13px;}
 .memo-text{
-  background:transparent;border:0;outline:none;resize:none;
+  background:transparent;border:0;outline:none;
   font-family:inherit;font-size:11.5px;line-height:1.5;
   color:var(--amber-text-dark);min-height:50px;flex:1;width:100%;
+  white-space:pre-wrap;word-break:break-word;
+}
+.memo-text[contenteditable=true]:empty:before{
+  content:"메모 입력...";color:rgba(0,0,0,0.3);
 }
 .memo-box.color-pink{background:var(--pink-bg);}
 .memo-box.color-pink .memo-header{color:var(--pink-text);}
@@ -330,6 +362,24 @@ body{
   </div>
 </div>
 
+<div class="toolbar">
+  <span class="toolbar-label">텍스트 도구</span>
+  <button class="tool-btn red" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#d63031')" title="빨강">A</button>
+  <button class="tool-btn blue" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#0984e3')" title="파랑">A</button>
+  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('foreColor','#1a1d23')" title="검정">A</button>
+  <div class="tool-divider"></div>
+  <button class="tool-btn hl" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#fff59d')" title="노랑 하이라이트">■</button>
+  <button class="tool-btn" style="background:#ffcdd2;" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#ffcdd2')" title="분홍 하이라이트">■</button>
+  <button class="tool-btn" style="background:#c8e6c9;" onmousedown="event.preventDefault()" onclick="applyFmt('hiliteColor','#c8e6c9')" title="민트 하이라이트">■</button>
+  <div class="tool-divider"></div>
+  <button class="tool-btn b" onmousedown="event.preventDefault()" onclick="applyFmt('bold')" title="굵게">B</button>
+  <button class="tool-btn i" onmousedown="event.preventDefault()" onclick="applyFmt('italic')" title="기울임">I</button>
+  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('underline')" title="밑줄"><u>U</u></button>
+  <div class="tool-divider"></div>
+  <button class="tool-btn" onmousedown="event.preventDefault()" onclick="applyFmt('removeFormat')" title="서식 지우기" style="font-size:11px;">✖</button>
+  <span style="font-size:10px;color:var(--text-faint);margin-left:auto;">💡 텍스트 선택 후 도구 클릭</span>
+</div>
+
 <div class="container">
   <div id="content">
     <div class="upload-zone" onclick="document.getElementById('file-input').click()">
@@ -347,6 +397,18 @@ const metaTitleEl = document.getElementById('meta-title');
 
 // 메모는 일단 메모리만 — { "1-Q0": {text, color}, ... }
 let _memos = {};
+// Q 텍스트 사용자 편집 — { "1-Q0": "수정된 HTML", ... }
+let _qEdits = {};
+
+// ── 텍스트 도구 ───────────────────────────────────────
+function applyFmt(cmd, value){
+  // 도구 버튼은 onmousedown="event.preventDefault()" 로 contenteditable 포커스 유지
+  document.execCommand(cmd, false, value || null);
+}
+
+function saveQEdit(key, html){
+  _qEdits[key] = html;
+}
 
 fileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -403,6 +465,8 @@ function renderWandaebon(data){
 
 function renderQuestionRow(corner, q, memoKey){
   const memo = _memos[memoKey];
+  // 사용자 편집된 Q text 있으면 그걸로
+  const qHtml = _qEdits[memoKey] !== undefined ? _qEdits[memoKey] : esc(q.text);
   const cgsHtml = (q.cgs && q.cgs.length) ? `
     <div class="cg-block">
       <div class="cg-label">CG · 수퍼</div>
@@ -420,7 +484,7 @@ function renderQuestionRow(corner, q, memoKey){
           <span class="memo-detach" onclick="deleteMemo('${memoKey}')" title="삭제">✕</span>
         </div>
       </div>
-      <textarea class="memo-text" oninput="updateMemo('${memoKey}', this.value)" placeholder="메모 입력...">${esc(memo.text||'')}</textarea>
+      <div class="memo-text" contenteditable="true" oninput="updateMemo('${memoKey}', this.innerHTML)">${memo.text||''}</div>
     </div>` : `
     <div class="memo-empty" onclick="addMemo('${memoKey}')">+ 메모 추가</div>`;
 
@@ -431,7 +495,7 @@ function renderQuestionRow(corner, q, memoKey){
           <span class="q-tag">${esc(q.qnum)}</span>
           <span class="q-speaker">${esc(q.speaker)}${q.target ? ' → ' + esc(q.target) : ''}</span>
         </div>
-        <div class="q-text">${esc(q.text)}</div>
+        <div class="q-text" contenteditable="true" oninput="saveQEdit('${memoKey}', this.innerHTML)">${qHtml}</div>
         ${cgsHtml}
       </div>
       <div>${memoHtml}</div>
@@ -482,7 +546,7 @@ function refreshQRow(key){
             <span class="memo-detach" onclick="deleteMemo('${key}')" title="삭제">✕</span>
           </div>
         </div>
-        <textarea class="memo-text" oninput="updateMemo('${key}', this.value)" placeholder="메모 입력...">${esc(memo.text||'')}</textarea>
+        <div class="memo-text" contenteditable="true" oninput="updateMemo('${key}', this.innerHTML)">${memo.text||''}</div>
       </div>`;
   } else {
     memoCell.innerHTML = `<div class="memo-empty" onclick="addMemo('${key}')">+ 메모 추가</div>`;
