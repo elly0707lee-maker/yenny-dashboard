@@ -339,6 +339,92 @@ body{
   color:var(--text-faint);font-size:11px;cursor:pointer;
 }
 .memo-empty:hover{border-color:var(--accent);color:var(--accent);background:#fdf8eb;}
+.memo-detached-placeholder{
+  border:1.5px dashed var(--border);border-radius:8px;padding:10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:var(--text-faint);font-size:10px;cursor:pointer;opacity:0.7;
+  line-height:1.5;text-align:center;
+}
+.memo-detached-placeholder:hover{border-color:var(--accent);opacity:1;}
+.floating-memo{
+  position:fixed;width:180px;border-radius:8px;
+  padding:8px 10px;box-shadow:0 3px 12px rgba(0,0,0,0.15);
+  cursor:move;z-index:100;background:var(--amber-bg);
+  transform:rotate(-2deg);transition:transform .1s ease;
+}
+.floating-memo.color-pink{background:var(--pink-bg);}
+.floating-memo.color-pink .memo-header{color:var(--pink-text);}
+.floating-memo.color-pink .memo-text{color:var(--pink-text-dark);}
+.floating-memo.color-teal{background:var(--teal-bg);}
+.floating-memo.color-teal .memo-header{color:var(--teal-text);}
+.floating-memo.color-teal .memo-text{color:var(--teal-text-dark);}
+.floating-memo .memo-header{color:var(--amber-text);}
+.floating-memo .memo-text{color:var(--amber-text-dark);}
+.floating-memo:active{transform:rotate(0deg) scale(1.02);box-shadow:0 5px 20px rgba(0,0,0,0.2);}
+.floating-memo.dragging{transform:rotate(0deg) scale(1.05);}
+
+/* ── 인쇄용 ─────────────────────────────────────── */
+@media print {
+  @page { margin: 12mm 10mm; }
+  body { background: white !important; font-size: 11pt; }
+  /* 인터랙티브 도구 다 숨김 */
+  .topbar, .toolbar { display: none !important; }
+  .memo-empty,
+  .memo-detached-placeholder { display: none !important; }
+  .memo-color-dot,
+  .memo-detach { display: none !important; }
+  .floating-memo { display: none !important; }
+  /* 컨테이너 풀폭 */
+  .container { padding: 0; max-width: none; }
+  /* 코너 카드 — 검정 테두리만, 그림자 없음 */
+  .corner-card {
+    border: 1px solid #999;
+    border-left: 3px solid #185FA5;
+    box-shadow: none;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .corner-header { 
+    page-break-after: avoid;
+    break-after: avoid;
+    font-size: 12pt;
+  }
+  /* Q-row — 한 질문 단위로 페이지 깨지지 않게 */
+  .q-row {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    grid-template-columns: minmax(0,1fr) 180px;
+  }
+  .q-text {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0;
+    font-size: 11pt;
+  }
+  /* 메모 — 인쇄 시 깔끔하게 */
+  .memo-box {
+    border: 1px solid #aaa;
+    box-shadow: none;
+    padding: 6px 8px;
+  }
+  .memo-text {
+    font-size: 9.5pt;
+    min-height: auto;
+  }
+  /* 배경색·하이라이트 그대로 인쇄 */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+  /* 텍스트 도구로 적용한 색깔도 그대로 */
+  .q-text *, .memo-text * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
 .empty-state{text-align:center;padding:60px 20px;color:var(--text-dim);}
 .loading{text-align:center;padding:40px 20px;color:var(--text-dim);}
 .err{
@@ -359,6 +445,7 @@ body{
   <div style="display:flex;gap:6px;align-items:center;">
     <input type="file" id="file-input" accept=".docx">
     <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">📎 docx 업로드</button>
+    <button class="btn" onclick="printPage()" title="인쇄 (Cmd+P)">🖨️ 인쇄</button>
   </div>
 </div>
 
@@ -496,20 +583,20 @@ function renderQuestionRow(corner, q, memoKey){
       <div class="cg-list">${q.cgs.map(c=>'<div>'+esc(c)+'</div>').join('')}</div>
     </div>` : '';
 
-  const memoHtml = memo ? `
-    <div class="memo-box ${memo.color ? 'color-'+memo.color : ''}" data-key="${memoKey}">
-      <div class="memo-header">
-        <span>📝 메모</span>
-        <div class="memo-header-actions">
-          <span class="memo-color-dot ${(!memo.color||memo.color==='amber')?'active':''}" style="background:#FAEEDA;border:1px solid #BA7517;" onclick="setMemoColor('${memoKey}', 'amber')" title="amber"></span>
-          <span class="memo-color-dot ${memo.color==='pink'?'active':''}" style="background:#FBEAF0;border:1px solid #D4537E;" onclick="setMemoColor('${memoKey}', 'pink')" title="pink"></span>
-          <span class="memo-color-dot ${memo.color==='teal'?'active':''}" style="background:#E1F5EE;border:1px solid #1D9E75;" onclick="setMemoColor('${memoKey}', 'teal')" title="teal"></span>
-          <span class="memo-detach" onclick="deleteMemo('${memoKey}')" title="삭제">✕</span>
-        </div>
-      </div>
-      <div class="memo-text" contenteditable="true" oninput="updateMemo('${memoKey}', this.innerHTML)">${memo.text||''}</div>
-    </div>` : `
-    <div class="memo-empty" onclick="addMemo('${memoKey}')">+ 메모 추가</div>`;
+  let memoHtml;
+  if(memo && memo.floating){
+    // 떠다님 — 자리엔 placeholder만
+    memoHtml = `
+      <div class="memo-detached-placeholder" onclick="reattachMemo('${memoKey}')" title="다시 인라인으로 붙이기">
+        ↗ 스티커로 떠있음<br/>
+        <span style="font-size:9px;">(클릭해서 다시 붙이기)</span>
+      </div>`;
+  } else if(memo){
+    // 인라인 모드
+    memoHtml = renderInlineMemo(memoKey, memo);
+  } else {
+    memoHtml = `<div class="memo-empty" onclick="addMemo('${memoKey}')">+ 메모 추가</div>`;
+  }
 
   return `
     <div class="q-row" id="q-${memoKey}">
@@ -522,6 +609,23 @@ function renderQuestionRow(corner, q, memoKey){
         ${cgsHtml}
       </div>
       <div>${memoHtml}</div>
+    </div>`;
+}
+
+function renderInlineMemo(key, memo){
+  return `
+    <div class="memo-box ${memo.color ? 'color-'+memo.color : ''}" data-key="${key}">
+      <div class="memo-header">
+        <span>📝 메모</span>
+        <div class="memo-header-actions">
+          <span class="memo-color-dot ${(!memo.color||memo.color==='amber')?'active':''}" style="background:#FAEEDA;border:1px solid #BA7517;" onclick="setMemoColor('${key}', 'amber')" title="amber"></span>
+          <span class="memo-color-dot ${memo.color==='pink'?'active':''}" style="background:#FBEAF0;border:1px solid #D4537E;" onclick="setMemoColor('${key}', 'pink')" title="pink"></span>
+          <span class="memo-color-dot ${memo.color==='teal'?'active':''}" style="background:#E1F5EE;border:1px solid #1D9E75;" onclick="setMemoColor('${key}', 'teal')" title="teal"></span>
+          <span class="memo-detach" onclick="detachMemo('${key}')" title="떼어서 떠다니게">↗</span>
+          <span class="memo-detach" onclick="deleteMemo('${key}')" title="삭제">✕</span>
+        </div>
+      </div>
+      <div class="memo-text" contenteditable="true" oninput="updateMemo('${key}', this.innerHTML)">${memo.text||''}</div>
     </div>`;
 }
 
@@ -548,29 +652,163 @@ function setMemoColor(key, color){
 function deleteMemo(key){
   if(confirm('이 메모 삭제할까요?')){
     delete _memos[key];
+    removeFloatingMemo(key);
     refreshQRow(key);
   }
 }
+
+// ── 떼기 / 다시 붙이기 / 드래그 ──────────────────
+function detachMemo(key){
+  if(!_memos[key]) return;
+  _memos[key].floating = true;
+  // 처음 떼면 화면 우측 적당한 위치에 둠
+  if(!_memos[key].pos){
+    const offsetX = 80 + Math.random()*60;
+    const offsetY = 120 + (Object.values(_memos).filter(m=>m.floating).length * 30);
+    _memos[key].pos = {
+      x: window.innerWidth - 220 - offsetX,
+      y: 120 + offsetY
+    };
+  }
+  refreshQRow(key);
+  renderFloatingMemo(key);
+}
+
+function reattachMemo(key){
+  if(!_memos[key]) return;
+  _memos[key].floating = false;
+  removeFloatingMemo(key);
+  refreshQRow(key);
+}
+
+function renderFloatingMemo(key){
+  const memo = _memos[key];
+  if(!memo) return;
+  let el = document.getElementById(`float-${key}`);
+  if(!el){
+    el = document.createElement('div');
+    el.id = `float-${key}`;
+    document.body.appendChild(el);
+    makeDraggable(el, key);
+  }
+  el.className = `floating-memo ${memo.color ? 'color-'+memo.color : ''}`;
+  el.style.left = memo.pos.x + 'px';
+  el.style.top = memo.pos.y + 'px';
+  el.innerHTML = `
+    <div class="memo-header" data-drag-handle="true">
+      <span>📌 ${esc(key)}</span>
+      <div class="memo-header-actions">
+        <span class="memo-color-dot ${(!memo.color||memo.color==='amber')?'active':''}" style="background:#FAEEDA;border:1px solid #BA7517;" onclick="setMemoColor('${key}', 'amber')" title="amber"></span>
+        <span class="memo-color-dot ${memo.color==='pink'?'active':''}" style="background:#FBEAF0;border:1px solid #D4537E;" onclick="setMemoColor('${key}', 'pink')" title="pink"></span>
+        <span class="memo-color-dot ${memo.color==='teal'?'active':''}" style="background:#E1F5EE;border:1px solid #1D9E75;" onclick="setMemoColor('${key}', 'teal')" title="teal"></span>
+        <span class="memo-detach" onclick="reattachMemo('${key}')" title="다시 인라인으로">↘</span>
+        <span class="memo-detach" onclick="deleteMemo('${key}')" title="삭제">✕</span>
+      </div>
+    </div>
+    <div class="memo-text" contenteditable="true" oninput="updateFloatingMemo('${key}', this.innerHTML)">${memo.text||''}</div>
+  `;
+}
+
+function updateFloatingMemo(key, html){
+  // 입력 시 _memos만 갱신, DOM은 그대로 (커서 위치 유지)
+  if(_memos[key]) _memos[key].text = html;
+}
+
+function removeFloatingMemo(key){
+  const el = document.getElementById(`float-${key}`);
+  if(el) el.remove();
+}
+
+function makeDraggable(el, key){
+  let dragging = false;
+  let offsetX = 0, offsetY = 0;
+
+  el.addEventListener('mousedown', (e) => {
+    // 텍스트 영역, 색깔 점, 버튼 클릭이면 드래그 안 함
+    const target = e.target;
+    if(target.classList.contains('memo-text')) return;
+    if(target.classList.contains('memo-color-dot')) return;
+    if(target.classList.contains('memo-detach')) return;
+    if(target.tagName === 'DIV' && target.contentEditable === 'true') return;
+    
+    dragging = true;
+    el.classList.add('dragging');
+    const rect = el.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    e.preventDefault();
+  });
+
+  function onMove(e){
+    if(!dragging) return;
+    const x = Math.max(0, Math.min(window.innerWidth - 50, e.clientX - offsetX));
+    const y = Math.max(0, Math.min(window.innerHeight - 30, e.clientY - offsetY));
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    if(_memos[key]) _memos[key].pos = {x, y};
+  }
+
+  function onUp(){
+    if(dragging){
+      dragging = false;
+      el.classList.remove('dragging');
+    }
+  }
+
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ── 인쇄 ──────────────────────────────────────────
+function printPage(){
+  // 떠있는 메모 키 기억해뒀다가 인쇄 후 복원
+  const floatingKeys = Object.keys(_memos).filter(k => _memos[k] && _memos[k].floating);
+  
+  // 임시로 다 인라인으로
+  floatingKeys.forEach(k => {
+    _memos[k].floating = false;
+    removeFloatingMemo(k);
+    refreshQRow(k);
+  });
+  
+  // 인쇄 끝나면 다시 떠다니게 복원
+  const restore = () => {
+    floatingKeys.forEach(k => {
+      if(_memos[k]){
+        _memos[k].floating = true;
+        renderFloatingMemo(k);
+        refreshQRow(k);
+      }
+    });
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  
+  // DOM 업데이트 끝난 다음 인쇄 다이얼로그
+  setTimeout(() => window.print(), 100);
+}
+
+// Cmd+P / Ctrl+P 가로채기 — 우리 printPage() 호출
+document.addEventListener('keydown', (e) => {
+  if((e.metaKey || e.ctrlKey) && e.key === 'p' && !e.shiftKey){
+    e.preventDefault();
+    printPage();
+  }
+});
 
 function refreshQRow(key){
   const row = document.getElementById(`q-${key}`);
   if(!row) return;
   const memoCell = row.lastElementChild;
   const memo = _memos[key];
-  if(memo){
+  if(memo && memo.floating){
     memoCell.innerHTML = `
-      <div class="memo-box ${memo.color ? 'color-'+memo.color : ''}">
-        <div class="memo-header">
-          <span>📝 메모</span>
-          <div class="memo-header-actions">
-            <span class="memo-color-dot ${(!memo.color||memo.color==='amber')?'active':''}" style="background:#FAEEDA;border:1px solid #BA7517;" onclick="setMemoColor('${key}', 'amber')" title="amber"></span>
-            <span class="memo-color-dot ${memo.color==='pink'?'active':''}" style="background:#FBEAF0;border:1px solid #D4537E;" onclick="setMemoColor('${key}', 'pink')" title="pink"></span>
-            <span class="memo-color-dot ${memo.color==='teal'?'active':''}" style="background:#E1F5EE;border:1px solid #1D9E75;" onclick="setMemoColor('${key}', 'teal')" title="teal"></span>
-            <span class="memo-detach" onclick="deleteMemo('${key}')" title="삭제">✕</span>
-          </div>
-        </div>
-        <div class="memo-text" contenteditable="true" oninput="updateMemo('${key}', this.innerHTML)">${memo.text||''}</div>
+      <div class="memo-detached-placeholder" onclick="reattachMemo('${key}')" title="다시 인라인으로 붙이기">
+        ↗ 스티커로 떠있음<br/>
+        <span style="font-size:9px;">(클릭해서 다시 붙이기)</span>
       </div>`;
+  } else if(memo){
+    memoCell.innerHTML = renderInlineMemo(key, memo);
   } else {
     memoCell.innerHTML = `<div class="memo-empty" onclick="addMemo('${key}')">+ 메모 추가</div>`;
   }
