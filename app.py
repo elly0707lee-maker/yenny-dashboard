@@ -283,6 +283,7 @@ POST_TYPE_KEEP = {
     "wdaebon": 3,    # 보통 텍스트지만 보수적으로 3개
     "checkpoint": 1, # 사용자가 매일 갱신, 최신만 필요
     "closing": 1,    # 마감일지 — 봇이 매일 새로, 최신만 필요
+    "onair": 1,      # 완대본 페이지 상태 (메모 + Q편집 + docx 파싱결과 JSON)
 }
 
 def save_post(t, content, date):
@@ -485,8 +486,8 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        # mindmap/checkpoint/closing은 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing"):
+        # mindmap/checkpoint/closing/onair은 빈 콘텐츠 저장 허용 (초기화용)
+        if pt not in ("mindmap", "checkpoint", "closing", "onair"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
