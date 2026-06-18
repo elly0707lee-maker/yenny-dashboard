@@ -178,7 +178,7 @@ def get_wandaebon_html() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>완대본 — Yenny</title>
+<title>ON AIR — Yenny</title>
 <link rel="manifest" href="/manifest.json">
 <style>
 :root{
@@ -320,8 +320,8 @@ body{
   <div class="topbar-left">
     <div class="brand"><a href="/">⬅ Yenny</a></div>
     <div class="meta-block">
-      <div class="meta-label">완대본</div>
-      <div class="meta-title" id="meta-title">파일 업로드 대기 중</div>
+      <div class="meta-label">🎙️ ON AIR</div>
+      <div class="meta-title" id="meta-title">완대본 업로드 대기 중</div>
     </div>
   </div>
   <div style="display:flex;gap:6px;align-items:center;">
@@ -355,7 +355,7 @@ fileInput.addEventListener('change', async (e) => {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const res = await fetch('/wandaebon/upload', {method:'POST', body: fd});
+    const res = await fetch('/onair/upload', {method:'POST', body: fd});
     if(!res.ok){
       const t = await res.text();
       contentEl.innerHTML = `<div class="err">업로드 실패 HTTP ${res.status}: ${t.slice(0,200)}</div>`;
