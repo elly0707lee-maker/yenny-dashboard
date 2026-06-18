@@ -6,6 +6,7 @@ from functools import wraps
 import anthropic
 import pg8000.native
 from mindmap import get_mindmap_html
+from wandaebon import get_wandaebon_html, parse_wandaebon_docx
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -280,6 +281,8 @@ def get_global_market():
 POST_TYPE_KEEP = {
     "mindmap": 1,    # 이미지 base64 포함 (행당 평균 700KB+)
     "wdaebon": 3,    # 보통 텍스트지만 보수적으로 3개
+    "checkpoint": 1, # 사용자가 매일 갱신, 최신만 필요
+    "closing": 1,    # 마감일지 — 봇이 매일 새로, 최신만 필요
 }
 
 def save_post(t, content, date):
@@ -375,6 +378,30 @@ def mindmap_page():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/wandaebon")
+@requires_auth
+def wandaebon_page():
+    html = get_wandaebon_html()
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/wandaebon/upload", methods=["POST"])
+@requires_auth
+def wandaebon_upload():
+    """docx 파일 받아서 파싱 후 JSON 반환."""
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "파일 없음"}), 400
+    try:
+        data = parse_wandaebon_docx(f.read())
+        return jsonify(data)
+    except Exception as e:
+        print(f"[wandaebon parse error] {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/market")
 @requires_auth
 def api_market():
@@ -437,8 +464,7 @@ def api_save_checkpoint_replace():
     body = request.json or {}
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
-    if not content:
-        return jsonify({"error": "content required"}), 400
+    # 빈 본문도 허용 (초기화 의도)
     save_post("checkpoint", content, date)
     print(f"[/api/post/checkpoint/replace] saved {len(content)} chars, date={date}")
     return jsonify({"ok": True, "saved_len": len(content)})
@@ -459,8 +485,8 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        # mindmap은 빈 콘텐츠 저장 허용 (초기화용)
-        if pt != "mindmap":
+        # mindmap/checkpoint/closing은 빈 콘텐츠 저장 허용 (초기화용)
+        if pt not in ("mindmap", "checkpoint", "closing"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
@@ -947,6 +973,50 @@ def db_vacuum():
     finally:
         try: conn.close()
         except Exception: pass
+
+
+@app.route("/admin/db-cleanup-all")
+@requires_auth
+def db_cleanup_all():
+    """모든 POST_TYPE_KEEP type을 한 번에 정리.
+    
+    각 type별로 최신 keep개만 남기고 옛 행 삭제.
+    자동 청소 로직과 동일한 동작을 명시적으로 한 번에 트리거.
+    """
+    results = {}
+    conn = get_db()
+    try:
+        for t, keep in POST_TYPE_KEEP.items():
+            try:
+                # 정리 전 카운트
+                before_rows = list(conn.run("SELECT COUNT(*) FROM posts WHERE type=:t", t=t))
+                before_cnt = before_rows[0][0] if before_rows else 0
+                
+                # 최신 keep개 id 가져오기
+                keep_rows = list(conn.run(
+                    f"SELECT id FROM posts WHERE type=:t ORDER BY id DESC LIMIT {int(keep)}",
+                    t=t))
+                if keep_rows:
+                    keep_ids_csv = ",".join(str(r[0]) for r in keep_rows)
+                    conn.run(
+                        f"DELETE FROM posts WHERE type=:t AND id NOT IN ({keep_ids_csv})",
+                        t=t)
+                
+                # 정리 후 카운트
+                after_rows = list(conn.run("SELECT COUNT(*) FROM posts WHERE type=:t", t=t))
+                after_cnt = after_rows[0][0] if after_rows else 0
+                
+                results[t] = {
+                    "kept_limit": keep,
+                    "before_rows": before_cnt,
+                    "after_rows": after_cnt,
+                    "deleted_rows": before_cnt - after_cnt,
+                }
+            except Exception as e:
+                results[t] = {"error": str(e)}
+    finally:
+        conn.close()
+    return jsonify({"cleanup_done": True, "results": results})
 
 
 @app.route("/admin/db-cleanup-mindmap", methods=["GET", "POST"])
@@ -1534,6 +1604,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
           <span class="content-date" id="checkpoint-date"></span>
           <button class="btn" onclick="loadPost('checkpoint','checkpoint-body','checkpoint-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
           <button class="btn" onclick="enterCpEdit()" id="cp-edit-btn" style="font-size:11px;padding:5px 10px;">✏️ 편집</button>
+          <button class="btn" onclick="clearCheckpoint()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="체크포인트 전부 비우기">🗑 초기화</button>
         </div>
       </div>
       <div class="tab-bar" id="cp-tabs">
@@ -1567,6 +1638,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div style="display:flex;gap:6px;align-items:center;">
         <span class="content-date" id="closing-date"></span>
         <button class="btn" onclick="loadPost('closing','closing-body','closing-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
+        <button class="btn" onclick="clearClosing()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="마감일지 전부 비우기">🗑 초기화</button>
       </div>
     </div>
     <div class="tab-bar" id="cl-tabs">
@@ -3776,6 +3848,37 @@ function cancelCpEdit() {
   if(activeBtn){
     const m = activeBtn.getAttribute('onclick')?.match(/cpTab\(this,'(\w+)'\)/);
     if(m) cpTab(activeBtn, m[1]);
+  }
+}
+
+// ── 초기화 (마인드맵식 — 다 비우기) ──────────────────
+async function clearCheckpoint() {
+  if(!confirm('체크포인트를 전부 비울까요?\n되돌릴 수 없어요. (텔레봇 last_checkpoint도 다음 메시지부터 새로 시작)')) return;
+  try {
+    const res = await fetch('/api/post/checkpoint/replace', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
+    });
+    if(!res.ok){ alert('초기화 실패 HTTP ' + res.status); return; }
+    window.location.reload();
+  } catch(e) {
+    alert('초기화 실패: ' + e.message);
+  }
+}
+
+async function clearClosing() {
+  if(!confirm('마감일지를 전부 비울까요?\n되돌릴 수 없어요.')) return;
+  try {
+    const res = await fetch('/api/post/closing', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
+    });
+    if(!res.ok){ alert('초기화 실패 HTTP ' + res.status); return; }
+    window.location.reload();
+  } catch(e) {
+    alert('초기화 실패: ' + e.message);
   }
 }
 
