@@ -3822,27 +3822,84 @@ function enterCpEdit() {
     legendHtml += '</div>';
   }
 
-  const ta = document.createElement('textarea');
-  ta.id = 'cp-edit-textarea';
-  ta.style.cssText = 'width:100%;min-height:420px;font-family:monospace;font-size:13px;padding:12px;border:1.5px solid #e8b84b;border-radius:8px;background:#fdfbf5;resize:vertical;line-height:1.65;display:block;';
-  ta.value = editText;
+  // 텍스트 도구바
+  const toolbarHtml = `
+    <div id="cp-toolbar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;padding:8px 10px;background:#fffdf6;border:1px solid #e8e1d0;border-radius:8px;">
+      <span style="font-size:10px;color:#888;letter-spacing:.04em;margin-right:4px;">텍스트 도구</span>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('foreColor','#d63031')" title="빨강 (⌘⇧1)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;color:#d63031;font-weight:700;border-radius:5px;cursor:pointer;">A</button>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('foreColor','#0984e3')" title="파랑 (⌘⇧2)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;color:#0984e3;font-weight:700;border-radius:5px;cursor:pointer;">A</button>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('foreColor','#1a1d23')" title="검정 (⌘⇧3)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;color:#1a1d23;border-radius:5px;cursor:pointer;">A</button>
+      <span style="width:1px;height:18px;background:#e8e1d0;margin:0 4px;"></span>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('hiliteColor','#fff59d')" title="노랑 (⌘⇧4)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff59d;border-radius:5px;cursor:pointer;">■</button>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('hiliteColor','#ffcdd2')" title="분홍 (⌘⇧5)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#ffcdd2;border-radius:5px;cursor:pointer;">■</button>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('hiliteColor','#c8e6c9')" title="민트 (⌘⇧6)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#c8e6c9;border-radius:5px;cursor:pointer;">■</button>
+      <span style="width:1px;height:18px;background:#e8e1d0;margin:0 4px;"></span>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('bold')" title="굵게 (⌘B)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;font-weight:700;border-radius:5px;cursor:pointer;">B</button>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('italic')" title="기울임 (⌘I)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;font-style:italic;border-radius:5px;cursor:pointer;">I</button>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('underline')" title="밑줄 (⌘U)" style="width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;border-radius:5px;cursor:pointer;"><u>U</u></button>
+      <span style="width:1px;height:18px;background:#e8e1d0;margin:0 4px;"></span>
+      <button onmousedown="event.preventDefault()" onclick="cpFmt('removeFormat')" title="서식 지우기 (⌘⇧0)" style="width:auto;padding:0 8px;height:28px;border:1px solid #e8e1d0;background:#fff;font-size:11px;border-radius:5px;cursor:pointer;">✖ 원복</button>
+      <span style="font-size:10px;color:#888;margin-left:auto;">💡 텍스트 선택 후 클릭 · 또는 ⌘⇧1~6</span>
+    </div>`;
 
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'margin-top:10px;display:flex;gap:8px;align-items:center;';
-  btnRow.innerHTML = '<button class="btn btn-green" onclick="saveCpEdit()">💾 저장</button>'
+  // contenteditable div — 줄바꿈 보존 위해 \n을 <br>로 변환
+  const safeText = (editText || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+
+  const editorHtml = `<div id="cp-edit-editor" contenteditable="true" style="width:100%;min-height:420px;font-family:monospace;font-size:13px;padding:12px;border:1.5px solid #e8b84b;border-radius:8px;background:#fdfbf5;line-height:1.7;outline:none;white-space:pre-wrap;">${safeText}</div>`;
+
+  const btnRowHtml = '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;">'
+    + '<button class="btn btn-green" onclick="saveCpEdit()">💾 저장</button>'
     + '<button class="btn" onclick="cancelCpEdit()">✕ 취소</button>'
-    + '<span id="cp-edit-badge" style="font-size:11px;color:#00b894;font-weight:700;display:none;">✓ 저장됨</span>';
+    + '<span id="cp-edit-badge" style="font-size:11px;color:#00b894;font-weight:700;display:none;">✓ 저장됨</span>'
+    + '</div>';
 
-  body.innerHTML = legendHtml;
-  body.appendChild(ta);
-  body.appendChild(btnRow);
-  ta.focus();
+  body.innerHTML = legendHtml + toolbarHtml + editorHtml + btnRowHtml;
+  document.getElementById('cp-edit-editor').focus();
 }
 
+// 텍스트 도구 — contenteditable에서 적용
+function cpFmt(cmd, value){
+  document.execCommand(cmd, false, value || null);
+}
+
+// Cmd/Ctrl + Shift + 숫자 단축키 (체크포인트 편집 시)
+document.addEventListener('keydown', (e) => {
+  if(!_cpEditing) return;
+  const active = document.activeElement;
+  if(!active || active.id !== 'cp-edit-editor') return;
+  const isCmd = e.metaKey || e.ctrlKey;
+  if(!isCmd || !e.shiftKey) return;
+  const map = {
+    '1': ['foreColor', '#d63031'],
+    '2': ['foreColor', '#0984e3'],
+    '3': ['foreColor', '#1a1d23'],
+    '4': ['hiliteColor', '#fff59d'],
+    '5': ['hiliteColor', '#ffcdd2'],
+    '6': ['hiliteColor', '#c8e6c9'],
+    '0': ['removeFormat', null],
+  };
+  const hit = map[e.key];
+  if(hit){ e.preventDefault(); cpFmt(hit[0], hit[1]); }
+});
+
 async function saveCpEdit() {
-  const ta = document.getElementById('cp-edit-textarea');
-  if(!ta) { alert('❌ textarea 못 찾음'); return; }
-  const rawText = cpEditToRaw(ta.value);
+  const ed = document.getElementById('cp-edit-editor');
+  if(!ed) { alert('❌ editor 못 찾음'); return; }
+  // innerHTML 그대로 저장 — 색깔/하이라이트 보존
+  // <br>과 <div>를 \n으로 정규화해서 봇이 텍스트로 처리할 수 있게
+  let html = ed.innerHTML;
+  // <div>는 줄바꿈으로 — contenteditable에서 enter 시 생기는 wrapper
+  html = html.replace(/<div><br><\/div>/gi, '\n');
+  html = html.replace(/<div>/gi, '\n');
+  html = html.replace(/<\/div>/gi, '');
+  html = html.replace(/<br\s*\/?>/gi, '\n');
+  // &nbsp; → 공백
+  html = html.replace(/&nbsp;/gi, ' ');
+  // 일반 escape 복원 (< > &)
+  // 단 사용자 강조 <span style="..."> 등은 그대로
+  // 이중 escape된 &amp; 만 한 번 더 풀어줌
+  // (innerHTML이 이미 안전한 형태로 직렬화됨)
+  const rawText = cpEditToRaw(html);
   const url = '/api/post/checkpoint/replace';
   const payload = {content: rawText, date: new Date().toISOString().slice(0,10)};
   try{
@@ -3857,7 +3914,6 @@ async function saveCpEdit() {
       alert('❌ 저장 실패 HTTP ' + res.status + '\n응답: ' + bodyTxt.slice(0, 300));
       return;
     }
-    // 성공 — 강제 새로고침
     window.location.reload();
   } catch(e) {
     alert('❌ 네트워크/JS 오류: ' + (e && e.message ? e.message : e));
