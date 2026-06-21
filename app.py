@@ -3350,9 +3350,26 @@ function _escapeHtml(s){
   return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// 사용자 강조 태그(font color, span style 색깔/배경, b/i/u)는 보존하고 나머지는 escape
+function _escapeHtmlPreserveFormatting(text){
+  text = String(text || '');
+  // 1) 강조 태그 placeholder로 치환
+  const placeholders = [];
+  const allowedPattern = /<(\/?(?:b|i|u|strong|em)\b|font\s+color\s*=\s*"[^"]*"|\/font|span\s+style\s*=\s*"(?:color|background-color|background)\s*:[^"]*"|\/span)>/gi;
+  text = text.replace(allowedPattern, function(m){
+    placeholders.push(m);
+    return '\x00FMT' + (placeholders.length - 1) + '\x00';
+  });
+  // 2) 나머지 HTML escape
+  text = text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  // 3) placeholder 복원
+  text = text.replace(/\x00FMT(\d+)\x00/g, function(_, i){ return placeholders[parseInt(i)]; });
+  return text;
+}
+
 function _linkifyText(text){
-  // 1. HTML escape (XSS 차단)
-  let s = _escapeHtml(text);
+  // 1. HTML escape (강조 태그는 보존, 나머지만 escape)
+  let s = _escapeHtmlPreserveFormatting(text);
   const linkStyle = 'color:#1a73e8;text-decoration:none;border-bottom:1px dotted #1a73e8;font-weight:500;';
   // 2. 봇 자체 마커 [[LINK:URL]] → 🔗 링크
   s = s.replace(/\[\[LINK:(https?:\/\/[^\]\s]+)\]\]/g, function(_, url){
