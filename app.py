@@ -3859,8 +3859,9 @@ function enterCpEdit() {
       <span style="font-size:10px;color:#888;margin-left:auto;">💡 텍스트 선택 후 클릭 · 또는 ⌘⇧1~6</span>
     </div>`;
 
-  // contenteditable div — 줄바꿈 보존 위해 \n을 <br>로 변환
-  const safeText = (editText || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  // contenteditable div — 줄바꿈 보존 + 강조 태그 보존 (옛 저장본의 <font>, <span style>도 살아있게)
+  let safeText = _escapeHtmlPreserveFormatting(editText || '');
+  safeText = safeText.replace(/\n/g, '<br>');
 
   const editorHtml = `<div id="cp-edit-editor" contenteditable="true" style="width:100%;min-height:420px;font-family:monospace;font-size:13px;padding:12px;border:1.5px solid #e8b84b;border-radius:8px;background:#fdfbf5;line-height:1.7;outline:none;white-space:pre-wrap;">${safeText}</div>`;
 
