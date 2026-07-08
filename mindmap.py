@@ -325,8 +325,8 @@ input,textarea,button{font-family:inherit;color:inherit}
   .mm-pv-cg-toggle{display:none !important}
   .mm-pv-cg-grid{
     grid-template-columns:repeat(3, 1fr) !important;
-    column-gap:8mm !important;    /* 좌우 여백 (3열 넉넉히) */
-    row-gap:22mm !important;      /* 세로 여백 = 메모 공간 (약 3~4줄) */
+    column-gap:8mm !important;    /* 좌우 여백 */
+    row-gap:28mm !important;      /* 세로 여백 = 메모 공간 */
   }
   .mm-pv-cg{
     cursor:default !important;
