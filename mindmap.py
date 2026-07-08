@@ -291,18 +291,71 @@ input,textarea,button{font-family:inherit;color:inherit}
 .mm-pv-cg.excluded .mm-pv-cg-toggle{opacity:1;background:#A32D2D}
 .mm-pv-empty{text-align:center;padding:60px 20px;color:#888780;font-size:13px}
 
-/* 인쇄 (PDF 저장) */
+/* 인쇄 (PDF 저장) — 가로 A4, CG 크게, CG 사이 여백 커서 메모 쓰기 좋게 */
 @media print {
+  @page {
+    size: A4 landscape;    /* 가로 모드 강제 */
+    margin: 10mm 12mm;
+  }
   body{background:#fff !important}
   body > *:not(.mm-preview){display:none !important}
   .mm-preview-bar{display:none !important}
   .mm-preview{position:static !important;display:block !important;background:#fff}
-  .mm-preview-body{padding:14px 22px !important;overflow:visible !important;max-width:none !important}
-  .mm-pv-section{border-top-color:#000 !important;page-break-inside:avoid;break-inside:avoid;margin-bottom:14px}
+  .mm-preview-body{padding:0 !important;overflow:visible !important;max-width:none !important}
+
+  /* 코너 헤더 */
+  .mm-pv-corner{font-size:15pt !important;margin-bottom:2mm !important}
+  .mm-pv-corner-sub{font-size:9pt !important;margin-bottom:6mm !important}
+
+  /* 질문 섹션 — 페이지 나누기 avoid */
+  .mm-pv-section{
+    border-top:1.5px solid #000 !important;
+    page-break-inside:avoid;
+    break-inside:avoid;
+    margin-bottom:10mm !important;
+    padding-top:5mm !important;
+  }
+  .mm-pv-q-head{margin-bottom:6mm !important}
+  .mm-pv-q-num{font-size:10pt !important; padding:2px 8px !important}
+  .mm-pv-q-guest{font-size:8.5pt !important; padding:2px 7px !important}
+  .mm-pv-q-title{font-size:12pt !important; line-height:1.35 !important}
+
+  /* CG 그리드 — 2열, 세로 여백 크게 (메모 공간 확보) */
   .mm-pv-cg.excluded{display:none !important}
   .mm-pv-cg-toggle{display:none !important}
-  .mm-pv-cg{cursor:default !important;border-color:#bbb !important}
-  .mm-pv-cg-grid{grid-template-columns:repeat(4, 1fr) !important;gap:6px !important}
+  .mm-pv-cg-grid{
+    grid-template-columns:repeat(2, 1fr) !important;
+    column-gap:12mm !important;   /* 좌우 여백 */
+    row-gap:34mm !important;      /* 세로 여백 = 메모 공간 (약 4~5줄 손글씨) */
+  }
+  .mm-pv-cg{
+    cursor:default !important;
+    border:1px solid #999 !important;
+    border-radius:4px !important;
+    break-inside:avoid;
+    background:#fff !important;
+    overflow:visible !important;   /* 라벨이 border 밖 나가도 안 잘림 */
+  }
+  .mm-pv-cg img{
+    max-height:95mm !important;    /* 이미지 크기 넉넉히 */
+    width:100% !important;
+    object-fit:contain !important;
+    background:#f9f9f9 !important;
+    display:block !important;
+  }
+  .mm-pv-cg-label{
+    font-size:9pt !important;
+    padding:2px 7px !important;
+    background:#fff !important;
+    border:1px solid #999 !important;
+  }
+
+  /* 배경/색 그대로 인쇄 */
+  * {
+    -webkit-print-color-adjust:exact !important;
+    print-color-adjust:exact !important;
+    color-adjust:exact !important;
+  }
 }
 
 /* === responsive === */
