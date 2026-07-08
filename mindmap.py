@@ -320,13 +320,13 @@ input,textarea,button{font-family:inherit;color:inherit}
   .mm-pv-q-guest{font-size:8.5pt !important; padding:2px 7px !important}
   .mm-pv-q-title{font-size:12pt !important; line-height:1.35 !important}
 
-  /* CG 그리드 — 2열, 세로 여백 크게 (메모 공간 확보) */
+  /* CG 그리드 — 3열 × 2행 = 페이지당 6개, CG 사이 메모 공간 */
   .mm-pv-cg.excluded{display:none !important}
   .mm-pv-cg-toggle{display:none !important}
   .mm-pv-cg-grid{
-    grid-template-columns:repeat(2, 1fr) !important;
-    column-gap:12mm !important;   /* 좌우 여백 */
-    row-gap:34mm !important;      /* 세로 여백 = 메모 공간 (약 4~5줄 손글씨) */
+    grid-template-columns:repeat(3, 1fr) !important;
+    column-gap:8mm !important;    /* 좌우 여백 (3열 넉넉히) */
+    row-gap:22mm !important;      /* 세로 여백 = 메모 공간 (약 3~4줄) */
   }
   .mm-pv-cg{
     cursor:default !important;
@@ -334,10 +334,10 @@ input,textarea,button{font-family:inherit;color:inherit}
     border-radius:4px !important;
     break-inside:avoid;
     background:#fff !important;
-    overflow:visible !important;   /* 라벨이 border 밖 나가도 안 잘림 */
+    overflow:visible !important;
   }
   .mm-pv-cg img{
-    max-height:95mm !important;    /* 이미지 크기 넉넉히 */
+    max-height:62mm !important;    /* 3열 × 2행 페이지 fit */
     width:100% !important;
     object-fit:contain !important;
     background:#f9f9f9 !important;
