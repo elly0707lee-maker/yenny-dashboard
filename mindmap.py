@@ -333,7 +333,7 @@ input,textarea,button{font-family:inherit;color:inherit}
         <div class="mm-corner-label">CORNER · #1</div>
         <input type="text" class="mm-corner-title" id="mm-corner-title" placeholder="코너 제목 (예: 미국 하락 코너)">
         <input type="text" class="mm-corner-sub" id="mm-corner-sub" placeholder="부제목 (선택)">
-        <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 추가… (엔터로 1개 / 멀티라인 paste면 자동으로 여러 Q 생성)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
+        <input type="text" class="mm-quick-q" id="mm-quick-q" placeholder="＋ 질문 추가… (엔터로 1개 / 멀티라인 paste면 자동으로 여러 Q 생성 · Alt+↑↓로 순서 변경)" onkeydown="if(event.key==='Enter'){quickAddQ(this.value);this.value=''}">
         <div class="mm-shortcuts-hint">
           텍스트 입력 중: <kbd>⌘B</kbd> 굵게 · <kbd>⌘I</kbd> 기울임 · <kbd>⌘U</kbd> 밑줄 · <kbd>⌘⇧H</kbd> 하이라이트 · <kbd>⌘⇧↑↓</kbd> 이전/다음 Q<br>
           카드 클릭 후: <kbd>←</kbd> <kbd>→</kbd> 카드 순서 이동 · <kbd>ESC</kbd> 선택 해제
@@ -550,6 +550,8 @@ function renderSection(q, idx){
   html += '</div>';
   html += '</div>';
   html += '<span class="mm-section-meta">CG '+cgCount+(cgCmtCount?' · 💬'+cgCmtCount:'')+'</span>';
+  html += '<button class="mm-section-act" title="위로 (Alt+↑)" onclick="moveQuestion(\''+q.id+'\',\'up\')" style="font-size:14px;">↑</button>';
+  html += '<button class="mm-section-act" title="아래로 (Alt+↓)" onclick="moveQuestion(\''+q.id+'\',\'down\')" style="font-size:14px;">↓</button>';
   html += '<button class="mm-section-act" title="접기/펼치기" onclick="toggleSectionCollapse(\''+q.id+'\')">'+caret+'</button>';
   html += '<button class="mm-section-act del" title="섹션 삭제" onclick="deleteQuestion(\''+q.id+'\')">✕</button>';
   html += '</div>';
@@ -751,6 +753,57 @@ function deleteQuestion(qId){
   render();
   scheduleSave();
 }
+
+// ── 질문 순서 변경 ────────────────────────────
+function moveQuestion(qId, direction){
+  const arr = MD.corner.questions;
+  const idx = arr.findIndex(q => q.id === qId);
+  if(idx < 0) return false;
+  let newIdx;
+  if(direction === 'up')       newIdx = idx > 0 ? idx - 1 : idx;
+  else if(direction === 'down') newIdx = idx < arr.length - 1 ? idx + 1 : idx;
+  else if(direction === 'top')  newIdx = 0;
+  else if(direction === 'bottom') newIdx = arr.length - 1;
+  else return false;
+  if(newIdx === idx) return false;
+  const [item] = arr.splice(idx, 1);
+  arr.splice(newIdx, 0, item);
+  render();
+  scheduleSave();
+  // 이동 후 그 섹션으로 스크롤 (커서/포커스 최대한 복구)
+  setTimeout(() => {
+    const sec = document.querySelector('[data-q-id="'+qId+'"]');
+    if(sec){
+      sec.scrollIntoView({behavior:'smooth', block:'center'});
+      // 짧게 강조 (이동한 항목 표시)
+      sec.style.transition = 'box-shadow .3s';
+      sec.style.boxShadow = '0 0 0 3px #e8b84b';
+      setTimeout(() => { sec.style.boxShadow = ''; }, 800);
+    }
+  }, 30);
+  return true;
+}
+
+// 단축키 리스너 — Option/Alt + ↑/↓/Home/End
+document.addEventListener('keydown', (e) => {
+  if(!e.altKey) return;
+  const key = e.key;
+  const isArrow = (key === 'ArrowUp' || key === 'ArrowDown');
+  const isJump = (key === 'Home' || key === 'End');
+  if(!isArrow && !isJump) return;
+  // 현재 포커스가 어느 질문 섹션 안에 있나
+  const focusEl = document.activeElement;
+  if(!focusEl) return;
+  const section = focusEl.closest ? focusEl.closest('.mm-section') : null;
+  if(!section) return;
+  const qId = section.getAttribute('data-q-id');
+  if(!qId) return;
+  e.preventDefault();
+  if(key === 'ArrowUp')   moveQuestion(qId, 'up');
+  else if(key === 'ArrowDown') moveQuestion(qId, 'down');
+  else if(key === 'Home')  moveQuestion(qId, 'top');
+  else if(key === 'End')   moveQuestion(qId, 'bottom');
+});
 function updateQField(qId, field, value){
   const q = getQById(qId); if(!q) return;
   q[field] = value;
