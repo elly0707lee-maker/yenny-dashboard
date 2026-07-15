@@ -1453,21 +1453,13 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 .q-body:empty::before{content:attr(data-placeholder);color:#b2bec3;font-style:italic}
 
 /* ── 체크포인트 인쇄 ─────────────────────────────
-   printing-checkpoint 클래스 body에 붙었을 때만 활성 */
+   printing-checkpoint 클래스 body에 붙었을 때만 활성
+   (JS가 wrapper를 body 직속으로 이동시켜둔 상태) */
 @media print {
   @page { size: A4 landscape; margin: 10mm 12mm; }
   body.printing-checkpoint { background: #fff !important; }
-  /* 모든 요소 감추기 (공간은 유지 — 조상 계층 안 깨짐) */
-  body.printing-checkpoint * { visibility: hidden !important; }
-  /* wrapper와 그 자식만 다시 보이게 */
-  body.printing-checkpoint #checkpoint-wrapper,
-  body.printing-checkpoint #checkpoint-wrapper * { visibility: visible !important; }
-  /* wrapper를 페이지 좌상단으로 (조상 위치 무시) */
+  /* wrapper를 페이지 전체로 */
   body.printing-checkpoint #checkpoint-wrapper {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -1481,7 +1473,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     width: 100% !important;
     max-width: none !important;
   }
-  /* 헤더의 버튼 · 탭 · 편집 UI 다 숨김 (visibility: hidden으론 공간 남으니 display로) */
+  /* 헤더의 버튼 · 탭 · 편집 UI 숨김 */
   body.printing-checkpoint .content-header .btn,
   body.printing-checkpoint #cp-tabs,
   body.printing-checkpoint #cp-edit-editor,
@@ -1493,7 +1485,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   }
   body.printing-checkpoint .content-title { font-size: 13pt !important; }
   body.printing-checkpoint .content-date { font-size: 10pt !important; color: #000 !important; }
-  /* 각 섹션 헤딩 (📊 지표, 🇺🇸 미증시, 등) 강조 */
+  /* 각 섹션 헤딩 강조 */
   body.printing-checkpoint #checkpoint-body > div[style*="letter-spacing"] {
     font-size: 11pt !important;
     color: #000 !important;
@@ -1510,29 +1502,21 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     margin-top: 0 !important;
     padding-top: 0 !important;
   }
-  /* 카드는 페이지 넘김 방지 */
-  body.printing-checkpoint .cp-card,
-  body.printing-checkpoint .indicator-card,
-  body.printing-checkpoint .sector-card,
-  body.printing-checkpoint .stock-card,
-  body.printing-checkpoint .signal-card {
+  /* 카드 자체는 페이지 넘김 방지 */
+  body.printing-checkpoint #checkpoint-body > div > div {
     page-break-inside: avoid;
     break-inside: avoid;
   }
-  /* 인쇄 시 카드 grid 강제 4열 (가로 페이지 활용) */
+  /* 카드 grid — auto-fit 그대로 유지 (카드 개수에 맞게 자연스럽게 채워짐)
+     인쇄 시 minmax 좀 낮춰서 더 많은 카드가 한 줄에 들어가게 */
   body.printing-checkpoint #checkpoint-body > div[style*="grid-template-columns"] {
-    grid-template-columns: repeat(4, 1fr) !important;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) !important;
     gap: 5mm !important;
-  }
-  body.printing-checkpoint #checkpoint-body > div[style*="grid-template-columns"] > div {
-    padding: 8px 10px !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
   }
   /* 링크는 밑줄만, 색 검정 */
   body.printing-checkpoint a { color: #000 !important; text-decoration: underline; }
   /* 사용자 강조(색깔·하이라이트)는 그대로 인쇄 */
-  body.printing-checkpoint #checkpoint-wrapper * {
+  body.printing-checkpoint * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -4059,24 +4043,44 @@ function printCheckpoint(){
   if(!_cpRaw){ alert('체크포인트가 비어있어요'); return; }
   // 현재 활성 탭 기억 (인쇄 후 복원)
   const activeTab = document.querySelector('#cp-tabs .tab.active');
-  const allTab = document.querySelector('#cp-tabs .tab[data-key="all"]') 
+  const allTab = document.querySelector('#cp-tabs .tab[data-key="all"]')
     || Array.from(document.querySelectorAll('#cp-tabs .tab')).find(t=>t.textContent.includes('전체'));
   // '전체' 탭으로 전환해서 모든 섹션 렌더
-  if(allTab && allTab !== activeTab){
-    allTab.click();
-  }
-  // 인쇄 모드 활성화 (다른 요소 숨기고 체크포인트만)
+  if(allTab && allTab !== activeTab){ allTab.click(); }
+
+  // wrapper를 body 직속으로 임시 이동 (원 위치 기억)
+  const wrapper = document.getElementById('checkpoint-wrapper');
+  const origParent = wrapper.parentNode;
+  const origNext = wrapper.nextSibling;
+  // 다른 body 자식들 임시 숨김
+  const otherChildren = Array.from(document.body.children);
+  const hiddenSaves = [];
+  otherChildren.forEach(c => {
+    if(c !== wrapper && c.id !== 'checkpoint-wrapper'){
+      hiddenSaves.push({el: c, disp: c.style.display});
+      c.style.setProperty('display', 'none', 'important');
+    }
+  });
+  document.body.appendChild(wrapper);
   document.body.classList.add('printing-checkpoint');
-  // afterprint에 복원
+
   const restore = () => {
     document.body.classList.remove('printing-checkpoint');
-    if(activeTab && activeTab !== allTab){
-      activeTab.click();
+    // wrapper 원 위치로
+    if(origParent){
+      if(origNext) origParent.insertBefore(wrapper, origNext);
+      else origParent.appendChild(wrapper);
     }
+    // 다른 자식들 원 상태 복원
+    hiddenSaves.forEach(({el, disp}) => {
+      if(disp) el.style.display = disp;
+      else el.style.removeProperty('display');
+    });
+    if(activeTab && activeTab !== allTab) activeTab.click();
     window.removeEventListener('afterprint', restore);
   };
   window.addEventListener('afterprint', restore);
-  // DOM 업데이트 후 인쇄
+
   setTimeout(() => window.print(), 150);
 }
 
