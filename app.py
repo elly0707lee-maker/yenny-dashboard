@@ -1451,6 +1451,87 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 .q-body{font-size:12px;color:#2d3436;line-height:1.65;padding:9px 11px;background:#f8f9fa;border-radius:7px;outline:none;cursor:text;min-height:50px;white-space:pre-wrap}
 .q-body:focus{background:#fff;box-shadow:inset 0 0 0 1.5px #e8b84b}
 .q-body:empty::before{content:attr(data-placeholder);color:#b2bec3;font-style:italic}
+
+/* ── 체크포인트 인쇄 ─────────────────────────────
+   printing-checkpoint 클래스 body에 붙었을 때만 활성 */
+@media print {
+  @page { size: A4 landscape; margin: 10mm 12mm; }
+  body.printing-checkpoint { background: #fff !important; }
+  /* body의 자식들 다 숨김. 오직 체크포인트 wrapper만 남김 */
+  body.printing-checkpoint > *:not(#checkpoint-wrapper) { display: none !important; }
+  /* 체크포인트 wrapper — 위치 정렬만 */
+  body.printing-checkpoint #checkpoint-wrapper {
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing-checkpoint #checkpoint-card {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+  /* 헤더의 버튼 · 탭 · 편집 UI 다 숨김 */
+  body.printing-checkpoint .content-header .btn,
+  body.printing-checkpoint #cp-tabs,
+  body.printing-checkpoint #cp-edit-editor,
+  body.printing-checkpoint #cp-toolbar { display: none !important; }
+  body.printing-checkpoint .content-header {
+    border-bottom: 1.5px solid #000 !important;
+    margin-bottom: 6mm !important;
+    padding-bottom: 3mm !important;
+  }
+  body.printing-checkpoint .content-title { font-size: 13pt !important; }
+  body.printing-checkpoint .content-date { font-size: 10pt !important; color: #000 !important; }
+  /* 각 섹션 헤딩 (📊 지표, 🇺🇸 미증시, 등) 강조 */
+  body.printing-checkpoint #checkpoint-body > div[style*="letter-spacing"] {
+    font-size: 11pt !important;
+    color: #000 !important;
+    border-top: 1px solid #999 !important;
+    padding-top: 3mm !important;
+    margin-top: 5mm !important;
+    margin-bottom: 3mm !important;
+    letter-spacing: normal !important;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+  body.printing-checkpoint #checkpoint-body > div[style*="letter-spacing"]:first-child {
+    border-top: 0 !important;
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+  }
+  /* 카드는 페이지 넘김 방지 */
+  body.printing-checkpoint .cp-card,
+  body.printing-checkpoint .indicator-card,
+  body.printing-checkpoint .sector-card,
+  body.printing-checkpoint .stock-card,
+  body.printing-checkpoint .signal-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  /* 인쇄 시 카드 grid 강제 4열 (가로 페이지 활용) */
+  body.printing-checkpoint #checkpoint-body > div[style*="grid-template-columns"] {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 5mm !important;
+  }
+  /* 카드 자체는 작아지니 폰트도 살짝 줄임 */
+  body.printing-checkpoint #checkpoint-body > div[style*="grid-template-columns"] > div {
+    padding: 8px 10px !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* 링크는 밑줄만, 색 검정 */
+  body.printing-checkpoint a { color: #000 !important; text-decoration: underline; }
+  /* 사용자 강조(색깔·하이라이트)는 그대로 인쇄 */
+  body.printing-checkpoint * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
 </style>
 </head>
 <body>
@@ -1619,14 +1700,15 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 
   <!-- 체크포인트 + 노트 2:1 분할 -->
   <div class="section-label">체크포인트</div>
-  <div style="margin-bottom:10px;">
-    <div class="content-card" style="margin-bottom:0;display:flex;flex-direction:column;">
+  <div style="margin-bottom:10px;" id="checkpoint-wrapper">
+    <div class="content-card" id="checkpoint-card" style="margin-bottom:0;display:flex;flex-direction:column;">
       <div class="content-header">
         <span class="content-title">☑ 오늘 체크포인트</span>
         <div style="display:flex;gap:6px;align-items:center;">
           <span class="content-date" id="checkpoint-date"></span>
           <button class="btn" onclick="loadPost('checkpoint','checkpoint-body','checkpoint-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
           <button class="btn" onclick="enterCpEdit()" id="cp-edit-btn" style="font-size:11px;padding:5px 10px;">✏️ 편집</button>
+          <button class="btn" onclick="printCheckpoint()" style="font-size:11px;padding:5px 10px;" title="모든 섹션 한 번에 인쇄 / PDF 저장">🖨️ 인쇄</button>
           <button class="btn" onclick="clearCheckpoint()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="체크포인트 전부 비우기">🗑 초기화</button>
         </div>
       </div>
@@ -3965,6 +4047,32 @@ async function clearCheckpoint() {
   } catch(e) {
     alert('초기화 실패: ' + e.message);
   }
+}
+
+// ── 체크포인트 인쇄 ─────────────────────────────
+function printCheckpoint(){
+  if(!_cpRaw){ alert('체크포인트가 비어있어요'); return; }
+  // 현재 활성 탭 기억 (인쇄 후 복원)
+  const activeTab = document.querySelector('#cp-tabs .tab.active');
+  const allTab = document.querySelector('#cp-tabs .tab[data-key="all"]') 
+    || Array.from(document.querySelectorAll('#cp-tabs .tab')).find(t=>t.textContent.includes('전체'));
+  // '전체' 탭으로 전환해서 모든 섹션 렌더
+  if(allTab && allTab !== activeTab){
+    allTab.click();
+  }
+  // 인쇄 모드 활성화 (다른 요소 숨기고 체크포인트만)
+  document.body.classList.add('printing-checkpoint');
+  // afterprint에 복원
+  const restore = () => {
+    document.body.classList.remove('printing-checkpoint');
+    if(activeTab && activeTab !== allTab){
+      activeTab.click();
+    }
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  // DOM 업데이트 후 인쇄
+  setTimeout(() => window.print(), 150);
 }
 
 async function clearClosing() {
