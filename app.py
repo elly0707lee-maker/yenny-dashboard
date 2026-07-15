@@ -1457,11 +1457,17 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
 @media print {
   @page { size: A4 landscape; margin: 10mm 12mm; }
   body.printing-checkpoint { background: #fff !important; }
-  /* body의 자식들 다 숨김. 오직 체크포인트 wrapper만 남김 */
-  body.printing-checkpoint > *:not(#checkpoint-wrapper) { display: none !important; }
-  /* 체크포인트 wrapper — 위치 정렬만 */
+  /* 모든 요소 감추기 (공간은 유지 — 조상 계층 안 깨짐) */
+  body.printing-checkpoint * { visibility: hidden !important; }
+  /* wrapper와 그 자식만 다시 보이게 */
+  body.printing-checkpoint #checkpoint-wrapper,
+  body.printing-checkpoint #checkpoint-wrapper * { visibility: visible !important; }
+  /* wrapper를 페이지 좌상단으로 (조상 위치 무시) */
   body.printing-checkpoint #checkpoint-wrapper {
-    position: static !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -1475,7 +1481,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     width: 100% !important;
     max-width: none !important;
   }
-  /* 헤더의 버튼 · 탭 · 편집 UI 다 숨김 */
+  /* 헤더의 버튼 · 탭 · 편집 UI 다 숨김 (visibility: hidden으론 공간 남으니 display로) */
   body.printing-checkpoint .content-header .btn,
   body.printing-checkpoint #cp-tabs,
   body.printing-checkpoint #cp-edit-editor,
@@ -1518,7 +1524,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     grid-template-columns: repeat(4, 1fr) !important;
     gap: 5mm !important;
   }
-  /* 카드 자체는 작아지니 폰트도 살짝 줄임 */
   body.printing-checkpoint #checkpoint-body > div[style*="grid-template-columns"] > div {
     padding: 8px 10px !important;
     break-inside: avoid;
@@ -1527,7 +1532,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   /* 링크는 밑줄만, 색 검정 */
   body.printing-checkpoint a { color: #000 !important; text-decoration: underline; }
   /* 사용자 강조(색깔·하이라이트)는 그대로 인쇄 */
-  body.printing-checkpoint * {
+  body.printing-checkpoint #checkpoint-wrapper * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
