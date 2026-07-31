@@ -7,6 +7,7 @@ import anthropic
 import pg8000.native
 from mindmap import get_mindmap_html
 from wandaebon import get_wandaebon_html, parse_wandaebon_docx
+from community_buzz import generate_buzz_sync
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -284,6 +285,7 @@ POST_TYPE_KEEP = {
     "checkpoint": 1, # 사용자가 매일 갱신, 최신만 필요
     "closing": 1,    # 마감일지 — 봇이 매일 새로, 최신만 필요
     "onair": 1,      # 완대본 페이지 상태 (메모 + Q편집 + docx 파싱결과 JSON)
+    "buzz": 1,       # 커뮤니티 버즈 — 매번 새로 생성, 최신만 필요
 }
 
 def save_post(t, content, date):
@@ -403,6 +405,31 @@ def wandaebon_upload():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/community-buzz", methods=["POST"])
+@requires_auth
+def api_community_buzz():
+    """레딧 + 네이버 종토방 병렬 크롤 + Claude 요약."""
+    body = request.json or {}
+    source = body.get("source", "both")
+    if source not in ("both", "reddit", "naver"):
+        source = "both"
+    try:
+        result = generate_buzz_sync(source)
+        import json as _json
+        payload = {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "result": result,
+        }
+        save_post("buzz", _json.dumps(payload, ensure_ascii=False),
+                  datetime.now().strftime("%Y-%m-%d"))
+        return jsonify({"ok": True, **payload})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[community_buzz error] {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/market")
 @requires_auth
 def api_market():
@@ -420,7 +447,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -430,7 +457,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -473,7 +500,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -1723,6 +1750,25 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
         <a href="/onair" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🎙️ ON AIR →</a>
       </div>
+    </div>
+  </div>
+
+  <!-- 🔥 커뮤니티 버즈 -->
+  <div class="section-label" style="margin-top:24px;">🔥 커뮤니티 버즈</div>
+  <div class="content-card" id="buzz-card" style="margin-bottom:0;">
+    <div class="content-header">
+      <span class="content-title">🔥 커뮤니티 버즈</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="buzz-updated" style="font-size:11px;color:#888;"></span>
+        <button class="btn" onclick="generateBuzz()" id="buzz-gen-btn" style="font-size:11px;padding:5px 10px;">🔄 생성</button>
+      </div>
+    </div>
+    <div class="tabs" id="buzz-tabs" style="margin:0 0 10px 0;">
+      <button class="tab active" onclick="switchBuzzTab(this,'reddit')">🇺🇸 미국 (레딧)</button>
+      <button class="tab" onclick="switchBuzzTab(this,'naver')">🇰🇷 한국 (종토방)</button>
+    </div>
+    <div id="buzz-body" class="content-body" style="min-height:180px;">
+      <span class="content-empty">🔄 생성 버튼을 눌러주세요. 크롤링 + 요약에 30초~1분 소요됩니다.</span>
     </div>
   </div>
 
@@ -4037,6 +4083,90 @@ async function clearCheckpoint() {
     alert('초기화 실패: ' + e.message);
   }
 }
+
+// ── 커뮤니티 버즈 ─────────────────────────────
+let _buzzData = {reddit: null, naver: null};
+let _buzzCurrentTab = 'reddit';
+
+async function generateBuzz(){
+  const btn = document.getElementById('buzz-gen-btn');
+  const body = document.getElementById('buzz-body');
+  const updated = document.getElementById('buzz-updated');
+  btn.disabled = true;
+  btn.textContent = '⏳ 실행 중...';
+  body.innerHTML = '<span class="content-empty">⏳ 레딧 + 네이버 종토방 크롤 + Claude 요약 중... (30초~1분 걸림)</span>';
+  try {
+    const res = await fetch('/api/community-buzz', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({source: 'both'})
+    });
+    if(!res.ok){
+      const txt = await res.text();
+      throw new Error('HTTP ' + res.status + ' — ' + txt.slice(0, 200));
+    }
+    const data = await res.json();
+    _buzzData.reddit = data.result?.reddit || null;
+    _buzzData.naver = data.result?.naver || null;
+    updated.textContent = '갱신 ' + (data.generated_at || '') ;
+    renderBuzz(_buzzCurrentTab);
+  } catch(e) {
+    body.innerHTML = '<span class="content-empty">⚠️ 오류: ' + (e.message || e) + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 생성';
+  }
+}
+
+function switchBuzzTab(el, key){
+  document.querySelectorAll('#buzz-tabs .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  _buzzCurrentTab = key;
+  renderBuzz(key);
+}
+
+function esc(s){
+  return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderBuzz(key){
+  const body = document.getElementById('buzz-body');
+  const d = _buzzData[key];
+  if(!d){
+    body.innerHTML = '<span class="content-empty">아직 데이터 없음 · 🔄 생성 눌러주세요</span>';
+    return;
+  }
+  if(d.error){
+    body.innerHTML = '<span class="content-empty">⚠️ ' + esc(d.error) + '</span>';
+    return;
+  }
+  const label = key === 'reddit' ? '레딧' : '네이버 종토방';
+  const count = d.post_count || 0;
+  const summary = d.summary || '(요약 없음)';
+  body.innerHTML = 
+    '<div style="font-size:11px;color:#888;margin-bottom:8px;">📊 ' + esc(label) + ' 게시글 ' + count + '개 수집 · Claude 요약</div>' +
+    '<div style="white-space:pre-wrap;line-height:1.7;font-size:12.5px;color:#2d3436;">' + esc(summary) + '</div>';
+}
+
+// 페이지 로드 시 이전에 생성한 buzz 자동 복구
+async function loadBuzzOnStart(){
+  try {
+    const res = await fetch('/api/post/buzz');
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!data || !data.content) return;
+    let payload;
+    try { payload = JSON.parse(data.content); } catch { return; }
+    if(payload.result){
+      _buzzData.reddit = payload.result.reddit || null;
+      _buzzData.naver = payload.result.naver || null;
+      const updated = document.getElementById('buzz-updated');
+      if(updated) updated.textContent = '갱신 ' + (payload.generated_at || '');
+      renderBuzz(_buzzCurrentTab);
+    }
+  } catch(e){}
+}
+window.addEventListener('DOMContentLoaded', loadBuzzOnStart);
 
 // ── 체크포인트 인쇄 ─────────────────────────────
 function printCheckpoint(){
