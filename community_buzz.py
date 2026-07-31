@@ -12,24 +12,31 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 REDDIT_SUBS = ["wallstreetbets", "stocks", "investing", "StockMarket", "options"]
-REDDIT_UA = "Mozilla/5.0 (compatible; YennyBot/1.0; +https://claude.ai)"
+# ★ old.reddit.com이 www.reddit.com보다 스크래핑 잘 됨. UA도 Chrome으로.
+REDDIT_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
 # ── 레딧 ─────────────────────────────────────────────
 async def fetch_reddit_hot(subs: list = None, limit: int = 25) -> list:
-    """서브레딧들에서 hot 게시글 (인증 없이 JSON endpoint)"""
+    """서브레딧들에서 hot 게시글 (old.reddit.com JSON endpoint)"""
     if subs is None:
         subs = REDDIT_SUBS
-    headers = {"User-Agent": REDDIT_UA}
+    headers = {
+        "User-Agent": REDDIT_UA,
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     posts = []
 
     async def fetch_sub(sub: str):
-        url = f"https://www.reddit.com/r/{sub}/hot.json?limit={limit}"
+        # ★ old.reddit.com — www보다 봇 차단 덜 함
+        url = f"https://old.reddit.com/r/{sub}/hot.json?limit={limit}"
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
                     if r.status != 200:
+                        print(f"[reddit] r/{sub} HTTP {r.status}")
                         return []
                     j = await r.json()
                     items = []
@@ -45,8 +52,10 @@ async def fetch_reddit_hot(subs: list = None, limit: int = 25) -> list:
                             "comments": d.get("num_comments", 0),
                             "url": "https://reddit.com" + d.get("permalink", ""),
                         })
+                    print(f"[reddit] r/{sub}: {len(items)}개")
                     return items
         except Exception as e:
+            print(f"[reddit] r/{sub} 에러: {e}")
             return []
 
     results = await asyncio.gather(*[fetch_sub(s) for s in subs], return_exceptions=True)
@@ -55,6 +64,7 @@ async def fetch_reddit_hot(subs: list = None, limit: int = 25) -> list:
             posts.extend(r)
     # score 상위로 정렬
     posts.sort(key=lambda x: x.get("score", 0), reverse=True)
+    print(f"[reddit] 총 {len(posts)}개 수집됨")
     return posts
 
 
@@ -113,6 +123,37 @@ async def summarize_reddit(posts: list) -> str:
 
 
 # ── 네이버 종토방 ─────────────────────────────────────
+def _smart_decode(raw: bytes, resp_headers: dict = None) -> str:
+    """네이버 응답 인코딩 자동 감지 — UTF-8 → EUC-KR → CP949 순으로 시도.
+    한글 깨짐 방지 (네이버가 페이지마다 다른 인코딩 사용)"""
+    # 1) Content-Type header의 charset 확인
+    if resp_headers:
+        ct = resp_headers.get("Content-Type", "") if hasattr(resp_headers, "get") else ""
+        m = re.search(r"charset=([\w-]+)", ct, re.IGNORECASE)
+        if m:
+            enc = m.group(1).lower()
+            try:
+                return raw.decode(enc, errors="strict")
+            except Exception:
+                pass
+    # 2) UTF-8 시도
+    try:
+        text = raw.decode("utf-8", errors="strict")
+        # 한글이 정상적으로 있으면 OK
+        if any("\uAC00" <= c <= "\uD7A3" for c in text[:5000]):
+            return text
+    except UnicodeDecodeError:
+        pass
+    # 3) EUC-KR / CP949 시도
+    for enc in ("euc-kr", "cp949"):
+        try:
+            return raw.decode(enc, errors="strict")
+        except UnicodeDecodeError:
+            continue
+    # 4) 마지막 fallback — UTF-8 with replace
+    return raw.decode("utf-8", errors="replace")
+
+
 async def fetch_naver_hot_stocks(top_n: int = 10) -> list:
     """네이버 금융 인기 검색 종목 TOP N"""
     url = "https://finance.naver.com/sise/lastsearch2.naver"
@@ -121,10 +162,10 @@ async def fetch_naver_hot_stocks(top_n: int = 10) -> list:
         async with aiohttp.ClientSession() as s:
             async with s.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
                 if r.status != 200:
+                    print(f"[naver] 인기종목 HTTP {r.status}")
                     return []
-                # 네이버 금융은 EUC-KR
                 raw = await r.read()
-                html = raw.decode("euc-kr", errors="ignore")
+                html = _smart_decode(raw, r.headers)
                 soup = BeautifulSoup(html, "html.parser")
                 stocks = []
                 seen = set()
@@ -143,8 +184,10 @@ async def fetch_naver_hot_stocks(top_n: int = 10) -> list:
                     stocks.append({"name": name, "code": code})
                     if len(stocks) >= top_n:
                         break
+                print(f"[naver] 인기종목 {len(stocks)}개")
                 return stocks
-    except Exception:
+    except Exception as e:
+        print(f"[naver] 인기종목 에러: {e}")
         return []
 
 
@@ -159,7 +202,7 @@ async def fetch_naver_board(code: str, name: str, limit: int = 10) -> list:
                 if r.status != 200:
                     return []
                 raw = await r.read()
-                html = raw.decode("euc-kr", errors="ignore")
+                html = _smart_decode(raw, r.headers)
                 soup = BeautifulSoup(html, "html.parser")
                 # 게시글 테이블
                 for tr in soup.select("table.type2 tr"):
@@ -195,8 +238,8 @@ async def fetch_naver_board(code: str, name: str, limit: int = 10) -> list:
                     })
                     if len(posts) >= limit:
                         break
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[naver] {name} 종토방 에러: {e}")
     return posts
 
 
