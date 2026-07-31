@@ -172,92 +172,105 @@ def _smart_decode(raw: bytes, resp_headers: dict = None) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+async def _naver_fetch_html(url: str, timeout: int = 15) -> tuple:
+    """네이버 URL fetch — 상세 진단 로그 반환.
+    반환: (html_text, status_code, error_msg)
+    """
+    # 다양한 UA 시도 (Railway IP 차단 우회)
+    uas = [
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    ]
+    for ua in uas:
+        headers = {
+            "User-Agent": ua,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+            "Referer": "https://finance.naver.com/",
+        }
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+                    raw = await r.read()
+                    html = _smart_decode(raw, r.headers)
+                    if r.status == 200 and len(html) > 500:
+                        return (html, 200, None)
+                    print(f"[naver-fetch] {url[:60]} → HTTP {r.status}, len={len(html)}, UA={ua[:30]}...")
+        except Exception as e:
+            print(f"[naver-fetch] {url[:60]} 에러: {e}, UA={ua[:30]}...")
+            continue
+    return ("", 0, "모든 UA 시도 실패")
+
+
 async def fetch_naver_hot_stocks(top_n: int = 10) -> list:
     """네이버 금융 인기 검색 종목 TOP N"""
     url = "https://finance.naver.com/sise/lastsearch2.naver"
-    headers = {"User-Agent": BROWSER_UA}
+    html, status, err = await _naver_fetch_html(url)
+    if not html:
+        print(f"[naver] 인기종목 접근 실패: status={status}, err={err}")
+        return []
+    print(f"[naver] 인기종목 페이지 fetch 성공, HTML {len(html)}자")
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                if r.status != 200:
-                    print(f"[naver] 인기종목 HTTP {r.status}")
-                    return []
-                raw = await r.read()
-                html = _smart_decode(raw, r.headers)
-                soup = BeautifulSoup(html, "html.parser")
-                stocks = []
-                seen = set()
-                for a in soup.select("a.tltle, a[href*='code=']"):
-                    href = a.get("href", "")
-                    m = re.search(r"code=(\d{6})", href)
-                    if not m:
-                        continue
-                    code = m.group(1)
-                    if code in seen:
-                        continue
-                    seen.add(code)
-                    name = a.get_text(strip=True)
-                    if not name:
-                        continue
-                    stocks.append({"name": name, "code": code})
-                    if len(stocks) >= top_n:
-                        break
-                print(f"[naver] 인기종목 {len(stocks)}개")
-                return stocks
+        soup = BeautifulSoup(html, "html.parser")
+        stocks = []
+        seen = set()
+        # 여러 셀렉터 시도
+        candidates = soup.select("a.tltle") + soup.select("a[href*='code=']")
+        print(f"[naver] 후보 링크 {len(candidates)}개 발견")
+        for a in candidates:
+            href = a.get("href", "")
+            m = re.search(r"code=(\d{6})", href)
+            if not m:
+                continue
+            code = m.group(1)
+            if code in seen:
+                continue
+            seen.add(code)
+            name = a.get_text(strip=True)
+            if not name or len(name) > 30:
+                continue
+            stocks.append({"name": name, "code": code})
+            if len(stocks) >= top_n:
+                break
+        print(f"[naver] 인기종목 {len(stocks)}개 추출")
+        return stocks
     except Exception as e:
-        print(f"[naver] 인기종목 에러: {e}")
+        print(f"[naver] 파싱 에러: {e}")
         return []
 
 
 async def fetch_naver_board(code: str, name: str, limit: int = 10) -> list:
     """특정 종목의 종토방 상위 게시글"""
     url = f"https://finance.naver.com/item/board.naver?code={code}"
-    headers = {"User-Agent": BROWSER_UA}
+    html, status, err = await _naver_fetch_html(url, timeout=12)
+    if not html:
+        return []
     posts = []
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=12)) as r:
-                if r.status != 200:
-                    return []
-                raw = await r.read()
-                html = _smart_decode(raw, r.headers)
-                soup = BeautifulSoup(html, "html.parser")
-                # 게시글 테이블
-                for tr in soup.select("table.type2 tr"):
-                    tds = tr.select("td")
-                    if len(tds) < 6:
-                        continue
-                    title_el = tds[1].select_one("a")
-                    if not title_el:
-                        continue
-                    title = title_el.get_text(strip=True)
-                    if not title:
-                        continue
-                    # 조회수, 추천, 반대
-                    try:
-                        views = int(tds[3].get_text(strip=True).replace(",", "") or 0)
-                    except:
-                        views = 0
-                    try:
-                        up = int(tds[4].get_text(strip=True).replace(",", "") or 0)
-                    except:
-                        up = 0
-                    try:
-                        down = int(tds[5].get_text(strip=True).replace(",", "") or 0)
-                    except:
-                        down = 0
-                    posts.append({
-                        "stock": name,
-                        "code": code,
-                        "title": title,
-                        "views": views,
-                        "up": up,
-                        "down": down,
-                    })
-                    if len(posts) >= limit:
-                        break
+        soup = BeautifulSoup(html, "html.parser")
+        for tr in soup.select("table.type2 tr"):
+            tds = tr.select("td")
+            if len(tds) < 6:
+                continue
+            title_el = tds[1].select_one("a")
+            if not title_el:
+                continue
+            title = title_el.get_text(strip=True)
+            if not title:
+                continue
+            try: views = int(tds[3].get_text(strip=True).replace(",", "") or 0)
+            except: views = 0
+            try: up = int(tds[4].get_text(strip=True).replace(",", "") or 0)
+            except: up = 0
+            try: down = int(tds[5].get_text(strip=True).replace(",", "") or 0)
+            except: down = 0
+            posts.append({"stock": name, "code": code, "title": title,
+                          "views": views, "up": up, "down": down})
+            if len(posts) >= limit:
+                break
     except Exception as e:
-        print(f"[naver] {name} 종토방 에러: {e}")
+        print(f"[naver] {name} 파싱 에러: {e}")
     return posts
 
 
