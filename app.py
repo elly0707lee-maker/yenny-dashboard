@@ -1773,23 +1773,28 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- 리서치 리포트 -->
-  <div class="section-label" style="margin-top:24px;">📄 리서치 리포트</div>
+  <!-- 마감일지 -->
+  <div class="section-label" style="margin-top:24px;">📋 마감일지</div>
   <div class="content-card" style="margin-bottom:0;">
-      <div class="content-header">
-        <span class="content-title">📄 리서치 리포트</span>
-        <div style="display:flex;gap:6px;">
-          <label class="btn btn-primary" style="cursor:pointer;font-size:12px;padding:6px 12px;">
-            + 업로드
-            <input type="file" id="pdf-upload-input" accept=".pdf" multiple style="display:none;" onchange="uploadPDFs(this)"/>
-          </label>
-          <button class="btn" onclick="clearAllPDFs()" style="color:#d63031;border-color:#fab1a0;font-size:12px;padding:6px 12px;">↺ 전체삭제</button>
-        </div>
+    <div class="content-header">
+      <span class="content-title">📋 마감일지</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="content-date" id="closing-date"></span>
+        <button class="btn" onclick="loadPost('closing','closing-body','closing-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
+        <button class="btn" onclick="clearClosing()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="마감일지 전부 비우기">🗑 초기화</button>
       </div>
-      <div class="tab-bar" id="pdf-tabs" style="flex-wrap:wrap;"></div>
-      <div id="pdf-viewer" style="width:100%;height:500px;border-radius:8px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;">
-        <span class="content-empty">PDF를 업로드해주세요</span>
-      </div>
+    </div>
+    <div class="tab-bar" id="cl-tabs">
+      <button class="tab active" onclick="clTab(this,'all')">전체</button>
+      <button class="tab" onclick="clTab(this,'figure')">마감수치</button>
+      <button class="tab" onclick="clTab(this,'factor')">지수팩터</button>
+      <button class="tab" onclick="clTab(this,'supply')">수급</button>
+      <button class="tab" onclick="clTab(this,'forex')">환율</button>
+      <button class="tab" onclick="clTab(this,'sector')">특징업종</button>
+      <button class="tab" onclick="clTab(this,'stock')">특징주</button>
+      <button class="tab" onclick="clTab(this,'schedule')">내일일정</button>
+    </div>
+    <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
   </div>
 
   <!-- 주간 캘린더 -->
@@ -3399,6 +3404,7 @@ const CL_SECTIONS = {
   figure: ['📌 마감수치','📌마감수치'],
   factor: ['📌 지수 팩터','📌지수 팩터','📌 지수팩터','📌지수팩터'],
   supply: ['📌 수급','📌수급'],
+  forex: ['📌 환율','📌환율'],
   sector: ['📌 특징 업종','📌특징 업종','📌특징업종','📌 특징업종'],
   stock: ['📌 특징주','📌특징주'],
   schedule: ['📌 내일 일정','📌내일 일정','📌내일일정']
@@ -3813,8 +3819,8 @@ function clTab(btn, key){
   if(!_clRaw){ return; }
   if(key==='all'){
     let html = '';
-    const labels = {figure:'마감수치',factor:'지수 팩터',supply:'수급',sector:'특징 업종',stock:'특징주',schedule:'내일 일정'};
-    for(const k of ['figure','factor','supply','sector','stock','schedule']){
+    const labels = {figure:'마감수치',factor:'지수 팩터',supply:'수급',forex:'환율',sector:'특징 업종',stock:'특징주',schedule:'내일 일정'};
+    for(const k of ['figure','factor','supply','forex','sector','stock','schedule']){
       const sec = parseSection(_clRaw, CL_SECTIONS[k]||[]);
       if(sec){
         html += '<div style="font-size:11px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:'+(html?'14px':'6px')+' 0 4px;">📌 '+labels[k]+'</div>';
