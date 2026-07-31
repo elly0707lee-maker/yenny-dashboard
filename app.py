@@ -513,8 +513,8 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        # mindmap/checkpoint/closing/onair은 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing", "onair"):
+        # mindmap/checkpoint/closing/onair/buzz는 빈 콘텐츠 저장 허용 (초기화용)
+        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
@@ -1761,6 +1761,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div style="display:flex;gap:8px;align-items:center;">
         <span id="buzz-updated" style="font-size:11px;color:#888;"></span>
         <button class="btn" onclick="generateBuzz()" id="buzz-gen-btn" style="font-size:11px;padding:5px 10px;">🔄 생성</button>
+        <button class="btn" onclick="clearBuzz()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="버즈 데이터 전부 비우기">🗑 초기화</button>
       </div>
     </div>
     <div class="tabs" id="buzz-tabs" style="margin:0 0 10px 0;">
@@ -1772,30 +1773,9 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- 마감일지 -->
-  <div class="section-label" style="margin-top:24px;">마감일지 / 리서치 리포트</div>
-  <div class="grid2" style="align-items:start;">
-    <div class="content-card" style="margin-bottom:0;">
-    <div class="content-header">
-      <span class="content-title">📋 마감일지</span>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <span class="content-date" id="closing-date"></span>
-        <button class="btn" onclick="loadPost('closing','closing-body','closing-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
-        <button class="btn" onclick="clearClosing()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="마감일지 전부 비우기">🗑 초기화</button>
-      </div>
-    </div>
-    <div class="tab-bar" id="cl-tabs">
-      <button class="tab active" onclick="clTab(this,'all')">전체</button>
-      <button class="tab" onclick="clTab(this,'figure')">마감수치</button>
-      <button class="tab" onclick="clTab(this,'factor')">지수팩터</button>
-      <button class="tab" onclick="clTab(this,'supply')">수급</button>
-      <button class="tab" onclick="clTab(this,'sector')">특징업종</button>
-      <button class="tab" onclick="clTab(this,'stock')">특징주</button>
-      <button class="tab" onclick="clTab(this,'schedule')">내일일정</button>
-    </div>
-    <div class="content-body" id="closing-body"><span class="content-empty">텔레그램 봇으로 마감일지를 올리면 여기에 표시됩니다.</span></div>
-    </div>
-    <div class="content-card" style="margin-bottom:0;">
+  <!-- 리서치 리포트 -->
+  <div class="section-label" style="margin-top:24px;">📄 리서치 리포트</div>
+  <div class="content-card" style="margin-bottom:0;">
       <div class="content-header">
         <span class="content-title">📄 리서치 리포트</span>
         <div style="display:flex;gap:6px;">
@@ -1810,7 +1790,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
       <div id="pdf-viewer" style="width:100%;height:500px;border-radius:8px;overflow:hidden;background:#f0f2f5;display:flex;align-items:center;justify-content:center;">
         <span class="content-empty">PDF를 업로드해주세요</span>
       </div>
-    </div>
   </div>
 
   <!-- 주간 캘린더 -->
@@ -4167,6 +4146,20 @@ async function loadBuzzOnStart(){
   } catch(e){}
 }
 window.addEventListener('DOMContentLoaded', loadBuzzOnStart);
+
+async function clearBuzz(){
+  if(!confirm('커뮤니티 버즈를 전부 비울까요?\n미국·한국 요약 다 사라짐 · DB도 청소됨')) return;
+  _buzzData = {reddit: null, naver: null};
+  document.getElementById('buzz-updated').textContent = '';
+  try {
+    await fetch('/api/post/buzz', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
+    });
+  } catch(e){}
+  renderBuzz(_buzzCurrentTab);
+}
 
 // ── 체크포인트 인쇄 ─────────────────────────────
 function printCheckpoint(){
