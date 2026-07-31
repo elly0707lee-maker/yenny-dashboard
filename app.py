@@ -4122,9 +4122,17 @@ function renderBuzz(key){
   const label = key === 'reddit' ? '레딧' : '네이버 종토방';
   const count = d.post_count || 0;
   const summary = d.summary || '(요약 없음)';
+  // 마크다운 스타일 변환
+  let html = esc(summary);
+  // **bold** → <strong>
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // *italic* → <em> (단, ** 이후 남은 것만)
+  html = html.replace(/(?<![*])\*([^*\n]+?)\*(?![*])/g, '<em>$1</em>');
+  // 큰 따옴표 강조 색상 (인용 표시)
+  html = html.replace(/&quot;([^&\n]{2,50}?)&quot;/g, '<span style="color:#0984e3;">"$1"</span>');
   body.innerHTML = 
     '<div style="font-size:11px;color:#888;margin-bottom:8px;">📊 ' + esc(label) + ' 게시글 ' + count + '개 수집 · Claude 요약</div>' +
-    '<div style="white-space:pre-wrap;line-height:1.7;font-size:12.5px;color:#2d3436;">' + esc(summary) + '</div>';
+    '<div style="white-space:pre-wrap;line-height:1.75;font-size:12.5px;color:#2d3436;">' + html + '</div>';
 }
 
 // 페이지 로드 시 이전에 생성한 buzz 자동 복구
