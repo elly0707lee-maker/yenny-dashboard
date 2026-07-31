@@ -12,109 +12,130 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 REDDIT_SUBS = ["wallstreetbets", "stocks", "investing", "StockMarket", "options"]
-# ★ old.reddit.com이 www.reddit.com보다 스크래핑 잘 됨. UA도 Chrome으로.
 REDDIT_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
 # ── 레딧 ─────────────────────────────────────────────
 async def fetch_reddit_hot(subs: list = None, limit: int = 25) -> list:
-    """서브레딧들에서 hot 게시글 (old.reddit.com JSON endpoint)"""
+    """서브레딧들에서 hot 게시글.
+    ★ Railway 데이터센터 IP는 reddit.com이 봇으로 인식해서 종종 차단함.
+    → RSS endpoint 사용 (봇 차단 훨씬 덜함, 인증 X)
+    """
+    import xml.etree.ElementTree as ET
     if subs is None:
         subs = REDDIT_SUBS
     headers = {
         "User-Agent": REDDIT_UA,
-        "Accept": "application/json",
+        "Accept": "application/atom+xml, application/rss+xml, application/xml",
         "Accept-Language": "en-US,en;q=0.9",
     }
     posts = []
+    ns = {'atom': 'http://www.w3.org/2005/Atom'}
 
     async def fetch_sub(sub: str):
-        # ★ old.reddit.com — www보다 봇 차단 덜 함
-        url = f"https://old.reddit.com/r/{sub}/hot.json?limit={limit}"
+        # ★ RSS/Atom 방식 — reddit.com/{sub}/hot/.rss
+        url = f"https://www.reddit.com/r/{sub}/hot/.rss?limit={limit}"
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
                     if r.status != 200:
-                        print(f"[reddit] r/{sub} HTTP {r.status}")
+                        print(f"[reddit RSS] r/{sub} HTTP {r.status}")
                         return []
-                    j = await r.json()
+                    text = await r.text()
+                    try:
+                        root = ET.fromstring(text)
+                    except ET.ParseError as pe:
+                        print(f"[reddit RSS] r/{sub} XML 파싱 실패: {pe}")
+                        return []
                     items = []
-                    for c in j.get("data", {}).get("children", []):
-                        d = c.get("data", {})
-                        if d.get("stickied"):
+                    for entry in root.findall('atom:entry', ns):
+                        title_el = entry.find('atom:title', ns)
+                        content_el = entry.find('atom:content', ns)
+                        link_el = entry.find('atom:link', ns)
+                        title = (title_el.text or "").strip() if title_el is not None else ""
+                        if not title:
                             continue
+                        raw_html = (content_el.text or "") if content_el is not None else ""
+                        # HTML → text (bs로 안전하게)
+                        try:
+                            text_content = BeautifulSoup(raw_html, "html.parser").get_text(" ", strip=True)
+                        except Exception:
+                            text_content = re.sub(r"<[^>]+>", " ", raw_html)
+                        text_content = re.sub(r"\s+", " ", text_content).strip()[:400]
+                        link = link_el.get("href") if link_el is not None else ""
                         items.append({
                             "sub": sub,
-                            "title": d.get("title", ""),
-                            "text": (d.get("selftext", "") or "")[:400],
-                            "score": d.get("score", 0),
-                            "comments": d.get("num_comments", 0),
-                            "url": "https://reddit.com" + d.get("permalink", ""),
+                            "title": title,
+                            "text": text_content,
+                            "url": link,
                         })
-                    print(f"[reddit] r/{sub}: {len(items)}개")
+                    print(f"[reddit RSS] r/{sub}: {len(items)}개")
                     return items
         except Exception as e:
-            print(f"[reddit] r/{sub} 에러: {e}")
+            print(f"[reddit RSS] r/{sub} 에러: {e}")
             return []
 
     results = await asyncio.gather(*[fetch_sub(s) for s in subs], return_exceptions=True)
     for r in results:
         if isinstance(r, list):
             posts.extend(r)
-    # score 상위로 정렬
-    posts.sort(key=lambda x: x.get("score", 0), reverse=True)
-    print(f"[reddit] 총 {len(posts)}개 수집됨")
+    print(f"[reddit RSS] 총 {len(posts)}개 수집됨")
     return posts
 
 
 async def summarize_reddit(posts: list) -> str:
-    """레딧 게시글 리스트를 Claude로 요약"""
+    """레딧 게시글 리스트를 Claude로 상세히 요약"""
     if not posts:
-        return "(데이터 없음)"
+        return "(데이터 없음 — 레딧 접근 실패. Railway IP 차단 가능성. 잠시 후 다시 시도해주세요.)"
     if not _client:
         return "(ANTHROPIC_API_KEY 미설정)"
 
-    # 게시글 텍스트 조립 (상위 60개까지)
+    # 게시글 텍스트 조립 (상위 80개까지)
     posts_text = "\n".join([
-        f"[{p['sub']}] ▲{p['score']} 💬{p['comments']} | {p['title'][:150]}"
-        + (f" · {p['text'][:200]}" if p.get('text') else "")
-        for p in posts[:60]
+        f"[r/{p['sub']}] {p['title']}"
+        + (f"\n   본문: {p['text'][:250]}" if p.get('text') else "")
+        for p in posts[:80]
     ])
 
     prompt = f"""아래는 미국 투자 커뮤니티(레딧 r/wallstreetbets, r/stocks 등)의 hot 게시글 목록입니다.
-방송 전 앵커가 훑어볼 수 있게 정리해주세요.
+방송 앵커가 훑어볼 수 있게 **생생하고 상세하게** 정리해주세요.
 
-출력 형식 (반드시 이대로):
+⭐ 핵심 원칙: 실제 게시글에 나온 표현·문구를 **직접 인용**해서 보여줄 것. 
+"~라는 표현이 반복됨", "'○○○'이라는 반응 나옴" 같이 어감을 살릴 것.
+
+출력 형식:
 
 🔥 뜨는 종목 TOP 5
-1. TICKER (종목명) — 뜨는 이유 한 줄
-2. TICKER (종목명) — 이유
-3. ...
+1. TICKER (종목명) — 왜 뜨는지 + 실제 언급된 표현 인용
+   예: NVDA (엔비디아) — "실적 서프라이즈 기대감 팽배함. 'This is the way' 같은 문구 반복됨"
+2. ...
 
-📢 주요 이슈
-- 이슈 한 줄
-- 이슈 한 줄
-- 이슈 한 줄
+📢 주요 이슈 (5~7개, 상세하게)
+- 이슈 + 실제 게시글에서 나온 표현/뉘앙스 포함
+  예: "FOMC 앞두고 방어적 심리 확산됨. 'cash is king' '현금 비중 늘렸다' 같은 글 다수 올라옴"
+- ...
 
 💭 시장 심리
-한 문장으로 (예: 반도체 강세 기대감 팽배함 / FOMC 앞두고 방어적 심리 확산됨)
+전반적 분위기 한 문장 + 대표적 감정/표현 2~3개 (직접 인용)
+예: "반도체 강세 기대감 팽배함. 'AI bubble이 아니라 진짜' 'nvidia to the moon' 등 낙관론 우세함"
 
 규칙:
 - 모두 음슴체 ('~함', '~됨', '~임')
-- 여러 게시글에서 다수 언급된 종목·이슈만 다룰 것
-- 단순 밈·개인 자랑 글은 무시
-- 종목은 실제 티커만 (SPY, TSLA, NVDA 등)
-- TOP 5가 안 나오면 나오는 만큼만
+- 여러 게시글에서 다수 언급된 종목·이슈만
+- 실제 게시글 표현을 큰따옴표로 인용해서 생생하게 살릴 것
+- 단순 밈이라도 자주 나오면 언급 (커뮤니티 어감 살리기)
+- 종목은 실제 티커 (SPY, TSLA, NVDA 등)
+- 각 bullet 40~80자 정도로 상세히
 - 정보 부족한 섹션은 "(정보 부족)" 표기
 
 게시글:
-{posts_text[:14000]}"""
+{posts_text[:15000]}"""
 
     try:
         resp = _client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1200,
+            max_tokens=2500,
             messages=[{"role": "user", "content": prompt}]
         )
         return resp.content[0].text.strip()
@@ -260,7 +281,7 @@ async def fetch_naver_all_forums(top_n_stocks: int = 10, posts_per: int = 8) -> 
 
 
 async def summarize_naver(posts: list) -> str:
-    """네이버 종토방 게시글을 Claude로 요약"""
+    """네이버 종토방 게시글을 Claude로 상세히 요약"""
     if not posts:
         return "(데이터 없음 — 네이버 접근 실패 또는 인기 종목 없음)"
     if not _client:
@@ -268,42 +289,46 @@ async def summarize_naver(posts: list) -> str:
 
     posts_text = "\n".join([
         f"[{p['stock']}] 👁 {p['views']} 👍 {p['up']} 👎 {p['down']} | {p['title'][:120]}"
-        for p in posts[:80]
+        for p in posts[:100]
     ])
 
-    prompt = f"""아래는 네이버 금융 종토방에서 인기 종목들의 게시글 목록입니다.
-방송 전 앵커가 훑어볼 수 있게 정리해주세요.
+    prompt = f"""아래는 네이버 금융 종토방의 인기 종목 게시글 목록입니다.
+방송 앵커가 훑어볼 수 있게 **생생하고 상세하게** 정리해주세요.
 
-출력 형식 (반드시 이대로):
+⭐ 핵심 원칙: 실제 게시글 제목의 표현·문구를 **직접 인용**해서 어감을 살릴 것.
+"'○○○'이라는 글이 반복됨", "'△△△'같은 반응 나옴" 이런 식으로.
+
+출력 형식:
 
 🔥 뜨는 종목 TOP 5
-1. 종목명 — 뜨는 이유 한 줄
-2. 종목명 — 이유
-3. ...
+1. 종목명 — 왜 뜨는지 + 실제 게시글에 나온 표현 인용
+   예: SK하이닉스 — "상한가 잠김' 언급 반복됨. '10만원 돌파 가능?' 같은 기대감 표출됨"
+2. ...
 
-📢 주요 이슈
-- 이슈 한 줄
-- 이슈 한 줄
-- 이슈 한 줄
+📢 주요 이슈 (5~7개, 상세하게)
+- 이슈 + 게시글에서 나온 표현·뉘앙스 포함
+  예: "삼성전자·SK하이닉스 반도체 랠리 재개. '개미들 안 뛰어들면 후회함' 같은 FOMO 조장 글 다수"
+- ...
 
 💭 시장 심리
-한 문장으로 (예: XX 실적 기대감 팽배함 / YY 개미들 공포심 확산됨)
+전반적 분위기 한 문장 + 대표적 감정/표현 2~3개 (직접 인용)
+예: "반도체 상한가 축제 분위기. '역사적 급등' '지금이라도 사자' 등 낙관론 우세하나 일부 '고점 아닌가' 우려도 병존함"
 
 규칙:
 - 모두 음슴체 ('~함', '~됨', '~임')
 - 여러 게시글에서 다수 언급된 종목·이슈만
-- 개인 자랑·낚시 제목·욕설 무시
-- 종목명은 그대로 (한글 종목명)
-- TOP 5 안 나오면 나오는 만큼만
+- 낚시 제목·욕설·짤 인용 지양, 시장 감정 대변하는 표현 위주로
+- 종목명은 한글 그대로
+- 각 bullet 40~80자 정도로 상세히
 - 정보 부족한 섹션은 "(정보 부족)" 표기
 
 게시글:
-{posts_text[:14000]}"""
+{posts_text[:15000]}"""
 
     try:
         resp = _client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1200,
+            max_tokens=2500,
             messages=[{"role": "user", "content": prompt}]
         )
         return resp.content[0].text.strip()
