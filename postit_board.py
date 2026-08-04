@@ -20,25 +20,25 @@ def get_postit_board_html() -> str:
 html,body{overflow:hidden;height:100%}
 body{
   font-family:'GmarketSans','GmarketSansMedium',-apple-system,'Segoe UI','Noto Sans KR',sans-serif;
-  background:#fbf9f4;color:#1a1d23;
+  background:#f8f9fa;color:#1a1d23;
   font-weight:500;letter-spacing:-0.01em;
 }
-.topbar{background:#1a1d23;color:#e8b84b;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;position:fixed;top:0;left:0;right:0;z-index:100;height:56px}
+.topbar{background:#1a1d23;color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;position:fixed;top:0;left:0;right:0;z-index:100;height:56px}
 .topbar-title{font-size:16px;font-weight:700}
 .topbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.btn{background:#fff;border:1px solid #e8e1d0;color:#1a1d23;padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:500;font-family:inherit;transition:all .12s}
-.btn:hover{background:#f5efd9;border-color:#e8b84b}
-.btn-primary{background:#e8b84b;color:#1a1d23;border-color:#e8b84b;font-weight:700}
-.btn-primary:hover{background:#f5c754}
+.btn{background:#fff;border:1px solid #e5e7eb;color:#1a1d23;padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:500;font-family:inherit;transition:all .12s}
+.btn:hover{background:#f1f3f5;border-color:#1a1d23}
+.btn-primary{background:#1a1d23;color:#fff;border-color:#1a1d23;font-weight:700}
+.btn-primary:hover{background:#2a2d33}
 .btn-danger{color:#d63031;border-color:#fab1a0}
 .btn-danger:hover{background:#ffe7e4}
 a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 
 /* 캔버스 */
-.canvas-wrap{position:absolute;top:56px;left:0;right:0;bottom:0;overflow:auto;background:#f5f0e4}
-.canvas{position:relative;width:4000px;height:3000px;background-image:
-  linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
-  linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+.canvas-wrap{position:absolute;top:56px;left:0;right:0;bottom:0;overflow:auto;background:#eceff1}
+.canvas{position:relative;width:4000px;height:3000px;background:#ffffff;background-image:
+  linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+  linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
   background-size:24px 24px;
 }
 
@@ -58,7 +58,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .postit:hover{box-shadow:3px 5px 14px rgba(0,0,0,0.2)}
 .postit.dragging{opacity:0.85;box-shadow:5px 8px 20px rgba(0,0,0,0.25);z-index:50}
-.postit.editing{box-shadow:0 0 0 3px #e8b84b, 3px 5px 14px rgba(0,0,0,0.2);z-index:60}
+.postit.editing{box-shadow:0 0 0 3px #1a1d23, 3px 5px 14px rgba(0,0,0,0.2);z-index:60}
 
 .postit-title{
   font-size:18px;font-weight:700;line-height:1.35;color:#1a1d23;
@@ -97,7 +97,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   font-family:inherit;font-weight:700;color:#333;
 }
 .size-btn:hover{background:#fff}
-.size-btn.active{background:#1a1d23;color:#e8b84b;border-color:#1a1d23}
+.size-btn.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
 .postit-delete{
   padding:2px 6px;font-size:11px;background:rgba(255,255,255,0.7);
   border:1px solid rgba(0,0,0,0.15);border-radius:3px;cursor:pointer;color:#d63031;
@@ -138,16 +138,16 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   display:flex;gap:8px;align-items:center;z-index:90;
   box-shadow:0 4px 16px rgba(0,0,0,0.2);
 }
-.new-note-tray-label{color:#e8b84b;font-size:11px;font-weight:600;margin-right:4px}
+.new-note-tray-label{color:#fff;font-size:11px;font-weight:600;margin-right:4px}
 .new-swatch{
   width:24px;height:24px;border-radius:5px;cursor:pointer;
   border:2px solid rgba(255,255,255,0.15);transition:transform .1s;
 }
-.new-swatch:hover{transform:scale(1.15);border-color:#e8b84b}
+.new-swatch:hover{transform:scale(1.15);border-color:#fff}
 
 /* 저장 표시 */
 .save-indicator{
-  position:fixed;bottom:24px;right:24px;background:#1a1d23;color:#e8b84b;
+  position:fixed;bottom:24px;right:24px;background:#1a1d23;color:#fff;
   padding:8px 16px;border-radius:20px;font-size:11px;font-weight:500;
   opacity:0;transition:opacity .3s;pointer-events:none;z-index:200;
   box-shadow:0 4px 12px rgba(0,0,0,0.15);
