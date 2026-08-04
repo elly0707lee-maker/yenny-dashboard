@@ -211,7 +211,17 @@ function parseCards(text){
   const flush = () => {
     if(current){
       if(Array.isArray(current.body)) current.body = current.body.join('\n').trim();
-      cards.push(current);
+      // 병합: title 없이 body만 있는 text 카드가 앞 카드 바로 뒤 + 같은 섹션이면 → 앞 카드에 흡수
+      const last = cards[cards.length - 1];
+      const isOrphanText = current.kind === 'text' && !current.title && current.body;
+      const canMerge = last && last.section === current.section
+                       && (last.kind === '✔️' || last.kind === '☑️' || last.kind === 'stock');
+      if(isOrphanText && canMerge){
+        const lastBody = typeof last.body === 'string' ? last.body : (last.body||[]).join('\n');
+        last.body = (lastBody ? lastBody + '\n' : '') + current.body;
+      } else {
+        cards.push(current);
+      }
       current = null;
     }
   };
@@ -237,12 +247,15 @@ function parseCards(text){
 
     if(l.includes('Check Point') || /^\d{1,2}\/\d{1,2}\s+Check/.test(l)) continue;
 
-    if(l.startsWith('✔️')){
+    // ✔️ / ☑️ 감지 (variation selector 있건 없건)
+    if(l.startsWith('✔')){
       flush();
-      current = {id: genId(), section: section || 'sector', kind: '✔️', title: l.slice(2).trim(), body: []};
-    } else if(l.startsWith('☑️')){
+      const title = l.replace(/^✔️?\s*/, '').trim();
+      current = {id: genId(), section: section || 'sector', kind: '✔️', title: title, body: []};
+    } else if(l.startsWith('☑')){
       flush();
-      current = {id: genId(), section: section || 'signal', kind: '☑️', title: l.slice(2).trim(), body: []};
+      const title = l.replace(/^☑️?\s*/, '').trim();
+      current = {id: genId(), section: section || 'signal', kind: '☑️', title: title, body: []};
     } else if((section === 'kospi' || section === 'kosdaq') && !l.startsWith('-') && !l.startsWith('•')){
       flush();
       current = {id: genId(), section: section, kind: 'stock', title: l, body: []};
@@ -284,7 +297,7 @@ function serializeCards(cards, date){
       const c = list[i];
       const body = typeof c.body === 'string' ? c.body : (c.body||[]).join('\n');
       if(c.kind === '✔️' || c.kind === '☑️'){
-        parts.push(c.kind + (c.title || ''));
+        parts.push(c.kind + (c.title ? ' ' + c.title : ''));
         if(body) parts.push(body);
       } else if(c.kind === 'stock'){
         parts.push(c.title || '');
