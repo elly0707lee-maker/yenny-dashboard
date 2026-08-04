@@ -1,6 +1,10 @@
 """
 체크포인트 풀 페이지 (/checkpoint)
-대시보드의 체크포인트 카드를 별도 페이지로 큰 화면.
+- 카드 기반 UI
+- 카드별 편집
+- 드래그 앤 드롭 순서 변경
+- 지마켓산스 폰트
+- 저장: 텍스트로 재직렬화 → /api/post/checkpoint/replace (봇 호환)
 """
 
 def get_checkpoint_page_html() -> str:
@@ -11,50 +15,113 @@ def get_checkpoint_page_html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Checkpoint · Yenny Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>☑</text></svg>">
+<!-- 지마켓산스 (webfontworld) -->
+<link rel="stylesheet" href="https://webfontworld.github.io/gmarket/GmarketSans.css">
+<!-- SortableJS -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans-serif;background:#fbf9f4;color:#1a1d23;min-height:100vh}
+body{
+  font-family:'GmarketSans','GmarketSansMedium',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR',sans-serif;
+  background:#fbf9f4;color:#1a1d23;min-height:100vh;
+  font-weight:500;letter-spacing:-0.01em;
+}
 .topbar{background:#1a1d23;color:#e8b84b;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
 .topbar-title{font-size:18px;font-weight:700;letter-spacing:.02em}
 .topbar-actions{display:flex;gap:10px;align-items:center}
-.btn{background:#fff;border:1px solid #e8e1d0;color:#1a1d23;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;transition:all .12s}
+.btn{background:#fff;border:1px solid #e8e1d0;color:#1a1d23;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;transition:all .12s;font-family:inherit}
 .btn:hover{background:#f5efd9;border-color:#e8b84b}
 .btn-primary{background:#1a1d23;color:#e8b84b;border-color:#1a1d23}
 .btn-primary:hover{background:#2a2d33;color:#e8b84b}
 .btn-danger{color:#d63031;border-color:#fab1a0}
 .btn-danger:hover{background:#ffe7e4;border-color:#d63031}
+.btn-mini{padding:4px 8px;font-size:11px;background:transparent;border:1px solid transparent;color:#7a8099}
+.btn-mini:hover{background:#fff;border-color:#e8e1d0;color:#1a1d23}
 a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+
 .wrap{max-width:1400px;margin:0 auto;padding:24px}
 .header-info{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-.header-title{font-size:22px;font-weight:700;color:#1a1d23}
+.header-title{font-size:24px;font-weight:700;color:#1a1d23}
 .header-date{font-size:14px;color:#7a8099}
-.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e8e1d0}
-.tab{background:#fff;border:1px solid #e8e1d0;color:#1a1d23;padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer;font-weight:500;transition:all .12s}
+
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #e8e1d0}
+.tab{background:#fff;border:1px solid #e8e1d0;color:#1a1d23;padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer;font-weight:500;transition:all .12s;font-family:inherit}
 .tab:hover{background:#f5efd9}
 .tab.active{background:#1a1d23;color:#e8b84b;border-color:#1a1d23}
-.content-body{min-height:400px}
-.content-empty{color:#b2bec3;font-style:italic;display:block;padding:60px 20px;text-align:center}
-.cp-card{background:#fff;border:1px solid #f0e9d8;border-radius:10px;padding:14px 16px;margin-bottom:10px}
-.cp-card-sub{font-size:11px;color:#7a8099;letter-spacing:.06em;margin-bottom:6px;font-weight:600;text-transform:uppercase}
-.cp-card-title{font-size:15px;font-weight:700;color:#1a1d23;margin-bottom:8px;display:flex;align-items:center;gap:6px}
-.cp-card-body{font-size:13px;color:#2d3436;line-height:1.7;white-space:pre-wrap}
-.cp-card-body a{color:#0984e3;text-decoration:none}
-.cp-card-body a:hover{text-decoration:underline}
-.cp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
-#cp-editor{width:100%;min-height:520px;font-family:monospace;font-size:14px;padding:16px;border:1.5px solid #e8b84b;border-radius:10px;background:#fdfbf5;line-height:1.7;outline:none;white-space:pre-wrap}
-.toolbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;background:#fffdf6;border:1px solid #e8e1d0;border-radius:8px;align-items:center}
-.toolbar-label{font-size:10px;color:#888;letter-spacing:.04em;margin-right:4px}
-.toolbar button{width:28px;height:28px;border:1px solid #e8e1d0;background:#fff;border-radius:5px;cursor:pointer;font-weight:700}
-.toolbar .sep{width:1px;height:18px;background:#e8e1d0;margin:0 4px}
-.link-legend{margin-bottom:10px;padding:10px 12px;background:#fff3a0;border-radius:8px;font-size:11px;line-height:1.7}
-.notice{padding:10px 14px;background:#fff3a0;border-radius:8px;font-size:12px;margin-bottom:12px}
+
+.section{margin-bottom:28px}
+.section-heading{
+  font-size:15px;color:#1a1d23;font-weight:700;letter-spacing:.02em;
+  margin-bottom:10px;padding-bottom:8px;border-bottom:1.5px solid #e8b84b;
+}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+
+.card{
+  background:#fff;border:1px solid #f0e9d8;border-radius:12px;padding:14px 16px;
+  transition:all .15s;position:relative;
+}
+.card:hover{border-color:#e8b84b;box-shadow:0 2px 8px rgba(232,184,75,0.12)}
+.card.editing{border-color:#e8b84b;box-shadow:0 0 0 3px rgba(232,184,75,0.15)}
+.card.dragging{opacity:0.5;transform:rotate(1deg)}
+.card.drag-ghost{background:#f5efd9;border-style:dashed}
+
+.card-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.drag-handle{
+  cursor:grab;color:#c8c1b0;font-size:14px;padding:2px 4px;user-select:none;
+  transition:color .12s;
+}
+.card:hover .drag-handle{color:#7a8099}
+.drag-handle:active{cursor:grabbing}
+
+.card-sub{
+  font-size:10px;color:#7a8099;letter-spacing:.08em;font-weight:600;
+  text-transform:uppercase;flex-shrink:0;
+}
+.card-actions{margin-left:auto;display:flex;gap:2px;opacity:0;transition:opacity .12s}
+.card:hover .card-actions{opacity:1}
+
+.card-title{
+  font-size:16px;font-weight:700;color:#1a1d23;margin-bottom:8px;
+  display:flex;align-items:center;gap:6px;line-height:1.4;
+}
+.card-title[contenteditable]:focus{outline:none;background:#fdfbf5;border-radius:4px;padding:2px 6px;margin:-2px -6px 6px -6px}
+
+.card-body{
+  font-size:13px;color:#2d3436;line-height:1.75;white-space:pre-wrap;
+}
+.card-body[contenteditable]:focus{outline:none;background:#fdfbf5;border-radius:6px;padding:6px 8px;margin:-6px -8px}
+.card-body a{color:#0984e3;text-decoration:none}
+.card-body a:hover{text-decoration:underline}
+
+.card-save-row{
+  display:none;margin-top:10px;padding-top:10px;border-top:1px dashed #e8e1d0;
+  gap:6px;
+}
+.card.editing .card-save-row{display:flex}
+.card.editing .card-actions{opacity:0}
+
+.content-empty{
+  color:#b2bec3;font-style:italic;display:block;padding:80px 20px;text-align:center;
+  font-size:14px;
+}
+
+.save-indicator{
+  position:fixed;bottom:24px;right:24px;background:#1a1d23;color:#e8b84b;
+  padding:10px 18px;border-radius:24px;font-size:12px;font-weight:500;
+  opacity:0;transition:opacity .3s;pointer-events:none;z-index:200;
+  box-shadow:0 4px 12px rgba(0,0,0,0.15);
+}
+.save-indicator.visible{opacity:1}
+
 @media print{
   @page{size:A4 landscape;margin:10mm 12mm}
   body{background:#fff}
-  .topbar,.tabs,.btn,.toolbar{display:none !important}
+  .topbar,.tabs,.btn,.card-actions,.drag-handle,.card-save-row,.save-indicator{display:none !important}
   .wrap{max-width:none;padding:0}
-  .cp-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr)) !important;gap:5mm !important}
-  .cp-card{page-break-inside:avoid;break-inside:avoid;padding:8px 10px !important}
+  .section-heading{border-bottom:1.5px solid #000 !important}
+  .grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr)) !important;gap:5mm !important}
+  .card{page-break-inside:avoid;break-inside:avoid;padding:8px 10px !important;box-shadow:none !important;border:1px solid #999 !important}
   *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
 }
 </style>
@@ -64,8 +131,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   <div class="topbar-title">☑ 체크포인트</div>
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
-    <button class="btn" onclick="loadCp()" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
-    <button class="btn btn-primary" onclick="enterEdit()" id="edit-btn">✏️ 편집</button>
+    <button class="btn" onclick="loadCp()">↻ 새로고침</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
     <button class="btn btn-danger" onclick="clearAll()">🗑 초기화</button>
   </div>
@@ -87,13 +153,14 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
     <button class="tab" onclick="switchTab(this,'kosdaq')">📌 코스닥</button>
   </div>
 
-  <div id="cp-body" class="content-body">
+  <div id="cp-body">
     <span class="content-empty">불러오는 중...</span>
   </div>
 </div>
 
+<div id="save-indicator" class="save-indicator">💾 저장됨</div>
+
 <script>
-// fetch wrapper — API 인증 헤더 자동 삽입
 (function(){
   const orig = window.fetch;
   window.fetch = function(url, opts){
@@ -107,130 +174,285 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   };
 })();
 
-let _cpRaw = '';
 let _cpDate = '';
-let _cpLinkMap = [];
+let _cards = [];
 let _currentTab = 'all';
-let _editing = false;
+let _saveTimer = null;
 
-const CP_SECTIONS = {
-  indicator: ['📊지표','📊 지표'],
-  us_market: ['🇺🇸美증시 마감','🇺🇸 美증시 마감','🇺🇸美증시','🇺🇸 美증시'],
-  signal: ['📡시장 시그널','📡 시장 시그널'],
-  sector: ['📌Sector','📌 Sector','📌sector','📌섹터','📌 섹터'],
-  kospi: ['📌코스피','📌 코스피'],
-  kosdaq: ['📌코스닥','📌 코스닥'],
-};
+function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-function esc(s){
-  return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// 사용자 강조 태그는 보존
 function escPreserve(text){
   text = String(text || '');
-  const placeholders = [];
+  const ph = [];
   const pattern = /<(\/?(?:b|i|u|strong|em)\b|font\s+color\s*=\s*"[^"]*"|\/font|span\s+style\s*=\s*"(?:color|background-color|background)\s*:[^"]*"|\/span)>/gi;
-  text = text.replace(pattern, function(m){
-    placeholders.push(m);
-    return '\x00FMT' + (placeholders.length - 1) + '\x00';
-  });
+  text = text.replace(pattern, m => { ph.push(m); return '\x00F' + (ph.length - 1) + '\x00'; });
   text = text.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  text = text.replace(/\x00FMT(\d+)\x00/g, function(_, i){ return placeholders[parseInt(i)]; });
+  text = text.replace(/\x00F(\d+)\x00/g, (_, i) => ph[parseInt(i)]);
   return text;
 }
 
 function linkify(text){
   let s = escPreserve(text);
-  // [[LINK:url]] 마커를 🔗 링크로
-  let idx = 0;
-  s = s.replace(/\[\[LINK:([^\]]+)\]\]/g, function(_, url){
-    idx++;
-    return ' <a href="'+url.replace(/&/g,'&amp;')+'" target="_blank" title="'+esc(url)+'">🔗</a>';
-  });
+  s = s.replace(/\[\[LINK:([^\]]+)\]\]/g, (_, url) =>
+    ' <a href="'+url.replace(/&/g,'&amp;')+'" target="_blank">🔗</a>'
+  );
   return s;
 }
 
-function parseSection(text, headers){
-  if(!text) return null;
+function genId(){ return 'c' + Math.random().toString(36).slice(2, 10); }
+
+function parseCards(text){
+  if(!text) return [];
   const lines = text.split('\n');
-  let capturing = false, result = [];
-  let headerAdded = false;
-  for(let i=0;i<lines.length;i++){
-    const l = lines[i];
-    const isHeader = headers.some(h=>l.includes(h));
-    const isOtherHeader = !isHeader && /^(📌|📊|🇺🇸|📡)/.test(l);
-    if(isHeader){
-      if(!headerAdded){ result.push(l); headerAdded = true; }
-      capturing = true;
+  const cards = [];
+  let section = null;
+  let current = null;
+
+  const flush = () => {
+    if(current){
+      if(Array.isArray(current.body)) current.body = current.body.join('\n').trim();
+      cards.push(current);
+      current = null;
+    }
+  };
+
+  for(const raw of lines){
+    const l = raw.trim();
+    if(!l){
+      if(current && Array.isArray(current.body)) current.body.push('');
       continue;
     }
-    if(isOtherHeader && capturing){
-      capturing = false;
-    }
-    if(capturing && l.trim()){
-      result.push(l);
-    }
-  }
-  return result.length > 0 ? result.join('\n') : null;
-}
 
-// 섹션 텍스트 → 카드 배열 (각 ✔️ 또는 종목명 = 한 카드)
-function parseCards(sectionText, kind){
-  if(!sectionText) return [];
-  const lines = sectionText.split('\n');
-  const cards = [];
-  let current = null;
-  const markers = kind === 'sector' ? /^✔️/ : (kind === 'signal' ? /^☑️/ : null);
-  let started = false;
+    if(l.startsWith('📊')){ flush(); section = 'indicator'; continue; }
+    if(l.startsWith('🇺🇸')){ flush(); section = 'us_market'; continue; }
+    if(l.startsWith('📡')){ flush(); section = 'signal'; continue; }
+    if(l.startsWith('📌')){
+      flush();
+      if(l.includes('Sector') || l.includes('sector') || l.includes('섹터')) section = 'sector';
+      else if(l.includes('코스피')) section = 'kospi';
+      else if(l.includes('코스닥')) section = 'kosdaq';
+      else section = 'other';
+      continue;
+    }
 
-  for(const l of lines){
-    if(/^(📌|📊|🇺🇸|📡)/.test(l)){ started = true; continue; } // 헤더는 무시
-    if(!started){ started = true; continue; }
-    if(markers && markers.test(l)){
-      // 새 카드 시작
-      if(current) cards.push(current);
-      current = {title: l, body: []};
-    } else if(kind === 'stock'){
-      // 코스피/코스닥 — 종목명이 카드 제목, - 로 시작 = 본문
-      if(l.trim() && !l.trim().startsWith('-') && !l.trim().startsWith('•')){
-        if(current) cards.push(current);
-        current = {title: l.trim(), body: []};
-      } else if(current){
-        current.body.push(l);
+    if(l.includes('Check Point') || /^\d{1,2}\/\d{1,2}\s+Check/.test(l)) continue;
+
+    if(l.startsWith('✔️')){
+      flush();
+      current = {id: genId(), section: section || 'sector', kind: '✔️', title: l.slice(2).trim(), body: []};
+    } else if(l.startsWith('☑️')){
+      flush();
+      current = {id: genId(), section: section || 'signal', kind: '☑️', title: l.slice(2).trim(), body: []};
+    } else if((section === 'kospi' || section === 'kosdaq') && !l.startsWith('-') && !l.startsWith('•')){
+      flush();
+      current = {id: genId(), section: section, kind: 'stock', title: l, body: []};
+    } else if(section === 'indicator' || section === 'us_market'){
+      if(!current || current.kind !== 'text'){
+        flush();
+        current = {id: genId(), section: section, kind: 'text', title: '', body: []};
       }
+      current.body.push(raw);
     } else if(current){
-      current.body.push(l);
-    } else {
-      // 카드 없이 시작하는 텍스트 (지표 등)
-      current = {title: '', body: [l]};
+      current.body.push(raw);
+    } else if(section){
+      current = {id: genId(), section: section, kind: 'text', title: '', body: [raw]};
     }
   }
-  if(current) cards.push(current);
+  flush();
   return cards;
 }
 
-function renderCards(cards, kind){
-  if(!cards.length) return '';
-  const isGrid = (kind === 'sector' || kind === 'stock' || kind === 'signal');
-  const wrapClass = isGrid ? 'cp-grid' : '';
-  let html = '<div class="'+wrapClass+'">';
+function serializeCards(cards, date){
+  const order = ['indicator', 'us_market', 'signal', 'sector', 'kospi', 'kosdaq', 'other'];
+  const headers = {
+    indicator: '📊지표', us_market: '🇺🇸美증시 마감', signal: '📡시장 시그널',
+    sector: '📌Sector', kospi: '📌코스피', kosdaq: '📌코스닥', other: '📌기타',
+  };
+  const bySection = {};
   for(const c of cards){
-    html += '<div class="cp-card">';
-    if(c.title){
-      const sub = kind === 'sector' ? '섹터' : (kind === 'signal' ? '시그널' : (kind === 'stock' ? '종목' : ''));
-      if(sub) html += '<div class="cp-card-sub">'+sub+'</div>';
-      html += '<div class="cp-card-title">'+linkify(c.title)+'</div>';
-    }
-    html += '<div class="cp-card-body">'+linkify(c.body.join('\n'))+'</div>';
-    html += '</div>';
+    const s = c.section || 'other';
+    if(!bySection[s]) bySection[s] = [];
+    bySection[s].push(c);
   }
-  html += '</div>';
-  return html;
+  const parts = [`${date || new Date().toISOString().slice(0,10)} Check Point✨`];
+  for(const s of order){
+    if(!bySection[s]) continue;
+    parts.push('');
+    parts.push(headers[s]);
+    const list = bySection[s];
+    for(let i = 0; i < list.length; i++){
+      const c = list[i];
+      const body = typeof c.body === 'string' ? c.body : (c.body||[]).join('\n');
+      if(c.kind === '✔️' || c.kind === '☑️'){
+        parts.push(c.kind + (c.title || ''));
+        if(body) parts.push(body);
+      } else if(c.kind === 'stock'){
+        parts.push(c.title || '');
+        if(body) parts.push(body);
+      } else {
+        if(c.title) parts.push(c.title);
+        if(body) parts.push(body);
+      }
+      if((s === 'sector' || s === 'signal' || s === 'kospi' || s === 'kosdaq') && i < list.length - 1){
+        parts.push('');
+      }
+    }
+  }
+  return parts.join('\n');
 }
 
-function renderPlain(text){
-  return '<div class="cp-card"><div class="cp-card-body">'+linkify(text)+'</div></div>';
+const SEC_LABEL = {
+  indicator: '📊 지표', us_market: '🇺🇸 美증시', signal: '📡 시장 시그널',
+  sector: '📌 Sector', kospi: '📌 코스피', kosdaq: '📌 코스닥', other: '📌 기타',
+};
+const CARD_SUB = {'✔️':'섹터', '☑️':'시그널', 'stock':'종목', 'text':''};
+
+function renderCard(c){
+  const bodyText = typeof c.body === 'string' ? c.body : (c.body||[]).join('\n');
+  const titleHtml = c.kind === '✔️' ? '✔️ ' + linkify(c.title || '')
+                  : c.kind === '☑️' ? '☑️ ' + linkify(c.title || '')
+                  : linkify(c.title || '');
+  const sub = CARD_SUB[c.kind] || '';
+  const hasTitle = c.title !== undefined && c.title !== '' && c.kind !== 'text';
+  return `
+    <div class="card" data-card-id="${c.id}" data-section="${c.section}">
+      <div class="card-header">
+        <span class="drag-handle" title="드래그로 이동">⋮⋮</span>
+        ${sub ? '<span class="card-sub">'+sub+'</span>' : ''}
+        <div class="card-actions">
+          <button class="btn btn-mini" onclick="editCard('${c.id}')" title="편집">✏️</button>
+          <button class="btn btn-mini" onclick="deleteCard('${c.id}')" title="삭제">🗑</button>
+        </div>
+      </div>
+      ${hasTitle ? `<div class="card-title" data-field="title">${titleHtml}</div>` : ''}
+      <div class="card-body" data-field="body">${linkify(bodyText)}</div>
+      <div class="card-save-row">
+        <button class="btn btn-primary" onclick="saveCardEdit('${c.id}')">💾 저장</button>
+        <button class="btn" onclick="cancelCardEdit('${c.id}')">✕ 취소</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSection(sectionKey, cards){
+  if(!cards.length) return '';
+  const list = cards.map(renderCard).join('');
+  return `
+    <div class="section">
+      <div class="section-heading">${SEC_LABEL[sectionKey] || sectionKey}</div>
+      <div class="grid" data-section-key="${sectionKey}">${list}</div>
+    </div>
+  `;
+}
+
+function render(){
+  const body = document.getElementById('cp-body');
+  if(!_cards.length){
+    body.innerHTML = '<span class="content-empty">체크포인트가 비어있음. 봇으로 보내면 여기 표시됨.</span>';
+    return;
+  }
+  const groups = {};
+  for(const c of _cards){
+    const s = c.section || 'other';
+    if(!groups[s]) groups[s] = [];
+    groups[s].push(c);
+  }
+  const order = ['indicator', 'us_market', 'signal', 'sector', 'kospi', 'kosdaq', 'other'];
+  let html = '';
+  for(const s of order){
+    if(!groups[s]) continue;
+    if(_currentTab !== 'all' && _currentTab !== s) continue;
+    html += renderSection(s, groups[s]);
+  }
+  body.innerHTML = html || '<span class="content-empty">이 섹션은 비어있음.</span>';
+  attachSortable();
+}
+
+function attachSortable(){
+  document.querySelectorAll('.grid[data-section-key]').forEach(grid => {
+    new Sortable(grid, {
+      animation: 150,
+      handle: '.drag-handle',
+      ghostClass: 'drag-ghost',
+      dragClass: 'dragging',
+      group: 'cards',
+      onEnd: () => {
+        reorderFromDOM();
+        scheduleSave();
+      }
+    });
+  });
+}
+
+function reorderFromDOM(){
+  const newOrder = [];
+  document.querySelectorAll('.grid[data-section-key]').forEach(grid => {
+    const sectionKey = grid.getAttribute('data-section-key');
+    grid.querySelectorAll('.card').forEach(cardEl => {
+      const id = cardEl.getAttribute('data-card-id');
+      const c = _cards.find(x => x.id === id);
+      if(c){
+        c.section = sectionKey;
+        newOrder.push(c);
+      }
+    });
+  });
+  _cards = newOrder;
+}
+
+function editCard(id){
+  const card = _cards.find(c => c.id === id);
+  if(!card) return;
+  const el = document.querySelector('[data-card-id="'+id+'"]');
+  if(!el) return;
+  el.classList.add('editing');
+  const titleEl = el.querySelector('[data-field="title"]');
+  const bodyEl = el.querySelector('[data-field="body"]');
+  if(titleEl){
+    titleEl.setAttribute('contenteditable', 'true');
+    titleEl.innerHTML = escPreserve(card.title || '').replace(/\n/g,'<br>');
+    titleEl.focus();
+  }
+  if(bodyEl){
+    bodyEl.setAttribute('contenteditable', 'true');
+    const bodyText = typeof card.body === 'string' ? card.body : (card.body||[]).join('\n');
+    bodyEl.innerHTML = escPreserve(bodyText).replace(/\n/g,'<br>');
+  }
+  if(!titleEl) bodyEl.focus();
+}
+
+function saveCardEdit(id){
+  const card = _cards.find(c => c.id === id);
+  if(!card) return;
+  const el = document.querySelector('[data-card-id="'+id+'"]');
+  const titleEl = el.querySelector('[data-field="title"]');
+  const bodyEl = el.querySelector('[data-field="body"]');
+  const stripHtml = (h) => h.replace(/<div><br><\/div>/gi,'\n').replace(/<div>/gi,'\n').replace(/<\/div>/gi,'').replace(/<br\s*\/?>/gi,'\n').replace(/&nbsp;/gi,' ');
+  if(titleEl){
+    card.title = stripHtml(titleEl.innerHTML).trim();
+  }
+  if(bodyEl){
+    card.body = stripHtml(bodyEl.innerHTML).trim();
+  }
+  el.classList.remove('editing');
+  render();
+  scheduleSave();
+}
+
+function cancelCardEdit(id){
+  const el = document.querySelector('[data-card-id="'+id+'"]');
+  if(el) el.classList.remove('editing');
+  render();
+}
+
+function deleteCard(id){
+  const card = _cards.find(c => c.id === id);
+  if(!card) return;
+  const preview = (card.title || (typeof card.body === 'string' ? card.body : (card.body||[]).join(' '))).slice(0, 40);
+  if(!confirm('이 카드를 삭제할까요?\n"' + preview + '"')) return;
+  _cards = _cards.filter(c => c.id !== id);
+  render();
+  scheduleSave();
 }
 
 function switchTab(btn, key){
@@ -240,61 +462,28 @@ function switchTab(btn, key){
   render();
 }
 
-function render(){
-  const body = document.getElementById('cp-body');
-  if(!_cpRaw){
-    body.innerHTML = '<span class="content-empty">체크포인트가 비어있음. 봇으로 보내면 여기 표시됨.</span>';
-    return;
-  }
-  if(_editing) return; // 편집 모드 렌더 스킵
+function scheduleSave(){
+  if(_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(saveNow, 800);
+}
 
-  if(_currentTab === 'all'){
-    let html = '';
-    const order = [
-      {key:'indicator', label:'📊 지표'},
-      {key:'us_market', label:'🇺🇸 美증시'},
-      {key:'signal', label:'📡 시장 시그널'},
-      {key:'sector', label:'📌 Sector'},
-      {key:'kospi', label:'📌 코스피'},
-      {key:'kosdaq', label:'📌 코스닥'},
-    ];
-    for(const o of order){
-      const sec = parseSection(_cpRaw, CP_SECTIONS[o.key]);
-      if(!sec) continue;
-      html += '<div style="font-size:12px;color:#7a8099;font-weight:700;letter-spacing:.08em;margin:'+(html?'22px':'0')+' 0 8px;">'+o.label+'</div>';
-      if(o.key === 'sector'){
-        html += renderCards(parseCards(sec, 'sector'), 'sector');
-      } else if(o.key === 'signal'){
-        html += renderCards(parseCards(sec, 'signal'), 'signal');
-      } else if(o.key === 'kospi' || o.key === 'kosdaq'){
-        html += renderCards(parseCards(sec, 'stock'), 'stock');
-      } else {
-        // 지표·미증시는 텍스트만 (미증시는 ☑️ 있으면 카드로)
-        if(o.key === 'us_market' && sec.includes('☑️')){
-          html += renderCards(parseCards(sec, 'signal'), 'signal');
-        } else {
-          const bodyText = sec.split('\n').slice(1).join('\n').trim();
-          if(bodyText) html += renderPlain(bodyText);
-        }
-      }
-    }
-    body.innerHTML = html || '<span class="content-empty">파싱된 섹션이 없음. 편집 눌러서 원문 확인.</span>';
-  } else {
-    const sec = parseSection(_cpRaw, CP_SECTIONS[_currentTab]);
-    if(!sec){ body.innerHTML = '<span class="content-empty">이 섹션은 비어있음.</span>'; return; }
-    if(_currentTab === 'sector'){
-      body.innerHTML = renderCards(parseCards(sec, 'sector'), 'sector');
-    } else if(_currentTab === 'signal'){
-      body.innerHTML = renderCards(parseCards(sec, 'signal'), 'signal');
-    } else if(_currentTab === 'kospi' || _currentTab === 'kosdaq'){
-      body.innerHTML = renderCards(parseCards(sec, 'stock'), 'stock');
-    } else if(_currentTab === 'us_market' && sec.includes('☑️')){
-      body.innerHTML = renderCards(parseCards(sec, 'signal'), 'signal');
-    } else {
-      const bodyText = sec.split('\n').slice(1).join('\n').trim();
-      body.innerHTML = bodyText ? renderPlain(bodyText) : '<span class="content-empty">비어있음</span>';
-    }
-  }
+async function saveNow(){
+  const text = serializeCards(_cards, _cpDate);
+  try {
+    const res = await fetch('/api/post/checkpoint/replace', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: text, date: _cpDate || new Date().toISOString().slice(0,10)})
+    });
+    if(res.ok) showSaved();
+  } catch(e){ console.error('save error', e); }
+}
+
+function showSaved(){
+  const el = document.getElementById('save-indicator');
+  el.textContent = '💾 저장됨 ' + new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'});
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 2000);
 }
 
 async function loadCp(){
@@ -305,148 +494,29 @@ async function loadCp(){
       return;
     }
     const data = await res.json();
-    _cpRaw = data.content || '';
+    const text = data.content || '';
     _cpDate = data.date || '';
     document.getElementById('cp-date').textContent = _cpDate;
-    // 링크 마커 인덱스 만들기
-    _cpLinkMap = [];
-    const urls = _cpRaw.match(/\[\[LINK:([^\]]+)\]\]/g) || [];
-    for(const u of urls){
-      const m = u.match(/\[\[LINK:([^\]]+)\]\]/);
-      if(m && !_cpLinkMap.includes(m[1])) _cpLinkMap.push(m[1]);
-    }
+    _cards = parseCards(text);
     render();
   } catch(e) {
     document.getElementById('cp-body').innerHTML = '<span class="content-empty">에러: '+esc(e.message)+'</span>';
   }
 }
 
-function cpRawToEdit(raw){
-  if(!raw) return '';
-  // [[LINK:url]] → [🔗n]
-  let idx = 0;
-  const urlToIdx = {};
-  const edited = raw.replace(/\[\[LINK:([^\]]+)\]\]/g, function(_, url){
-    if(!(url in urlToIdx)){
-      idx++;
-      urlToIdx[url] = idx;
-    }
-    return ' [🔗'+urlToIdx[url]+']';
-  });
-  return edited;
-}
-
-function cpEditToRaw(text){
-  if(!text) return '';
-  return text.replace(/\s*\[🔗(\d+)\]/g, function(_, n){
-    const i = parseInt(n) - 1;
-    if(i >= 0 && i < _cpLinkMap.length) return ' [[LINK:'+_cpLinkMap[i]+']]';
-    return '';
-  });
-}
-
-function enterEdit(){
-  _editing = true;
-  document.getElementById('edit-btn').style.display = 'none';
-  document.getElementById('cp-tabs').style.display = 'none';
-  const editText = cpRawToEdit(_cpRaw || '');
-
-  let legend = '';
-  if(_cpLinkMap.length > 0){
-    legend = '<div class="link-legend"><div style="font-weight:700;margin-bottom:4px;">🔗 링크 토큰 (지우면 링크 사라짐)</div>';
-    _cpLinkMap.forEach((url, i) => {
-      legend += '<div><b style="background:#1a1d23;color:#e8b84b;padding:1px 6px;border-radius:3px;font-size:10px;">[🔗'+(i+1)+']</b> <a href="'+url+'" target="_blank" style="color:#0984e3;font-size:10px;">'+esc(url.slice(0,80))+'</a></div>';
-    });
-    legend += '</div>';
-  }
-
-  const toolbar = `<div class="toolbar">
-    <span class="toolbar-label">텍스트 도구</span>
-    <button onmousedown="event.preventDefault()" onclick="fmt('foreColor','#d63031')" style="color:#d63031">A</button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('foreColor','#0984e3')" style="color:#0984e3">A</button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('foreColor','#1a1d23')">A</button>
-    <span class="sep"></span>
-    <button onmousedown="event.preventDefault()" onclick="fmt('hiliteColor','#fff59d')" style="background:#fff59d">■</button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('hiliteColor','#ffcdd2')" style="background:#ffcdd2">■</button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('hiliteColor','#c8e6c9')" style="background:#c8e6c9">■</button>
-    <span class="sep"></span>
-    <button onmousedown="event.preventDefault()" onclick="fmt('bold')">B</button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('italic')" style="font-style:italic">I</button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('underline')"><u>U</u></button>
-    <button onmousedown="event.preventDefault()" onclick="fmt('removeFormat')" style="width:auto;padding:0 8px;">✖ 원복</button>
-  </div>`;
-
-  const safeText = escPreserve(editText).replace(/\n/g, '<br>');
-  const editor = '<div id="cp-editor" contenteditable="true">'+safeText+'</div>';
-  const btns = '<div style="margin-top:10px;display:flex;gap:8px;"><button class="btn btn-primary" onclick="saveEdit()">💾 저장</button><button class="btn" onclick="cancelEdit()">✕ 취소</button></div>';
-
-  document.getElementById('cp-body').innerHTML = legend + toolbar + editor + btns;
-  document.getElementById('cp-editor').focus();
-}
-
-function fmt(cmd, value){
-  document.execCommand(cmd, false, value || null);
-}
-
-function cancelEdit(){
-  _editing = false;
-  document.getElementById('edit-btn').style.display = '';
-  document.getElementById('cp-tabs').style.display = '';
-  render();
-}
-
-async function saveEdit(){
-  const ed = document.getElementById('cp-editor');
-  if(!ed) return;
-  let html = ed.innerHTML;
-  html = html.replace(/<div><br><\/div>/gi, '\n');
-  html = html.replace(/<div>/gi, '\n');
-  html = html.replace(/<\/div>/gi, '');
-  html = html.replace(/<br\s*\/?>/gi, '\n');
-  html = html.replace(/&nbsp;/gi, ' ');
-  const raw = cpEditToRaw(html);
-  try {
-    const res = await fetch('/api/post/checkpoint/replace', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: raw, date: new Date().toISOString().slice(0,10)})
-    });
-    if(!res.ok){ alert('저장 실패 HTTP '+res.status); return; }
-    _cpRaw = raw;
-    _editing = false;
-    document.getElementById('edit-btn').style.display = '';
-    document.getElementById('cp-tabs').style.display = '';
-    await loadCp();
-  } catch(e){ alert('저장 오류: '+e.message); }
-}
-
-// 단축키
-document.addEventListener('keydown', (e) => {
-  if(!_editing) return;
-  const isCmd = e.metaKey || e.ctrlKey;
-  if(!isCmd || !e.shiftKey) return;
-  const map = {
-    '1': ['foreColor', '#d63031'], '2': ['foreColor', '#0984e3'], '3': ['foreColor', '#1a1d23'],
-    '4': ['hiliteColor', '#fff59d'], '5': ['hiliteColor', '#ffcdd2'], '6': ['hiliteColor', '#c8e6c9'],
-    '0': ['removeFormat', null],
-  };
-  const hit = map[e.key];
-  if(hit){ e.preventDefault(); fmt(hit[0], hit[1]); }
-});
-
 async function clearAll(){
-  if(!confirm('체크포인트를 전부 비울까요?\n되돌릴 수 없음 (봇도 다음 메시지부터 새로 시작).')) return;
+  if(!confirm('체크포인트를 전부 비울까요?\n되돌릴 수 없음.')) return;
   try {
     await fetch('/api/post/checkpoint/replace', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
     });
-    location.reload();
+    _cards = [];
+    render();
   } catch(e){ alert('오류: '+e.message); }
 }
 
-// 시작 시 로드
 loadCp();
 </script>
 </body>
