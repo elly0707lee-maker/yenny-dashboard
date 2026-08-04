@@ -8,6 +8,7 @@ import pg8000.native
 from mindmap import get_mindmap_html
 from wandaebon import get_wandaebon_html, parse_wandaebon_docx
 from community_buzz import generate_buzz_sync
+from checkpoint_page import get_checkpoint_page_html
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -376,6 +377,15 @@ def index():
 @requires_auth
 def mindmap_page():
     html = get_mindmap_html()
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/checkpoint")
+@requires_auth
+def checkpoint_page():
+    html = get_checkpoint_page_html()
     secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
     html = html.replace('</head>', f'{secret_script}</head>', 1)
     return Response(html, mimetype="text/html")
@@ -1722,6 +1732,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <span class="content-title">☑ 오늘 체크포인트</span>
         <div style="display:flex;gap:6px;align-items:center;">
           <span class="content-date" id="checkpoint-date"></span>
+          <a href="/checkpoint" target="_blank" class="btn" style="font-size:11px;padding:5px 10px;text-decoration:none;color:#e8b84b;background:#1a1d23;border-color:#1a1d23;" title="큰 화면에서 열기">🖼️ 팝업</a>
           <button class="btn" onclick="loadPost('checkpoint','checkpoint-body','checkpoint-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
           <button class="btn" onclick="enterCpEdit()" id="cp-edit-btn" style="font-size:11px;padding:5px 10px;">✏️ 편집</button>
           <button class="btn" onclick="printCheckpoint()" style="font-size:11px;padding:5px 10px;" title="모든 섹션 한 번에 인쇄 / PDF 저장">🖨️ 인쇄</button>
