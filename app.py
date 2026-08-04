@@ -1741,14 +1741,13 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- ON AIR — 마인드맵 + 완대본 -->
+  <!-- ON AIR — 마인드맵 -->
   <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card" style="padding:14px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 완대본 메모</span>
+      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
-        <a href="/onair" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🎙️ ON AIR →</a>
       </div>
     </div>
   </div>
