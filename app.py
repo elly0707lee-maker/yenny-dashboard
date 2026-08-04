@@ -9,6 +9,7 @@ from mindmap import get_mindmap_html
 from wandaebon import get_wandaebon_html, parse_wandaebon_docx
 from community_buzz import generate_buzz_sync
 from checkpoint_page import get_checkpoint_page_html
+from postit_board import get_postit_board_html
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -287,6 +288,7 @@ POST_TYPE_KEEP = {
     "closing": 1,    # 마감일지 — 봇이 매일 새로, 최신만 필요
     "onair": 1,      # 완대본 페이지 상태 (메모 + Q편집 + docx 파싱결과 JSON)
     "buzz": 1,       # 커뮤니티 버즈 — 매번 새로 생성, 최신만 필요
+    "postit": 1,     # 질문 보드 — 최신 1개
 }
 
 def save_post(t, content, date):
@@ -391,6 +393,15 @@ def checkpoint_page():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/postit")
+@requires_auth
+def postit_page():
+    html = get_postit_board_html()
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
 @app.route("/onair")
 @requires_auth
 def wandaebon_page():
@@ -457,7 +468,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -467,7 +478,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -510,7 +521,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -523,8 +534,8 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        # mindmap/checkpoint/closing/onair/buzz는 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz"):
+        # mindmap/checkpoint/closing/onair/buzz/postit는 빈 콘텐츠 저장 허용 (초기화용)
+        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
@@ -1756,9 +1767,10 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
   <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card" style="padding:14px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리</span>
+      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 질문 보드</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
+        <a href="/postit" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗂️ 질문 보드 →</a>
       </div>
     </div>
   </div>
