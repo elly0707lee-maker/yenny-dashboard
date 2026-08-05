@@ -112,6 +112,21 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .postit:hover .resize-handle{opacity:0.5}
 
+/* 삭제 X 버튼 (우상단, 항상 표시) */
+.postit-x{
+  position:absolute;top:5px;right:5px;
+  width:22px;height:22px;
+  background:rgba(255,255,255,0.75);
+  border:1px solid rgba(0,0,0,0.15);
+  border-radius:50%;color:#d63031;
+  font-size:13px;font-weight:bold;line-height:1;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0.35;transition:all .15s;z-index:2;
+}
+.postit:hover .postit-x{opacity:1}
+.postit-x:hover{background:#ffe7e4;border-color:#d63031;transform:scale(1.1)}
+
 /* 색상 정의 (배경 + 좌측 바 색 + 흑백 대비용 패턴) */
 .postit[data-color="yellow"]{background:#fff59d;border-left-color:#e6c33d}
 .postit[data-color="pink"]{background:#f8bbd0;border-left-color:#ec7ba1}
@@ -130,6 +145,11 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .postit[data-size="l"] .postit-title{font-size:22px}
 .postit[data-size="l"] .postit-subtitle{font-size:16px}
 .postit[data-size="l"] .postit-body{font-size:14px}
+/* 🆕 W (Wide) — 가로형, 헤드라인 스타일 */
+.postit[data-size="w"]{width:420px;min-height:150px}
+.postit[data-size="w"] .postit-title{font-size:20px}
+.postit[data-size="w"] .postit-subtitle{font-size:14px}
+.postit[data-size="w"] .postit-body{font-size:13px}
 
 /* 팔레트 (좌하단) */
 .new-note-tray{
@@ -227,13 +247,22 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   };
 })();
 
-let _notes = [];   // {id, x, y, width, height, color, size, title, subtitle, body}
+let _notes = [];
 let _saveTimer = null;
+let _maxZ = 100;   // 🆕 z-index 최대값 추적
 const COLORS = ['yellow','pink','blue','green','purple','orange'];
 
 function genId(){ return 'n' + Math.random().toString(36).slice(2, 10); }
 
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// 🆕 특정 포스트잇을 맨 앞으로 (마지막 클릭한 게 제일 위)
+function bringToFront(el, n){
+  _maxZ++;
+  el.style.zIndex = _maxZ;
+  n.z = _maxZ;
+  scheduleSave();
+}
 
 function scheduleSave(){
   if(_saveTimer) clearTimeout(_saveTimer);
@@ -292,8 +321,11 @@ function makeNoteEl(n){
   el.style.top = (n.y || 100) + 'px';
   if(n.width) el.style.width = n.width + 'px';
   if(n.height) el.style.height = n.height + 'px';
+  // z-index 적용
+  if(n.z){ el.style.zIndex = n.z; if(n.z > _maxZ) _maxZ = n.z; }
 
   el.innerHTML = `
+    <button class="postit-x" onclick="deleteNote('${n.id}')" title="삭제">✕</button>
     <div class="postit-title" contenteditable="true" data-field="title">${esc(n.title||'')}</div>
     <div class="postit-subtitle" contenteditable="true" data-field="subtitle">${esc(n.subtitle||'')}</div>
     <div class="postit-body" contenteditable="true" data-field="body">${esc(n.body||'')}</div>
@@ -305,8 +337,8 @@ function makeNoteEl(n){
         <button class="size-btn ${n.size==='s'?'active':''}" onclick="setSize('${n.id}','s')">S</button>
         <button class="size-btn ${(n.size||'m')==='m'?'active':''}" onclick="setSize('${n.id}','m')">M</button>
         <button class="size-btn ${n.size==='l'?'active':''}" onclick="setSize('${n.id}','l')">L</button>
+        <button class="size-btn ${n.size==='w'?'active':''}" onclick="setSize('${n.id}','w')" title="가로형">W</button>
       </div>
-      <button class="postit-delete" onclick="deleteNote('${n.id}')" title="삭제">✕</button>
     </div>
     <div class="resize-handle" data-resize-for="${n.id}"></div>
   `;
@@ -327,7 +359,10 @@ function attachInteractions(el, n){
       n[key] = field.innerText;
       scheduleSave();
     });
-    field.addEventListener('focus', () => el.classList.add('editing'));
+    field.addEventListener('focus', () => {
+      el.classList.add('editing');
+      bringToFront(el, n);
+    });
     field.addEventListener('blur', () => el.classList.remove('editing'));
     // 편집 중 드래그 방지
     field.addEventListener('mousedown', e => e.stopPropagation());
@@ -335,11 +370,13 @@ function attachInteractions(el, n){
 
   // 드래그 (헤더 부분 + 배경)
   el.addEventListener('mousedown', (e) => {
-    // contenteditable 클릭 시 드래그 안 함
     if(e.target.closest('[contenteditable]')) return;
     if(e.target.closest('.postit-controls')) return;
     if(e.target.closest('.resize-handle')) return;
+    if(e.target.closest('.postit-x')) return;
     e.preventDefault();
+    // 🆕 클릭한 순간 맨 앞으로
+    bringToFront(el, n);
     const startX = e.pageX;
     const startY = e.pageY;
     const origLeft = parseInt(el.style.left) || 0;
