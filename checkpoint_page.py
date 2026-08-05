@@ -131,6 +131,16 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   <div class="topbar-title">☑ 체크포인트</div>
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
+    <div style="position:relative;display:inline-block;">
+      <button class="btn btn-primary" onclick="toggleAddMenu(event)">+ 새 카드 ▾</button>
+      <div id="add-menu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.1);padding:4px;min-width:180px;z-index:200;">
+        <button class="btn" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;margin:0;font-size:12px;" onclick="addNewCard('sector')">✔️ 섹터 카드</button>
+        <button class="btn" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;margin:0;font-size:12px;" onclick="addNewCard('signal')">☑️ 시그널 카드</button>
+        <button class="btn" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;margin:0;font-size:12px;" onclick="addNewCard('kospi')">📌 코스피 종목</button>
+        <button class="btn" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;margin:0;font-size:12px;" onclick="addNewCard('kosdaq')">📌 코스닥 종목</button>
+        <button class="btn" style="display:block;width:100%;text-align:left;border:0;background:transparent;padding:8px 12px;margin:0;font-size:12px;" onclick="addNewCard('us_market')">🇺🇸 미증시 항목</button>
+      </div>
+    </div>
     <button class="btn" onclick="loadCp()">↻ 새로고침</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
     <button class="btn btn-danger" onclick="clearAll()">🗑 초기화</button>
@@ -488,13 +498,17 @@ async function saveNow(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({content: text, date: _cpDate || new Date().toISOString().slice(0,10)})
     });
-    if(res.ok) showSaved();
+    if(res.ok){
+      _lastLoadedText = text;   // 방금 저장한 것 기억
+      _lastSaveAt = Date.now();
+      showSaved();
+    }
   } catch(e){ console.error('save error', e); }
 }
 
-function showSaved(){
+function showSaved(msg){
   const el = document.getElementById('save-indicator');
-  el.textContent = '💾 저장됨 ' + new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'});
+  el.textContent = msg || ('💾 저장됨 ' + new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'}));
   el.classList.add('visible');
   setTimeout(() => el.classList.remove('visible'), 2000);
 }
@@ -511,10 +525,88 @@ async function loadCp(){
     _cpDate = data.date || '';
     document.getElementById('cp-date').textContent = _cpDate;
     _cards = parseCards(text);
+    _lastLoadedText = text;
     render();
   } catch(e) {
     document.getElementById('cp-body').innerHTML = '<span class="content-empty">에러: '+esc(e.message)+'</span>';
   }
+}
+
+// 🆕 상시 리프레시 — 봇이 새 조각 보내면 자동 반영
+let _lastLoadedText = '';
+let _lastSaveAt = 0;
+
+async function quietPoll(){
+  // 편집 중이면 skip
+  if(document.querySelector('.card.editing')) return;
+  // 방금 저장 완료 후 3초 안이면 skip (내가 보낸 게 되돌아오는 것 방지)
+  if(Date.now() - _lastSaveAt < 3000) return;
+  try {
+    const res = await fetch('/api/post/checkpoint');
+    if(!res.ok) return;
+    const data = await res.json();
+    const text = data.content || '';
+    if(text === _lastLoadedText) return;   // 변경 없음
+    // 스크롤 위치 유지
+    const scrollY = window.scrollY;
+    _lastLoadedText = text;
+    _cpDate = data.date || '';
+    document.getElementById('cp-date').textContent = _cpDate;
+    _cards = parseCards(text);
+    render();
+    window.scrollTo(0, scrollY);
+    // 살짝 알림
+    showSaved('🔄 봇 업데이트 반영');
+  } catch(e){}
+}
+// 5초마다 폴링
+setInterval(quietPoll, 5000);
+
+// 🆕 새 카드 추가
+function toggleAddMenu(e){
+  if(e) e.stopPropagation();
+  const menu = document.getElementById('add-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+document.addEventListener('click', () => {
+  const menu = document.getElementById('add-menu');
+  if(menu) menu.style.display = 'none';
+});
+
+function addNewCard(sectionType){
+  const menu = document.getElementById('add-menu');
+  if(menu) menu.style.display = 'none';
+  const kindMap = {sector:'✔️', signal:'☑️', kospi:'stock', kosdaq:'stock', us_market:'☑️'};
+  const kind = kindMap[sectionType] || '✔️';
+  const newCard = {
+    id: genId(),
+    section: sectionType,
+    kind: kind,
+    title: '',
+    body: '',
+  };
+  // 그 섹션 맨 뒤에 추가
+  const lastIdxOfSection = (() => {
+    let idx = -1;
+    for(let i = 0; i < _cards.length; i++){
+      if(_cards[i].section === sectionType) idx = i;
+    }
+    return idx;
+  })();
+  if(lastIdxOfSection >= 0){
+    _cards.splice(lastIdxOfSection + 1, 0, newCard);
+  } else {
+    _cards.push(newCard);
+  }
+  render();
+  scheduleSave();
+  // 새 카드 편집 모드로 자동 진입
+  setTimeout(() => {
+    editCard(newCard.id);
+    // 스크롤도 그 카드로
+    const el = document.querySelector('[data-card-id="'+newCard.id+'"]');
+    if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+  }, 100);
 }
 
 async function clearAll(){
