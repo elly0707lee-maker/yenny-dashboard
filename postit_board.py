@@ -66,7 +66,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .postit-title:empty::before{content:'제목';color:rgba(0,0,0,0.25);font-weight:500}
 .postit-body{
-  font-size:13px;font-weight:500;line-height:1.55;color:#2d3436;
+  font-size:14px;font-weight:500;line-height:1.55;color:#2d3436;
   outline:none;min-height:3em;cursor:text;white-space:pre-wrap;
 }
 .postit-body:empty::before{content:'내용을 입력...';color:rgba(0,0,0,0.25)}
@@ -133,15 +133,15 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 /* 사이즈 */
 .postit[data-size="s"]{width:180px;min-height:140px}
 .postit[data-size="s"] .postit-title{font-size:15px}
-.postit[data-size="s"] .postit-body{font-size:11px}
+.postit[data-size="s"] .postit-body{font-size:12px}
 .postit[data-size="m"]{width:240px;min-height:200px}
 .postit[data-size="l"]{width:340px;min-height:280px}
 .postit[data-size="l"] .postit-title{font-size:22px}
-.postit[data-size="l"] .postit-body{font-size:14px}
+.postit[data-size="l"] .postit-body{font-size:16px}
 /* 🆕 W (Wide) — 가로형, 헤드라인 스타일 */
 .postit[data-size="w"]{width:420px;min-height:150px}
 .postit[data-size="w"] .postit-title{font-size:20px}
-.postit[data-size="w"] .postit-body{font-size:13px}
+.postit[data-size="w"] .postit-body{font-size:14px}
 
 /* 팔레트 (좌하단) */
 .new-note-tray{
