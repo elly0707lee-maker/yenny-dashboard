@@ -62,14 +62,9 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 
 .postit-title{
   font-size:18px;font-weight:700;line-height:1.35;color:#1a1d23;
-  margin-bottom:6px;outline:none;min-height:1.4em;cursor:text;
+  margin-bottom:10px;outline:none;min-height:1.4em;cursor:text;
 }
 .postit-title:empty::before{content:'제목';color:rgba(0,0,0,0.25);font-weight:500}
-.postit-subtitle{
-  font-size:14px;font-weight:600;line-height:1.4;color:#333;
-  margin-bottom:8px;outline:none;min-height:1.3em;cursor:text;
-}
-.postit-subtitle:empty::before{content:'소제목';color:rgba(0,0,0,0.25);font-weight:500}
 .postit-body{
   font-size:13px;font-weight:500;line-height:1.55;color:#2d3436;
   outline:none;min-height:3em;cursor:text;white-space:pre-wrap;
@@ -138,17 +133,14 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 /* 사이즈 */
 .postit[data-size="s"]{width:180px;min-height:140px}
 .postit[data-size="s"] .postit-title{font-size:15px}
-.postit[data-size="s"] .postit-subtitle{font-size:12px}
 .postit[data-size="s"] .postit-body{font-size:11px}
 .postit[data-size="m"]{width:240px;min-height:200px}
 .postit[data-size="l"]{width:340px;min-height:280px}
 .postit[data-size="l"] .postit-title{font-size:22px}
-.postit[data-size="l"] .postit-subtitle{font-size:16px}
 .postit[data-size="l"] .postit-body{font-size:14px}
 /* 🆕 W (Wide) — 가로형, 헤드라인 스타일 */
 .postit[data-size="w"]{width:420px;min-height:150px}
 .postit[data-size="w"] .postit-title{font-size:20px}
-.postit[data-size="w"] .postit-subtitle{font-size:14px}
 .postit[data-size="w"] .postit-body{font-size:13px}
 
 /* 팔레트 (좌하단) */
@@ -327,7 +319,6 @@ function makeNoteEl(n){
   el.innerHTML = `
     <button class="postit-x" onclick="deleteNote('${n.id}')" title="삭제">✕</button>
     <div class="postit-title" contenteditable="true" data-field="title">${esc(n.title||'')}</div>
-    <div class="postit-subtitle" contenteditable="true" data-field="subtitle">${esc(n.subtitle||'')}</div>
     <div class="postit-body" contenteditable="true" data-field="body">${esc(n.body||'')}</div>
     <div class="postit-controls">
       <div class="swatches">
@@ -461,7 +452,7 @@ function setSize(id, size){
 function deleteNote(id){
   const n = _notes.find(x => x.id === id);
   if(!n) return;
-  const preview = (n.title || n.subtitle || n.body || '').slice(0, 30);
+  const preview = (n.title || n.body || '').slice(0, 30);
   if(!confirm('이 포스트잇 삭제할까요?' + (preview ? '\n"'+preview+'"' : ''))) return;
   _notes = _notes.filter(x => x.id !== id);
   renderAll();
@@ -481,7 +472,6 @@ function addNoteAtCenter(color){
     color: color,
     size: 'm',
     title: '',
-    subtitle: '',
     body: '',
   };
   _notes.push(n);
