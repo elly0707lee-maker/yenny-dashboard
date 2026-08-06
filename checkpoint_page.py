@@ -142,6 +142,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
       </div>
     </div>
     <button class="btn" onclick="loadCp()">↻ 새로고침</button>
+    <button class="btn btn-primary" onclick="manualSave()" id="save-btn" style="display:none;">💾 저장</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
     <button class="btn btn-danger" onclick="clearAll()">🗑 초기화</button>
   </div>
@@ -486,12 +487,54 @@ function switchTab(btn, key){
 }
 
 function scheduleSave(){
-  if(_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(saveNow, 800);
+  // 🆕 자동 저장 X — dirty 표시만
+  markDirty();
 }
 
-async function saveNow(){
-  const text = serializeCards(_cards, _cpDate);
+// 🆕 미저장 변경 표시
+let _dirty = false;
+function markDirty(){
+  _dirty = true;
+  const btn = document.getElementById('save-btn');
+  if(btn){
+    btn.style.display = '';
+    btn.textContent = '💾 저장 (미저장)';
+    btn.classList.add('btn-danger');
+    btn.classList.remove('btn-primary');
+  }
+}
+function clearDirty(){
+  _dirty = false;
+  const btn = document.getElementById('save-btn');
+  if(btn){
+    btn.style.display = 'none';
+    btn.textContent = '💾 저장';
+    btn.classList.remove('btn-danger');
+    btn.classList.add('btn-primary');
+  }
+}
+
+// 명시적 저장 (사용자 클릭)
+async function manualSave(){
+  const newText = serializeCards(_cards, _cpDate);
+  const origLen = (_lastLoadedText || '').length;
+  const newLen = newText.length;
+  // 🆕 손실 감지 — 원본보다 30% 이상 줄어들면 경고
+  if(origLen > 100 && newLen < origLen * 0.7){
+    if(!confirm(
+      '⚠️ 저장 시 내용이 크게 줄어들 것 같습니다.\n\n' +
+      '원본: ' + origLen + '자\n' +
+      '저장 후: ' + newLen + '자\n\n' +
+      '파서가 일부 카드를 인식 못했을 가능성. 정말 저장할까요?\n' +
+      '(취소하면 편집 내용은 유지되지만 서버는 안 바뀜)'
+    )) return;
+  }
+  await saveNow(newText);
+}
+
+// 실제 서버 저장 (manualSave에서 호출)
+async function saveNow(text){
+  text = text || serializeCards(_cards, _cpDate);
   try {
     const res = await fetch('/api/post/checkpoint/replace', {
       method: 'POST',
@@ -499,11 +542,16 @@ async function saveNow(){
       body: JSON.stringify({content: text, date: _cpDate || new Date().toISOString().slice(0,10)})
     });
     if(res.ok){
-      _lastLoadedText = text;   // 방금 저장한 것 기억
+      _lastLoadedText = text;
       _lastSaveAt = Date.now();
+      clearDirty();
       showSaved();
+    } else {
+      alert('저장 실패 HTTP ' + res.status);
     }
-  } catch(e){ console.error('save error', e); }
+  } catch(e){
+    alert('저장 오류: ' + e.message);
+  }
 }
 
 function showSaved(msg){
@@ -526,6 +574,7 @@ async function loadCp(){
     document.getElementById('cp-date').textContent = _cpDate;
     _cards = parseCards(text);
     _lastLoadedText = text;
+    clearDirty();
     render();
   } catch(e) {
     document.getElementById('cp-body').innerHTML = '<span class="content-empty">에러: '+esc(e.message)+'</span>';
@@ -537,17 +586,17 @@ let _lastLoadedText = '';
 let _lastSaveAt = 0;
 
 async function quietPoll(){
-  // 편집 중이면 skip
+  // 편집 중이거나 미저장 변경이 있으면 skip
   if(document.querySelector('.card.editing')) return;
-  // 방금 저장 완료 후 3초 안이면 skip (내가 보낸 게 되돌아오는 것 방지)
+  if(_dirty) return;
+  // 방금 저장 완료 후 3초 안이면 skip
   if(Date.now() - _lastSaveAt < 3000) return;
   try {
     const res = await fetch('/api/post/checkpoint');
     if(!res.ok) return;
     const data = await res.json();
     const text = data.content || '';
-    if(text === _lastLoadedText) return;   // 변경 없음
-    // 스크롤 위치 유지
+    if(text === _lastLoadedText) return;
     const scrollY = window.scrollY;
     _lastLoadedText = text;
     _cpDate = data.date || '';
@@ -555,7 +604,6 @@ async function quietPoll(){
     _cards = parseCards(text);
     render();
     window.scrollTo(0, scrollY);
-    // 살짝 알림
     showSaved('🔄 봇 업데이트 반영');
   } catch(e){}
 }
