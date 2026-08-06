@@ -214,6 +214,21 @@ function genId(){ return 'c' + Math.random().toString(36).slice(2, 10); }
 
 function parseCards(text){
   if(!text) return [];
+  // 🆕 파싱 전 HTML 태그 다 제거 (붙여넣기로 들어간 오염 복구)
+  //    <p>, <span>, <div>, <br>, style, class 등등 모두 제거
+  text = text.replace(/<\/?p\b[^>]*>/gi, '\n');
+  text = text.replace(/<\/?div\b[^>]*>/gi, '\n');
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<\/?span\b[^>]*>/gi, '');
+  text = text.replace(/<\/?font\b[^>]*>/gi, '');
+  text = text.replace(/<\/?(strong|b|i|em|u)\b[^>]*>/gi, '');
+  // 다른 태그도 그냥 다 제거 (안전)
+  text = text.replace(/<[^>]+>/g, '');
+  // HTML entity 복원
+  text = text.replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&nbsp;/gi, ' ');
+  // 연속된 빈 줄 정리
+  text = text.replace(/\n{3,}/g, '\n\n');
+
   const lines = text.split('\n');
   const cards = [];
   let section = null;
@@ -432,15 +447,23 @@ function editCard(id){
   el.classList.add('editing');
   const titleEl = el.querySelector('[data-field="title"]');
   const bodyEl = el.querySelector('[data-field="body"]');
+  // 🆕 paste 시 plain text만 (서식·HTML 태그 다 제거)
+  const stripPaste = (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, text);
+  };
   if(titleEl){
     titleEl.setAttribute('contenteditable', 'true');
     titleEl.innerHTML = escPreserve(card.title || '').replace(/\n/g,'<br>');
+    titleEl.addEventListener('paste', stripPaste);
     titleEl.focus();
   }
   if(bodyEl){
     bodyEl.setAttribute('contenteditable', 'true');
     const bodyText = typeof card.body === 'string' ? card.body : (card.body||[]).join('\n');
     bodyEl.innerHTML = escPreserve(bodyText).replace(/\n/g,'<br>');
+    bodyEl.addEventListener('paste', stripPaste);
   }
   if(!titleEl) bodyEl.focus();
 }
@@ -451,12 +474,12 @@ function saveCardEdit(id){
   const el = document.querySelector('[data-card-id="'+id+'"]');
   const titleEl = el.querySelector('[data-field="title"]');
   const bodyEl = el.querySelector('[data-field="body"]');
-  const stripHtml = (h) => h.replace(/<div><br><\/div>/gi,'\n').replace(/<div>/gi,'\n').replace(/<\/div>/gi,'').replace(/<br\s*\/?>/gi,'\n').replace(/&nbsp;/gi,' ');
+  // 🆕 innerText로 저장 (HTML 태그·인라인 스타일 무시)
   if(titleEl){
-    card.title = stripHtml(titleEl.innerHTML).trim();
+    card.title = (titleEl.innerText || '').trim();
   }
   if(bodyEl){
-    card.body = stripHtml(bodyEl.innerHTML).trim();
+    card.body = (bodyEl.innerText || '').trim();
   }
   el.classList.remove('editing');
   render();
