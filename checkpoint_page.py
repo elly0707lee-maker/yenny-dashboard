@@ -143,7 +143,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
     </div>
     <button class="btn" onclick="loadCp()">↻ 새로고침</button>
     <button class="btn btn-primary" onclick="manualSave()" id="save-btn" style="display:none;">💾 저장</button>
-    <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
+    <button class="btn" onclick="doPrint()">🖨️ 인쇄</button>
     <button class="btn btn-danger" onclick="clearAll()">🗑 초기화</button>
   </div>
 </div>
@@ -691,6 +691,29 @@ async function clearAll(){
     _cards = [];
     render();
   } catch(e){ alert('오류: '+e.message); }
+}
+
+// 🆕 인쇄 — 어떤 탭 보고 있든 무조건 전체 표시로 인쇄
+function doPrint(){
+  const originalTab = _currentTab;
+  _currentTab = 'all';
+  render();
+  // 렌더링 완료 후 인쇄
+  setTimeout(() => {
+    window.print();
+    // 인쇄 다이얼로그 닫힌 후 원래 탭으로 복원
+    setTimeout(() => {
+      _currentTab = originalTab;
+      // 활성 탭 UI 복원
+      document.querySelectorAll('#cp-tabs .tab').forEach(t => {
+        t.classList.remove('active');
+        if(t.textContent.includes(SEC_LABEL[originalTab]) || (originalTab === 'all' && t.textContent === '전체')){
+          t.classList.add('active');
+        }
+      });
+      render();
+    }, 500);
+  }, 200);
 }
 
 loadCp();
