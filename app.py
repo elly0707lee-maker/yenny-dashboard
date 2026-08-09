@@ -1735,42 +1735,15 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="theme-price-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- 체크포인트 + 노트 2:1 분할 -->
-  <div class="section-label">체크포인트</div>
-  <div style="margin-bottom:10px;" id="checkpoint-wrapper">
-    <div class="content-card" id="checkpoint-card" style="margin-bottom:0;display:flex;flex-direction:column;">
-      <div class="content-header">
-        <span class="content-title">☑ 오늘 체크포인트</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span class="content-date" id="checkpoint-date"></span>
-          <a href="/checkpoint" target="_blank" class="btn" style="font-size:11px;padding:5px 10px;text-decoration:none;color:#e8b84b;background:#1a1d23;border-color:#1a1d23;" title="큰 화면에서 열기">🖼️ 팝업</a>
-          <button class="btn" onclick="loadPost('checkpoint','checkpoint-body','checkpoint-date')" style="font-size:11px;padding:5px 10px;" title="서버에서 최신 본문 받아오기">↻ 새로고침</button>
-          <button class="btn" onclick="enterCpEdit()" id="cp-edit-btn" style="font-size:11px;padding:5px 10px;">✏️ 편집</button>
-          <button class="btn" onclick="printCheckpoint()" style="font-size:11px;padding:5px 10px;" title="모든 섹션 한 번에 인쇄 / PDF 저장">🖨️ 인쇄</button>
-          <button class="btn" onclick="clearCheckpoint()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="체크포인트 전부 비우기">🗑 초기화</button>
-        </div>
-      </div>
-      <div class="tab-bar" id="cp-tabs">
-        <button class="tab active" onclick="cpTab(this,'all')">전체</button>
-        <button class="tab" onclick="cpTab(this,'indicator')">📊지표</button>
-        <button class="tab" onclick="cpTab(this,'us_market')">🇺🇸美증시</button>
-        <button class="tab" onclick="cpTab(this,'signal')">📡시그널</button>
-        <button class="tab" onclick="cpTab(this,'sector')">📌Sector</button>
-        <button class="tab" onclick="cpTab(this,'kospi')">📌코스피</button>
-        <button class="tab" onclick="cpTab(this,'kosdaq')">📌코스닥</button>
-      </div>
-      <div class="content-body" id="checkpoint-body" style="flex:1;min-height:400px;"><span class="content-empty">텔레그램 봇으로 체크포인트를 올리면 여기에 표시됩니다.</span></div>
-    </div>
-  </div>
-
-  <!-- ON AIR — 마인드맵 -->
+  <!-- ON AIR — 마인드맵 / 질문 보드 / 체크포인트 -->
   <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card" style="padding:14px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 질문 보드</span>
+      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 질문 보드 · 체크포인트</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
         <a href="/postit" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗂️ 질문 보드 →</a>
+        <a href="/checkpoint" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">☑ 체크포인트 →</a>
       </div>
     </div>
   </div>
