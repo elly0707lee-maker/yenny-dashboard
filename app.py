@@ -10,6 +10,8 @@ from wandaebon import get_wandaebon_html, parse_wandaebon_docx
 from community_buzz import generate_buzz_sync
 from checkpoint_page import get_checkpoint_page_html
 from postit_board import get_postit_board_html
+from sector_news import get_sector_news_html, fetch_all_sectors_sync
+from telegram_pulse import generate_pulse_sync
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -289,6 +291,7 @@ POST_TYPE_KEEP = {
     "onair": 1,      # 완대본 페이지 상태 (메모 + Q편집 + docx 파싱결과 JSON)
     "buzz": 1,       # 커뮤니티 버즈 — 매번 새로 생성, 최신만 필요
     "postit": 1,     # 질문 보드 — 최신 1개
+    "tgpulse": 1,    # 텔레 크로스체크 — 최신 1개
 }
 
 def save_post(t, content, date):
@@ -402,6 +405,52 @@ def postit_page():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/sector-news")
+@requires_auth
+def sector_news_page():
+    html = get_sector_news_html()
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/api/sector-news")
+@requires_auth
+def api_sector_news():
+    """섹터별 뉴스 병렬 fetch."""
+    try:
+        sectors = fetch_all_sectors_sync(limit=8)
+        return jsonify({
+            "ok": True,
+            "sectors": sectors,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/telegram-pulse", methods=["POST"])
+@requires_auth
+def api_telegram_pulse():
+    """텔레 채널 크로스체크 — 공통 이슈 추출."""
+    body = request.json or {}
+    hours = int(body.get("hours", 6))
+    try:
+        result = generate_pulse_sync(hours)
+        import json as _json
+        payload = {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "result": result,
+        }
+        save_post("tgpulse", _json.dumps(payload, ensure_ascii=False),
+                  datetime.now().strftime("%Y-%m-%d"))
+        return jsonify({"ok": True, **payload})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/onair")
 @requires_auth
 def wandaebon_page():
@@ -468,7 +517,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -478,7 +527,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -521,7 +570,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -534,8 +583,8 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        # mindmap/checkpoint/closing/onair/buzz/postit는 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit"):
+        # mindmap/checkpoint/closing/onair/buzz/postit/tgpulse는 빈 콘텐츠 저장 허용 (초기화용)
+        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
@@ -1735,16 +1784,33 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="theme-price-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- ON AIR — 마인드맵 / 질문 보드 / 체크포인트 -->
+  <!-- ON AIR — 마인드맵 / 질문 보드 / 체크포인트 / 섹터 뉴스 -->
   <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card" style="padding:14px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 질문 보드 · 체크포인트</span>
+      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 질문 보드 · 체크포인트 · 섹터 뉴스</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
         <a href="/postit" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗂️ 질문 보드 →</a>
         <a href="/checkpoint" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">☑ 체크포인트 →</a>
+        <a href="/sector-news" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">📰 섹터 뉴스 →</a>
       </div>
+    </div>
+  </div>
+
+  <!-- 📡 텔레 이슈 크로스체크 -->
+  <div class="section-label" style="margin-top:24px;">📡 텔레 이슈 크로스체크</div>
+  <div class="content-card" id="tgpulse-card" style="margin-bottom:0;">
+    <div class="content-header">
+      <span class="content-title">📡 텔레 이슈</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="tgpulse-updated" style="font-size:11px;color:#888;"></span>
+        <button class="btn" onclick="generateTgpulse()" id="tgpulse-gen-btn" style="font-size:11px;padding:5px 10px;">🔄 생성</button>
+        <button class="btn" onclick="clearTgpulse()" style="font-size:11px;padding:5px 10px;color:#d63031;border-color:#fab1a0;" title="텔레 이슈 비우기">🗑 초기화</button>
+      </div>
+    </div>
+    <div id="tgpulse-body" class="content-body" style="min-height:180px;">
+      <span class="content-empty">🔄 생성 버튼을 눌러주세요. 18개 채널 크로스체크에 30초~1분 걸립니다.</span>
     </div>
   </div>
 
@@ -4062,6 +4128,93 @@ async function clearCheckpoint() {
   } catch(e) {
     alert('초기화 실패: ' + e.message);
   }
+}
+
+// ── 텔레 이슈 크로스체크 ──────────────────
+let _tgpulseData = null;
+
+async function generateTgpulse(){
+  const btn = document.getElementById('tgpulse-gen-btn');
+  const body = document.getElementById('tgpulse-body');
+  const updated = document.getElementById('tgpulse-updated');
+  btn.disabled = true;
+  btn.textContent = '⏳ 실행 중...';
+  body.innerHTML = '<span class="content-empty">⏳ 18개 채널 스크래핑 + Claude 크로스체크 중... (30초~1분)</span>';
+  try {
+    const res = await fetch('/api/telegram-pulse', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hours: 12})
+    });
+    if(!res.ok){
+      const txt = await res.text();
+      throw new Error('HTTP ' + res.status + ' — ' + txt.slice(0, 200));
+    }
+    const data = await res.json();
+    _tgpulseData = data.result || null;
+    updated.textContent = '갱신 ' + (data.generated_at || '');
+    renderTgpulse();
+  } catch(e) {
+    body.innerHTML = '<span class="content-empty">⚠️ 오류: ' + (e.message || e) + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 생성';
+  }
+}
+
+function renderTgpulse(){
+  const body = document.getElementById('tgpulse-body');
+  const d = _tgpulseData;
+  if(!d){
+    body.innerHTML = '<span class="content-empty">아직 데이터 없음 · 🔄 생성 눌러주세요</span>';
+    return;
+  }
+  const summary = d.summary || '(요약 없음)';
+  // 마크다운 정리 + URL 자동 링크
+  let html = esc(summary);
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" style="color:#0984e3;text-decoration:none;">🔗 $1</a>');
+  html = html.replace(/&quot;([^&\n]{2,50}?)&quot;/g, '<span style="color:#0984e3;">"$1"</span>');
+
+  const errorMsg = d.error_channels && d.error_channels.length > 0
+    ? ' · ⚠️ 접근 실패: ' + d.error_channels.join(', ')
+    : '';
+
+  body.innerHTML =
+    '<div style="font-size:11px;color:#888;margin-bottom:8px;">📊 ' + d.ok_channel_count + '/' + d.channel_count + '개 채널 · ' + d.total_messages + '개 메시지 분석 (' + d.hours + '시간)' + esc(errorMsg) + '</div>' +
+    '<div style="white-space:pre-wrap;line-height:1.75;font-size:12.5px;color:#2d3436;">' + html + '</div>';
+}
+
+async function loadTgpulseOnStart(){
+  try {
+    const res = await fetch('/api/post/tgpulse');
+    if(!res.ok) return;
+    const data = await res.json();
+    if(!data || !data.content) return;
+    let payload;
+    try { payload = JSON.parse(data.content); } catch { return; }
+    if(payload.result){
+      _tgpulseData = payload.result;
+      const updated = document.getElementById('tgpulse-updated');
+      if(updated) updated.textContent = '갱신 ' + (payload.generated_at || '');
+      renderTgpulse();
+    }
+  } catch(e){}
+}
+window.addEventListener('DOMContentLoaded', loadTgpulseOnStart);
+
+async function clearTgpulse(){
+  if(!confirm('텔레 이슈를 비울까요?\nDB도 청소됨')) return;
+  _tgpulseData = null;
+  document.getElementById('tgpulse-updated').textContent = '';
+  try {
+    await fetch('/api/post/tgpulse', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
+    });
+  } catch(e){}
+  renderTgpulse();
 }
 
 // ── 커뮤니티 버즈 ─────────────────────────────
