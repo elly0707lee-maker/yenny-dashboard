@@ -34,8 +34,34 @@ body{
 .btn-danger:hover{background:#ffe7e4}
 a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 
-/* 캔버스 */
-.canvas-wrap{position:absolute;top:56px;left:0;right:0;bottom:0;overflow:auto;background:#eceff1}
+/* 🆕 보드 탭바 */
+.tabbar{
+  position:fixed;top:56px;left:0;right:0;height:44px;
+  background:#fff;border-bottom:1px solid #e5e7eb;
+  display:flex;align-items:center;padding:0 16px;gap:6px;
+  z-index:99;overflow-x:auto;
+}
+.tabbar-inner{display:flex;gap:6px;align-items:center;flex:0 0 auto}
+.board-tab{
+  display:flex;align-items:center;gap:6px;
+  padding:6px 12px 6px 14px;border:1px solid #e5e7eb;border-radius:8px;
+  background:#f8f9fa;color:#1a1d23;font-size:13px;font-weight:500;
+  cursor:pointer;font-family:inherit;transition:all .12s;
+  white-space:nowrap;
+}
+.board-tab:hover{background:#eceff1;border-color:#1a1d23}
+.board-tab.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
+.board-tab-name{outline:none;min-width:20px}
+.board-tab-name:focus{background:rgba(255,255,255,0.2);padding:0 4px;border-radius:3px}
+.tab-add-btn{
+  width:32px;height:32px;border-radius:8px;border:1px dashed #999;
+  background:transparent;color:#666;font-size:16px;font-weight:700;
+  cursor:pointer;font-family:inherit;
+}
+.tab-add-btn:hover{background:#f8f9fa;color:#1a1d23;border-color:#1a1d23}
+
+/* 캔버스 wrap을 tabbar 아래로 */
+.canvas-wrap{position:absolute;top:100px;left:0;right:0;bottom:0;overflow:auto;background:#eceff1}
 .canvas{position:relative;width:4000px;height:3000px;background:#ffffff;background-image:
   linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
   linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
@@ -203,6 +229,15 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   </div>
 </div>
 
+<!-- 🆕 보드 탭바 -->
+<div class="tabbar" id="tabbar">
+  <div class="tabbar-inner" id="tabbar-inner">
+    <!-- 탭이 JS로 렌더링됨 -->
+  </div>
+  <button class="tab-add-btn" onclick="addBoard()" title="새 보드">+</button>
+  <button class="btn btn-danger" onclick="deleteCurrentBoard()" style="font-size:11px;padding:5px 10px;margin-left:auto;" title="현재 보드 삭제">🗑 이 보드</button>
+</div>
+
 <div class="canvas-wrap" id="canvas-wrap">
   <div class="canvas" id="canvas">
     <div class="empty-hint" id="empty-hint">
@@ -239,16 +274,24 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   };
 })();
 
-let _notes = [];
+let _boards = [];               // [{id, name, notes: []}]
+let _currentBoardId = null;
 let _saveTimer = null;
-let _maxZ = 100;   // 🆕 z-index 최대값 추적
+let _maxZ = 100;
 const COLORS = ['yellow','pink','blue','green','purple','orange'];
 
 function genId(){ return 'n' + Math.random().toString(36).slice(2, 10); }
+function genBoardId(){ return 'b' + Math.random().toString(36).slice(2, 10); }
 
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-// 🆕 특정 포스트잇을 맨 앞으로 (마지막 클릭한 게 제일 위)
+// 🆕 현재 보드의 notes 배열 참조 (양방향 바인딩)
+function getCurrentNotes(){
+  const b = _boards.find(b => b.id === _currentBoardId);
+  return b ? b.notes : [];
+}
+
+// 특정 포스트잇을 맨 앞으로
 function bringToFront(el, n){
   _maxZ++;
   el.style.zIndex = _maxZ;
@@ -263,10 +306,15 @@ function scheduleSave(){
 
 async function saveNow(){
   try {
+    const payload = {
+      version: 2,
+      boards: _boards,
+      currentBoardId: _currentBoardId,
+    };
     const res = await fetch('/api/post/postit', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: JSON.stringify(_notes), date: new Date().toISOString().slice(0,10)})
+      body: JSON.stringify({content: JSON.stringify(payload), date: new Date().toISOString().slice(0,10)})
     });
     if(res.ok) showSaved();
   } catch(e){ console.error(e); }
@@ -282,23 +330,104 @@ function showSaved(){
 async function loadNotes(){
   try {
     const res = await fetch('/api/post/postit');
-    if(!res.ok) return;
+    if(!res.ok){ initEmptyBoards(); return; }
     const data = await res.json();
-    if(!data || !data.content) return;
-    try {
-      _notes = JSON.parse(data.content) || [];
-    } catch(e){ _notes = []; }
+    if(!data || !data.content){ initEmptyBoards(); return; }
+    let payload;
+    try { payload = JSON.parse(data.content); } catch(e){ initEmptyBoards(); return; }
+    // 마이그레이션: 옛 형식 (notes 배열) → 새 형식 (boards 배열)
+    if(Array.isArray(payload)){
+      _boards = [{id: genBoardId(), name: '보드 1', notes: payload}];
+      _currentBoardId = _boards[0].id;
+    } else if(payload.boards){
+      _boards = payload.boards;
+      _currentBoardId = payload.currentBoardId || (_boards[0] && _boards[0].id);
+    } else {
+      initEmptyBoards();
+      return;
+    }
+    if(!_boards.length) initEmptyBoards();
+    if(!_currentBoardId || !_boards.find(b => b.id === _currentBoardId)){
+      _currentBoardId = _boards[0].id;
+    }
+    renderTabs();
     renderAll();
-  } catch(e){}
+  } catch(e){ console.error(e); initEmptyBoards(); }
+}
+
+function initEmptyBoards(){
+  _boards = [{id: genBoardId(), name: '보드 1', notes: []}];
+  _currentBoardId = _boards[0].id;
+  renderTabs();
+  renderAll();
+}
+
+// 🆕 탭 렌더링
+function renderTabs(){
+  const inner = document.getElementById('tabbar-inner');
+  if(!inner) return;
+  inner.innerHTML = _boards.map(b => {
+    const active = b.id === _currentBoardId;
+    return '<div class="board-tab ' + (active?'active':'') + '" onclick="switchBoard(\'' + b.id + '\')">' +
+           '<span class="board-tab-name" contenteditable="' + (active?'true':'false') + '" onblur="renameBoard(\'' + b.id + '\', this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">' + esc(b.name) + '</span>' +
+           '</div>';
+  }).join('');
+}
+
+function switchBoard(boardId){
+  if(_currentBoardId === boardId) return;
+  _currentBoardId = boardId;
+  renderTabs();
+  renderAll();
+  scheduleSave();
+}
+
+function renameBoard(boardId, el){
+  const newName = (el.innerText || '').trim();
+  const b = _boards.find(b => b.id === boardId);
+  if(b && newName && newName !== b.name){
+    b.name = newName.slice(0, 30);
+    scheduleSave();
+  }
+  el.innerText = b ? b.name : '';
+}
+
+function addBoard(){
+  const nextNum = _boards.length + 1;
+  const newBoard = {id: genBoardId(), name: '보드 ' + nextNum, notes: []};
+  _boards.push(newBoard);
+  _currentBoardId = newBoard.id;
+  renderTabs();
+  renderAll();
+  scheduleSave();
+}
+
+function deleteCurrentBoard(){
+  if(_boards.length <= 1){
+    alert('마지막 보드는 삭제할 수 없어요. 대신 🗑 초기화로 비워주세요.');
+    return;
+  }
+  const b = _boards.find(b => b.id === _currentBoardId);
+  if(!b) return;
+  const noteCount = (b.notes || []).length;
+  const msg = '"' + b.name + '" 보드를 삭제할까요?' + (noteCount > 0 ? '\n(포스트잇 ' + noteCount + '개 함께 삭제됨)' : '');
+  if(!confirm(msg)) return;
+  const idx = _boards.findIndex(x => x.id === _currentBoardId);
+  _boards.splice(idx, 1);
+  _currentBoardId = _boards[Math.max(0, idx-1)].id;
+  renderTabs();
+  renderAll();
+  scheduleSave();
 }
 
 function renderAll(){
   const canvas = document.getElementById('canvas');
   // 기존 포스트잇 제거 (empty-hint 유지)
   canvas.querySelectorAll('.postit').forEach(el => el.remove());
+  const notes = getCurrentNotes();
   const hint = document.getElementById('empty-hint');
-  if(hint) hint.style.display = _notes.length === 0 ? '' : 'none';
-  for(const n of _notes){
+  if(hint) hint.style.display = notes.length === 0 ? '' : 'none';
+  for(const n of notes){
     canvas.appendChild(makeNoteEl(n));
   }
 }
@@ -421,7 +550,7 @@ function attachInteractions(el, n){
 }
 
 function setColor(id, color){
-  const n = _notes.find(x => x.id === id);
+  const n = getCurrentNotes().find(x => x.id === id);
   if(!n) return;
   n.color = color;
   const el = document.querySelector('[data-note-id="'+id+'"]');
@@ -430,7 +559,7 @@ function setColor(id, color){
 }
 
 function setSize(id, size){
-  const n = _notes.find(x => x.id === id);
+  const n = getCurrentNotes().find(x => x.id === id);
   if(!n) return;
   n.size = size;
   // 사이즈 프리셋 사용 시 width/height 리셋 (CSS에 맡김)
@@ -450,17 +579,21 @@ function setSize(id, size){
 }
 
 function deleteNote(id){
-  const n = _notes.find(x => x.id === id);
+  const board = _boards.find(b => b.id === _currentBoardId);
+  if(!board) return;
+  const n = board.notes.find(x => x.id === id);
   if(!n) return;
   const preview = (n.title || n.body || '').slice(0, 30);
   if(!confirm('이 포스트잇 삭제할까요?' + (preview ? '\n"'+preview+'"' : ''))) return;
-  _notes = _notes.filter(x => x.id !== id);
+  board.notes = board.notes.filter(x => x.id !== id);
   renderAll();
   scheduleSave();
 }
 
 function addNoteAtCenter(color){
   color = color || 'yellow';
+  const board = _boards.find(b => b.id === _currentBoardId);
+  if(!board) return;
   // 캔버스의 현재 스크롤 중앙에 추가
   const wrap = document.getElementById('canvas-wrap');
   const x = wrap.scrollLeft + (wrap.clientWidth / 2) - 120 + (Math.random()*40 - 20);
@@ -474,7 +607,7 @@ function addNoteAtCenter(color){
     title: '',
     body: '',
   };
-  _notes.push(n);
+  board.notes.push(n);
   document.getElementById('empty-hint').style.display = 'none';
   const el = makeNoteEl(n);
   document.getElementById('canvas').appendChild(el);
@@ -487,16 +620,12 @@ function addNoteAtCenter(color){
 }
 
 async function clearAll(){
-  if(!confirm('보드를 전부 비울까요?\n되돌릴 수 없음.')) return;
-  _notes = [];
+  const board = _boards.find(b => b.id === _currentBoardId);
+  if(!board) return;
+  if(!confirm('현재 보드 "' + board.name + '"의 포스트잇을 전부 비울까요?\n(다른 보드는 유지됨)')) return;
+  board.notes = [];
   renderAll();
-  try {
-    await fetch('/api/post/postit', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: '', date: new Date().toISOString().slice(0,10)})
-    });
-  } catch(e){}
+  scheduleSave();
 }
 
 loadNotes();
