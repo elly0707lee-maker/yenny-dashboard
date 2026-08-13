@@ -1665,33 +1665,6 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     </div>
   </div>
 
-  <!-- 투두리스트 + 메모 -->
-  <div class="grid-todo-memo" style="margin-top:10px;">
-      <div class="content-card" style="margin-bottom:0;">
-        <div class="content-header">
-          <span class="content-title">✅ 투두리스트</span>
-          <span class="saved-badge" id="todo-badge">✓ 저장됨</span>
-        </div>
-        <div id="todo-list" style="margin-bottom:8px;"></div>
-        <div style="display:flex;gap:6px;">
-          <input id="todo-new-input" class="input-line" placeholder="할일 추가..." style="flex:1;font-size:13px;"
-            onkeydown="if(event.key==='Enter')addTodoItem()"/>
-          <button class="btn btn-green" onclick="addTodoItem()" style="padding:8px 12px;">+</button>
-        </div>
-      </div>
-      <div class="content-card" style="margin-bottom:0;">
-        <div class="content-header">
-          <span class="content-title">📝 메모</span>
-          <div style="display:flex;gap:6px;">
-            <span class="saved-badge" id="memo-badge">✓ 저장됨</span>
-            <button class="btn btn-green" onclick="saveMemo()">저장</button>
-            <button class="btn" onclick="clearMemo()" style="color:#d63031;border-color:#fab1a0;">↺ 초기화</button>
-          </div>
-        </div>
-        <textarea class="input-area" id="memo-input" placeholder="메모..." style="min-height:120px;"></textarea>
-      </div>
-  </div>
-
   <!-- 미국·글로벌 -->
   <div class="section-label">미국·글로벌</div>
   <div class="grid-us">
