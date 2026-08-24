@@ -628,11 +628,11 @@ function renderGroup(sectorId, group){
                'onblur="setTimeout(()=>acClose(\'' + group.id + '\'), 200)"/>' +
         '<div class="ac-list" id="ac-list-' + group.id + '"></div>' +
       '</div>' +
-      '<button class="btn" onclick="acManualToggle(\'' + group.id + '\')" title="종목코드로 직접 입력">🔢 코드입력</button>' +
+      '<button class="btn" onclick="acManualToggle(\'' + group.id + '\')" title="코드 입력창 접기/펼치기">🔢</button>' +
     '</div>' +
-    '<div class="add-stock manual" id="manual-' + group.id + '" style="display:none;">' +
-      '<input type="text" placeholder="종목코드 6자리" id="add-code-' + group.id + '" maxlength="6"/>' +
-      '<input type="text" placeholder="종목명" id="add-name-' + group.id + '"/>' +
+    '<div class="add-stock manual" id="manual-' + group.id + '">' +
+      '<input type="text" placeholder="종목코드 6자리" id="add-code-' + group.id + '" maxlength="6" style="max-width:160px"/>' +
+      '<input type="text" placeholder="종목명" id="add-name-' + group.id + '" onkeydown="if(event.key===\'Enter\')addStock(\'' + group.id + '\')"/>' +
       '<button class="btn btn-primary" onclick="addStock(\'' + group.id + '\')">+ 추가</button>' +
     '</div>' +
     '</div>';
@@ -802,20 +802,31 @@ function acSearch(groupId, q){
   st.timer = setTimeout(async () => {
     try {
       const res = await fetch('/api/watchlist/search?q=' + encodeURIComponent(q));
-      const data = await res.json();
+      const raw = await res.text();
+      if(!res.ok){
+        listEl.innerHTML = '<div class="ac-empty">⚠️ 서버 오류 HTTP ' + res.status +
+          '<br><span style="font-size:10px;color:#d63031">' + esc(raw.slice(0,200)) + '</span>' +
+          '<br><span style="font-size:11px">🔢 코드입력 버튼 사용</span></div>';
+        return;
+      }
+      let data;
+      try { data = JSON.parse(raw); }
+      catch(pe){
+        listEl.innerHTML = '<div class="ac-empty">⚠️ 응답 형식 오류' +
+          '<br><span style="font-size:10px;color:#d63031">' + esc(raw.slice(0,200)) + '</span></div>';
+        return;
+      }
       const items = data.items || [];
       st.items = items;
       st.sel = -1;
       if(!items.length){
         const ms = data.master_size || 0;
-        const err = data.master_error || '';
-        if(ms === 0){
-          listEl.innerHTML = '<div class="ac-empty">📥 종목 목록 로드 실패' +
-            (err ? '<br><span style="font-size:10px;color:#d63031">' + esc(err.slice(0,120)) + '</span>' : '') +
-            '<br><span style="font-size:11px"># 버튼으로 종목코드 직접 입력하세요</span></div>';
-        } else {
-          listEl.innerHTML = '<div class="ac-empty">검색 결과 없음 (' + ms + '종목 중) · # 버튼으로 코드 직접 입력</div>';
-        }
+        const err = data.diag || data.master_error || data.error || '';
+        listEl.innerHTML = '<div class="ac-empty">검색 결과 없음' +
+          (data.src ? ' (' + esc(data.src) + ')' : '') +
+          (ms ? ' · 마스터 ' + ms + '종목' : ' · 마스터 미로드') +
+          (err ? '<br><span style="font-size:10px;color:#d63031">' + esc(String(err).slice(0,150)) + '</span>' : '') +
+          '<br><span style="font-size:11px">🔢 코드입력 버튼으로 직접 추가</span></div>';
         return;
       }
       listEl.innerHTML = items.map((it, i) =>
@@ -826,7 +837,9 @@ function acSearch(groupId, q){
         '</div>'
       ).join('');
     } catch(e){
-      listEl.innerHTML = '<div class="ac-empty">검색 실패 · # 버튼으로 코드 직접 입력</div>';
+      listEl.innerHTML = '<div class="ac-empty">⚠️ 요청 실패' +
+        '<br><span style="font-size:10px;color:#d63031">' + esc(String(e.message || e).slice(0,180)) + '</span>' +
+        '<br><span style="font-size:11px">🔢 코드입력 버튼 사용</span></div>';
     }
   }, 300);
 }
@@ -896,7 +909,8 @@ function acClose(groupId){
 function acManualToggle(groupId){
   const el = document.getElementById('manual-' + groupId);
   if(!el) return;
-  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+  const hidden = (el.style.display === 'none');
+  el.style.display = hidden ? 'flex' : 'none';
 }
 
 // 공통 추가 로직
