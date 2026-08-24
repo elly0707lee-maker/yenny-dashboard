@@ -143,10 +143,15 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 /* 🔎 내 종목 찾기 */
 .find-box{
   padding:5px 10px;border:1px solid #e5e7eb;border-radius:16px;
-  font-size:11.5px;font-family:inherit;outline:none;width:150px;
+  font-size:11.5px;font-family:inherit;outline:none;width:170px;
   transition:all .12s;background:#f8f9fa;
 }
-.find-box:focus{border-color:#1a1d23;width:200px;background:#fff}
+.find-box:focus{border-color:#1a1d23;width:230px;background:#fff}
+.find-section{
+  font-size:10.5px;color:#7a8099;font-weight:700;
+  padding:6px 10px 3px;border-top:1px solid #f1f3f5;margin-top:2px;
+}
+.find-section:first-child{border-top:none;margin-top:0}
 .find-result{
   display:none;position:sticky;top:96px;z-index:88;
   background:#fff;border-bottom:1px solid #e5e7eb;
@@ -517,7 +522,7 @@ body.edit-mode .add-group-btn{display:inline-block}
     <label class="chk"><input type="checkbox" id="nxt-only" onchange="toggleNxtOnly()"/> 🌙 시간외 거래만</label>
   </div>
   <div class="ctrl-group" style="margin-left:auto">
-    <input type="text" id="find-input" class="find-box" placeholder="🔎 내 종목 찾기"
+    <input type="text" id="find-input" class="find-box" placeholder="🔎 종목 · 테마 찾기"
            autocomplete="off" oninput="findMyStock(this.value)"
            oncompositionstart="_composing=true"
            oncompositionend="_composing=false;findMyStock(this.value)"/>
@@ -1825,8 +1830,7 @@ function applyMove(){
   showSaved('✅ "' + g.name + '" → ' + target.name + ' 이동됨');
 }
 
-// ── 🔎 내 종목 찾기 ───────────────────────
-// 등록해둔 종목이 어느 섹터 › 그룹에 있는지 즉시 찾아줌
+// ── 🔎 찾기 — 종목명 · 테마(그룹) · 섹터 동시 검색 ────
 function findMyStock(q){
   if(_composing) return;
   const box = document.getElementById('find-result');
@@ -1835,13 +1839,26 @@ function findMyStock(q){
   if(q.length < 1){ box.classList.remove('open'); box.innerHTML = ''; return; }
 
   const k = pctKey();
-  const hits = [];
+  const themeHits = [];   // 그룹(테마) 매칭
+  const stockHits = [];   // 종목 매칭
+
   for(const s of _data.sectors){
+    const sName = (s.name || '').toLowerCase().replace(/\s/g, '');
     for(const g of (s.groups || [])){
+      const gName = (g.name || '').toLowerCase().replace(/\s/g, '');
+      // 그룹명 또는 섹터명이 걸리면 테마 결과로
+      if(gName.includes(q) || sName.includes(q)){
+        const vs = (g.stocks || []);
+        themeHits.push({
+          sectorId: s.id, groupId: g.id,
+          sectorName: s.name, groupName: g.name,
+          count: vs.length, avg: avgPct(vs),
+        });
+      }
       for(const st of (g.stocks || [])){
         const nm = (st.name || '').toLowerCase().replace(/\s/g, '');
         if(nm.includes(q) || st.code.includes(q)){
-          hits.push({
+          stockHits.push({
             stock: st, sectorId: s.id, groupId: g.id,
             sectorName: s.name, groupName: g.name,
           });
@@ -1850,38 +1867,62 @@ function findMyStock(q){
     }
   }
 
-  if(!hits.length){
-    box.innerHTML = '<div class="find-none">「' + esc(q) + '」 등록된 종목 중에 없음</div>';
+  if(!themeHits.length && !stockHits.length){
+    box.innerHTML = '<div class="find-none">「' + esc(q) + '」 등록된 종목·테마 중에 없음</div>';
     box.classList.add('open');
     return;
   }
 
-  // 같은 종목이 여러 그룹에 있으면 묶어서 표시
-  const byCode = {};
-  for(const h of hits){
-    if(!byCode[h.stock.code]) byCode[h.stock.code] = {stock: h.stock, places: []};
-    byCode[h.stock.code].places.push(h);
+  let html = '';
+
+  // ── 테마(그룹) 결과 ──
+  if(themeHits.length){
+    themeHits.sort((a,b) => (b.avg ?? -999) - (a.avg ?? -999));
+    html += '<div class="find-section">📁 테마 ' + themeHits.length + '개</div>';
+    html += themeHits.slice(0, 6).map(t => {
+      const cls = t.avg > 0 ? 'up' : (t.avg < 0 ? 'down' : 'flat');
+      const pct = (t.avg === null || t.avg === undefined) ? '—'
+                : (t.avg > 0 ? '+' : '') + t.avg.toFixed(2) + '%';
+      return '<div class="find-item" onclick="gotoSignal(\'' + t.sectorId + '\',\'' + t.groupId + '\')">' +
+        '<span class="find-name">📁 ' + esc(t.groupName) + '</span>' +
+        '<span class="find-code">' + t.count + '종목</span>' +
+        '<span class="find-path"><b>' + esc(t.sectorName) + '</b></span>' +
+        '<span class="find-pct ' + cls + '">' + pct + '</span>' +
+        '</div>';
+    }).join('');
   }
 
-  box.innerHTML = Object.values(byCode).slice(0, 8).map(entry => {
-    const st = entry.stock;
-    const q2 = _quotes[st.code] || {};
-    const v = q2[k];
-    const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
-    const pct = (v === undefined || v === null) ? '—'
-              : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
-    const paths = entry.places.map(p =>
-      '<b>' + esc(p.sectorName) + '</b> › ' + esc(p.groupName)).join(' &nbsp;·&nbsp; ');
-    const first = entry.places[0];
-    const dupNote = entry.places.length > 1
-      ? ' <span style="font-size:10px;color:#e17055">' + entry.places.length + '곳 중복</span>' : '';
-    return '<div class="find-item" onclick="gotoSignal(\'' + first.sectorId + '\',\'' + first.groupId + '\')">' +
-      '<span class="find-name">' + esc(st.name) + '</span>' +
-      '<span class="find-code">' + esc(st.code) + '</span>' +
-      '<span class="find-path">' + paths + dupNote + '</span>' +
-      '<span class="find-pct ' + cls + '">' + pct + '</span>' +
-      '</div>';
-  }).join('');
+  // ── 종목 결과 ──
+  if(stockHits.length){
+    const byCode = {};
+    for(const h of stockHits){
+      if(!byCode[h.stock.code]) byCode[h.stock.code] = {stock: h.stock, places: []};
+      byCode[h.stock.code].places.push(h);
+    }
+    const list = Object.values(byCode);
+    html += '<div class="find-section">📈 종목 ' + list.length + '개</div>';
+    html += list.slice(0, 8).map(entry => {
+      const st = entry.stock;
+      const q2 = _quotes[st.code] || {};
+      const v = q2[k];
+      const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
+      const pct = (v === undefined || v === null) ? '—'
+                : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+      const paths = entry.places.map(p =>
+        '<b>' + esc(p.sectorName) + '</b> › ' + esc(p.groupName)).join(' &nbsp;·&nbsp; ');
+      const first = entry.places[0];
+      const dupNote = entry.places.length > 1
+        ? ' <span style="font-size:10px;color:#e17055">' + entry.places.length + '곳 중복</span>' : '';
+      return '<div class="find-item" onclick="gotoSignal(\'' + first.sectorId + '\',\'' + first.groupId + '\')">' +
+        '<span class="find-name">' + esc(st.name) + '</span>' +
+        '<span class="find-code">' + esc(st.code) + '</span>' +
+        '<span class="find-path">' + paths + dupNote + '</span>' +
+        '<span class="find-pct ' + cls + '">' + pct + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  box.innerHTML = html;
   box.classList.add('open');
 }
 
@@ -2028,6 +2069,7 @@ function renderSignals(){
 function gotoSignal(sectorId, groupId){
   const fbox = document.getElementById('find-result');
   if(fbox) fbox.classList.remove('open');
+  _expandedBig[groupId] = true;   // 접혀 있던 큰 그룹도 펼침
   if(_view === 'rank'){
     _openSectors[sectorId] = true;
     _openGroups[groupId] = true;
@@ -2040,6 +2082,9 @@ function gotoSignal(sectorId, groupId){
   }
   _data.currentSectorId = sectorId;
   render();
+  // 창고형 — 이 섹터 시세가 아직 없으면 지금 받아옴
+  const missing = currentSectorCodes().filter(c => !_quotes[c]);
+  if(missing.length) refreshQuotes(missing);
   setTimeout(() => {
     const el = document.querySelector('[data-group-id="' + groupId + '"]');
     if(el){
