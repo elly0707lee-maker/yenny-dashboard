@@ -2187,6 +2187,109 @@ fetch('/api/watchlist/master-warmup', {method:'POST'}).catch(() => {});
 """
 
 
+def fetch_quotes_naver_bulk(codes: list) -> dict:
+    """
+    네이버 실시간 API로 여러 종목을 한 번에 조회.
+    KIS는 종목당 1요청(초당 20건 제한)이라 종목이 많으면 수십 초 걸리지만,
+    이건 한 요청에 수십 종목을 담아서 훨씬 빠름.
+    """
+    import requests as _rq
+    import concurrent.futures
+
+    uniq, seen = [], set()
+    for c in codes:
+        c = str(c).strip()
+        if c and len(c) == 6 and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    if not uniq:
+        return {}
+
+    quotes = {}
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+        "Referer": "https://m.stock.naver.com/",
+        "Accept": "application/json",
+    }
+
+    def _num(v, d=0):
+        try:
+            return float(str(v).replace(",", "").strip() or d)
+        except Exception:
+            return d
+
+    def fetch_chunk(chunk):
+        joined = ",".join(chunk)
+        urls = [
+            f"https://polling.finance.naver.com/api/realtime/domestic/stock/{joined}",
+            f"https://m.stock.naver.com/api/realtime/domestic/stock/{joined}",
+        ]
+        for url in urls:
+            try:
+                r = _rq.get(url, headers=headers, timeout=(3, 6))
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+                found = 0
+
+                def walk(node, depth=0):
+                    nonlocal found
+                    if depth > 6:
+                        return
+                    if isinstance(node, dict):
+                        code = None
+                        for ck in ("itemCode", "cd", "code", "stockCode"):
+                            v = node.get(ck)
+                            if isinstance(v, str) and re.fullmatch(r"[A-Z]?\d{6}", v.strip()):
+                                code = v.strip()[-6:]
+                                break
+                        if code:
+                            price = _num(node.get("closePrice") or node.get("nv")
+                                         or node.get("currentPrice") or 0)
+                            chg = _num(node.get("compareToPreviousClosePrice")
+                                       or node.get("cv") or 0)
+                            pct = _num(node.get("fluctuationsRatio") or node.get("cr") or 0)
+                            vol = _num(node.get("accumulatedTradingVolume")
+                                       or node.get("aq") or 0)
+                            # 하락 부호 보정
+                            sign = str(node.get("compareToPreviousPrice", {}).get("code", "")
+                                       if isinstance(node.get("compareToPreviousPrice"), dict)
+                                       else node.get("rf", ""))
+                            if sign in ("4", "5"):
+                                chg = -abs(chg)
+                                pct = -abs(pct)
+                            if price > 0:
+                                quotes[code] = {
+                                    "price": int(price),
+                                    "chg": int(chg),
+                                    "chg_pct": round(pct, 2),
+                                    "volume": int(vol),
+                                    "market": "J",
+                                    "api_name": (node.get("stockName") or node.get("nm") or "").strip(),
+                                }
+                                found += 1
+                            return
+                        for v in node.values():
+                            walk(v, depth + 1)
+                    elif isinstance(node, list):
+                        for v in node:
+                            walk(v, depth + 1)
+
+                walk(data)
+                if found:
+                    return
+            except Exception as e:
+                print(f"[naver bulk] {url[:60]}: {e}")
+
+    # 40종목씩 나눠서 병렬
+    chunks = [uniq[i:i+40] for i in range(0, len(uniq), 40)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(chunks))) as ex:
+        list(ex.map(fetch_chunk, chunks))
+
+    return quotes
+
+
 def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN",
                        token: str = "", app_key: str = "", app_secret: str = "") -> dict:
     """
@@ -2292,31 +2395,40 @@ _krx_close_cache = {"date": "", "prices": {}}    # {code: {price, chg_pct}}
 def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
                           token: str = "", app_key: str = "", app_secret: str = "") -> dict:
     """
-    NXT 선택 시 KRX 정규장 마감가를 같이 받아 '괴리율' 계산.
+    시장별 최적 경로로 시세 조회.
 
-    gap_pct = (NXT 현재가 - KRX 종가) / KRX 종가 * 100
+    KRX/통합 → 네이버 일괄 API (한 요청에 40종목, 압도적으로 빠름)
+    NXT      → KIS 개별 조회 + KRX 종가는 네이버 일괄
 
-    ⚡ 최적화: 장 마감(15:30) 이후엔 KRX 종가가 고정이므로 캐시.
-       → 30초마다 갱신할 때 NXT만 조회 (요청 절반)
+    NXT 괴리율 = (NXT 현재가 - KRX 종가) / KRX 종가 * 100
     """
     import concurrent.futures
     from datetime import datetime as _dt
 
+    # ⚡ KRX·통합은 네이버 일괄 조회 (종목 많아도 1~2초)
     if market != "NX":
+        q = fetch_quotes_naver_bulk(codes)
+        if q:
+            for v in q.values():
+                v["market"] = market
+            missing = [c for c in codes if str(c).strip() not in q]
+            if missing and len(missing) <= 30:
+                q.update(fetch_stock_quotes(missing, kis_get_fn, market,
+                                            token, app_key, app_secret))
+            return q
         return fetch_stock_quotes(codes, kis_get_fn, market, token, app_key, app_secret)
 
     now = _dt.now()
     today = now.strftime("%Y-%m-%d")
     mins = now.hour * 60 + now.minute
-    after_close = mins >= 15 * 60 + 40      # 15:40 이후 = KRX 종가 확정
-    intraday = (9 * 60) <= mins < (15 * 60 + 40)   # 정규장 중
+    intraday = (9 * 60) <= mins < (15 * 60 + 40)
+    after_close = mins >= 15 * 60 + 40
 
-    # 캐시 날짜가 다르면 초기화
     if _krx_close_cache["date"] != today:
         _krx_close_cache["date"] = today
         _krx_close_cache["prices"] = {}
 
-    # ⚡ 정규장 중에는 괴리율이 무의미 → NXT만 조회 (요청 절반)
+    # 정규장 중에는 괴리율이 무의미 → NXT만
     if intraday:
         nx = fetch_stock_quotes(codes, kis_get_fn, "NX", token, app_key, app_secret)
         out = {}
@@ -2329,61 +2441,55 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
             out[code] = q
         return out
 
+    # ⚡ KRX 종가는 네이버 일괄(빠름), NXT만 KIS
     need_krx = [c for c in codes if str(c).strip() not in _krx_close_cache["prices"]]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        f_nx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "NX",
+                         token, app_key, app_secret)
+        f_krx = ex.submit(fetch_quotes_naver_bulk, need_krx) if need_krx else None
+        nx = f_nx.result()
+        krx_new = f_krx.result() if f_krx else {}
 
-    if need_krx:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-            f_nx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "NX",
-                             token, app_key, app_secret)
-            f_krx = ex.submit(fetch_stock_quotes, need_krx, kis_get_fn, "J",
-                              token, app_key, app_secret)
-            nx = f_nx.result()
-            krx_new = f_krx.result()
-        # 종가 확정 이후에만 캐시에 적재
-        if after_close:
-            for c, k in krx_new.items():
-                _krx_close_cache["prices"][c] = {
-                    "price": k.get("price", 0),
-                    "chg_pct": k.get("chg_pct"),
-                }
-        krx = dict(_krx_close_cache["prices"])
-        krx.update(krx_new)
-    else:
-        # KRX는 캐시로 해결 → NXT만 조회 (요청 절반!)
-        nx = fetch_stock_quotes(codes, kis_get_fn, "NX", token, app_key, app_secret)
-        krx = dict(_krx_close_cache["prices"])
+    if after_close:
+        for c, k in krx_new.items():
+            _krx_close_cache["prices"][c] = {
+                "price": k.get("price", 0), "chg_pct": k.get("chg_pct"),
+                "api_name": k.get("api_name", ""),
+            }
+    krx = dict(_krx_close_cache["prices"])
+    krx.update(krx_new)
 
     out = {}
-    for code, q in nx.items():
+    for code in set(list(nx.keys()) + list(krx.keys())):
+        q = dict(nx.get(code, {}))
         k = krx.get(code, {})
         krx_close = k.get("price", 0)
         nxt_price = q.get("price", 0)
-        gap = gap_pct = None
-        if krx_close and nxt_price:
-            gap = nxt_price - krx_close
-            gap_pct = round(gap / krx_close * 100, 2)
-        q = dict(q)
-        q["krx_close"] = krx_close
-        q["krx_chg_pct"] = k.get("chg_pct")
-        q["gap"] = gap
-        q["gap_pct"] = gap_pct
-        out[code] = q
 
-    # NXT 체결 없는 종목 → KRX 값으로 채움
-    for code, k in krx.items():
-        if code not in out and k.get("price"):
-            out[code] = {
-                "price": k["price"],
+        # NXT 체결이 없으면 KRX 종가를 그대로 표시
+        if not nxt_price and krx_close:
+            q = {
+                "price": krx_close,
                 "chg": 0,
                 "chg_pct": k.get("chg_pct", 0),
                 "volume": 0,
-                "market": "NX",
-                "krx_close": k["price"],
-                "krx_chg_pct": k.get("chg_pct"),
-                "gap": 0,
-                "gap_pct": 0.0,
+                "api_name": k.get("api_name", ""),
                 "no_nxt": True,
             }
+            nxt_price = krx_close
+
+        q["market"] = "NX"
+        q["krx_close"] = krx_close
+        q["krx_chg_pct"] = k.get("chg_pct")
+        if krx_close and nxt_price:
+            gap = nxt_price - krx_close
+            q["gap"] = gap
+            q["gap_pct"] = round(gap / krx_close * 100, 2)
+        else:
+            q["gap"] = None
+            q["gap_pct"] = None
+        if q.get("price"):
+            out[code] = q
 
     return out
 
