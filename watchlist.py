@@ -131,6 +131,32 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* 🔎 내 종목 찾기 */
+.find-box{
+  padding:5px 10px;border:1px solid #e5e7eb;border-radius:16px;
+  font-size:11.5px;font-family:inherit;outline:none;width:150px;
+  transition:all .12s;background:#f8f9fa;
+}
+.find-box:focus{border-color:#1a1d23;width:200px;background:#fff}
+.find-result{
+  display:none;position:sticky;top:96px;z-index:88;
+  background:#fff;border-bottom:1px solid #e5e7eb;
+  padding:8px 24px;box-shadow:0 4px 12px rgba(0,0,0,0.06);
+}
+.find-result.open{display:block}
+.find-item{
+  display:flex;align-items:center;gap:10px;padding:7px 10px;
+  border-radius:8px;cursor:pointer;font-size:12.5px;transition:background .1s;
+}
+.find-item:hover{background:#f1f3f5}
+.find-name{font-weight:700;flex:0 0 auto}
+.find-code{font-size:10.5px;color:#a8b0bd;flex:0 0 auto}
+.find-path{color:#636e72;font-size:11.5px;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.find-path b{color:#1a1d23;font-weight:600}
+.find-pct{font-weight:700;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.find-none{font-size:12px;color:#a8b0bd;font-style:italic;padding:8px 10px}
+
 /* 🚨 특이 시그널 */
 #signal-box{margin-bottom:14px}
 .signal-head{
@@ -147,7 +173,6 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .signal-card.surge{border-left-color:#d63031;background:#fff6f5}
 .signal-card.plunge{border-left-color:#0984e3;background:#f4f9ff}
 .signal-card.solo{border-left-color:#e17055;background:#fff9f4}
-.signal-card.volume{border-left-color:#a06d00;background:#fffdf3}
 .signal-card.split{border-left-color:#6c5ce7;background:#f8f7ff}
 .signal-icon{font-size:17px;flex:0 0 auto}
 .signal-text{flex:1;font-size:12.5px;line-height:1.45;min-width:0}
@@ -480,9 +505,17 @@ body.edit-mode .add-group-btn{display:inline-block}
     <label class="chk"><input type="checkbox" id="signal-on" checked onchange="renderSignals()"/> 🚨 시그널</label>
   </div>
   <div class="ctrl-group" style="margin-left:auto">
+    <input type="text" id="find-input" class="find-box" placeholder="🔎 내 종목 찾기"
+           autocomplete="off" oninput="findMyStock(this.value)"
+           oncompositionstart="_composing=true"
+           oncompositionend="_composing=false;findMyStock(this.value)"/>
+  </div>
+  <div class="ctrl-group">
     <span class="market-hint" id="market-hint"></span>
   </div>
 </div>
+
+<div id="find-result" class="find-result"></div>
 
 <div class="wrap">
   <div class="updated" id="updated"></div>
@@ -494,6 +527,29 @@ body.edit-mode .add-group-btn{display:inline-block}
 </div>
 
 <div id="save-indicator" class="save-indicator">💾 저장됨</div>
+
+<!-- ↗ 그룹 이동 모달 -->
+<div id="move-overlay" class="modal-overlay" onclick="if(event.target===this)closeMove()">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-head">
+      <span class="modal-title">↗ 그룹을 다른 섹터로 이동</span>
+      <button class="btn btn-mini" onclick="closeMove()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="bulk-hint" id="move-desc"></div>
+      <div class="bulk-target">
+        <div class="bulk-target-row">
+          <span class="ctrl-label">이동할 섹터</span>
+          <select id="move-target"></select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeMove()">취소</button>
+      <button class="btn btn-primary" onclick="applyMove()">이동하기</button>
+    </div>
+  </div>
+</div>
 
 <!-- 📥 일괄 추가 모달 -->
 <div id="bulk-overlay" class="modal-overlay" onclick="if(event.target===this)closeBulk()">
@@ -1102,7 +1158,10 @@ function renderGroup(sectorId, group){
       '<span class="group-name">' + esc(group.name) + '</span>' +
       (_editing ? '<button class="tab-icon-btn dark" onclick="renameGroupPrompt(\'' + group.id + '\')" title="이름 변경">✏️</button>' : '') +
       summary +
-      (_editing ? '<span class="group-actions"><button class="btn btn-mini btn-danger" onclick="deleteGroup(\'' + group.id + '\')" title="그룹 삭제">🗑</button></span>' : '') +
+      (_editing ? '<span class="group-actions">' +
+        '<button class="btn btn-mini" onclick="moveGroupPrompt(\'' + group.id + '\')" title="다른 섹터로 이동">↗ 이동</button>' +
+        '<button class="btn btn-mini btn-danger" onclick="deleteGroup(\'' + group.id + '\')" title="그룹 삭제">🗑</button>' +
+        '</span>' : '') +
     '</div>' +
     rows +
     '<div class="add-stock">' +
@@ -1604,13 +1663,122 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // 초기 컨트롤 상태 세팅
-// ── 🚨 특이 시그널 감지 ────────────────────
+// ── ↗ 그룹을 다른 섹터로 이동 ────────────────
+let _moveGroupId = null;
+
+function moveGroupPrompt(groupId){
+  const cur = _data.sectors.find(s => s.id === _data.currentSectorId);
+  if(!cur) return;
+  const g = cur.groups.find(x => x.id === groupId);
+  if(!g) return;
+  const others = _data.sectors.filter(s => s.id !== cur.id);
+  if(!others.length){
+    alert('이동할 다른 섹터가 없어요. 먼저 섹터를 만들어주세요.');
+    return;
+  }
+  _moveGroupId = groupId;
+  document.getElementById('move-desc').innerHTML =
+    '<b>' + esc(g.name) + '</b> (' + (g.stocks || []).length + '종목)을 ' +
+    '<b>' + esc(cur.name) + '</b>에서 다른 섹터로 옮깁니다.';
+  document.getElementById('move-target').innerHTML =
+    others.map(s => '<option value="' + s.id + '">' + esc(s.name) + '</option>').join('');
+  document.getElementById('move-overlay').classList.add('open');
+}
+
+function closeMove(){
+  document.getElementById('move-overlay').classList.remove('open');
+  _moveGroupId = null;
+}
+
+function applyMove(){
+  if(!_moveGroupId) return;
+  const cur = _data.sectors.find(s => s.id === _data.currentSectorId);
+  const targetId = document.getElementById('move-target').value;
+  const target = _data.sectors.find(s => s.id === targetId);
+  if(!cur || !target){ closeMove(); return; }
+  const idx = cur.groups.findIndex(x => x.id === _moveGroupId);
+  if(idx < 0){ closeMove(); return; }
+  const [g] = cur.groups.splice(idx, 1);
+  target.groups.push(g);
+  closeMove();
+  render();
+  scheduleSave();
+  showSaved('✅ "' + g.name + '" → ' + target.name + ' 이동됨');
+}
+
+// ── 🔎 내 종목 찾기 ───────────────────────
+// 등록해둔 종목이 어느 섹터 › 그룹에 있는지 즉시 찾아줌
+function findMyStock(q){
+  if(_composing) return;
+  const box = document.getElementById('find-result');
+  if(!box) return;
+  q = (q || '').trim().toLowerCase().replace(/\s/g, '');
+  if(q.length < 1){ box.classList.remove('open'); box.innerHTML = ''; return; }
+
+  const k = pctKey();
+  const hits = [];
+  for(const s of _data.sectors){
+    for(const g of (s.groups || [])){
+      for(const st of (g.stocks || [])){
+        const nm = (st.name || '').toLowerCase().replace(/\s/g, '');
+        if(nm.includes(q) || st.code.includes(q)){
+          hits.push({
+            stock: st, sectorId: s.id, groupId: g.id,
+            sectorName: s.name, groupName: g.name,
+          });
+        }
+      }
+    }
+  }
+
+  if(!hits.length){
+    box.innerHTML = '<div class="find-none">「' + esc(q) + '」 등록된 종목 중에 없음</div>';
+    box.classList.add('open');
+    return;
+  }
+
+  // 같은 종목이 여러 그룹에 있으면 묶어서 표시
+  const byCode = {};
+  for(const h of hits){
+    if(!byCode[h.stock.code]) byCode[h.stock.code] = {stock: h.stock, places: []};
+    byCode[h.stock.code].places.push(h);
+  }
+
+  box.innerHTML = Object.values(byCode).slice(0, 8).map(entry => {
+    const st = entry.stock;
+    const q2 = _quotes[st.code] || {};
+    const v = q2[k];
+    const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
+    const pct = (v === undefined || v === null) ? '—'
+              : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+    const paths = entry.places.map(p =>
+      '<b>' + esc(p.sectorName) + '</b> › ' + esc(p.groupName)).join(' &nbsp;·&nbsp; ');
+    const first = entry.places[0];
+    const dupNote = entry.places.length > 1
+      ? ' <span style="font-size:10px;color:#e17055">' + entry.places.length + '곳 중복</span>' : '';
+    return '<div class="find-item" onclick="gotoSignal(\'' + first.sectorId + '\',\'' + first.groupId + '\')">' +
+      '<span class="find-name">' + esc(st.name) + '</span>' +
+      '<span class="find-code">' + esc(st.code) + '</span>' +
+      '<span class="find-path">' + paths + dupNote + '</span>' +
+      '<span class="find-pct ' + cls + '">' + pct + '</span>' +
+      '</div>';
+  }).join('');
+  box.classList.add('open');
+}
+
+// 바깥 클릭하면 결과 닫기
+document.addEventListener('click', (e) => {
+  const box = document.getElementById('find-result');
+  const inp = document.getElementById('find-input');
+  if(!box || !inp) return;
+  if(e.target === inp || box.contains(e.target)) return;
+  box.classList.remove('open');
+});
 // 세부 그룹(테마) 단위로 이상 흐름을 잡아낸다.
 const SIG = {
   GROUP_MOVE: 3.0,    // 그룹 평균 ±3% 이상 → 동반 급등/급락
   GROUP_CALM: 1.5,    // 그룹 평균 ±1.5% 이내면 '잠잠'
   SOLO_MOVE: 5.0,     // 잠잠한 그룹에서 홀로 ±5% → 개별 이슈
-  VOL_MULT: 2.5,      // 그룹 평균 거래량 대비 2.5배 → 거래 폭증
   SPLIT_GAP: 10.0,    // 그룹 내 최고-최저 10%p 차이 → 분열
   MIN_STOCKS: 2,      // 그룹 판정 최소 종목 수
 };
@@ -1679,35 +1847,7 @@ function detectSignals(){
         }
       }
 
-      // ③ 거래량 폭증 — 자기를 뺀 나머지 종목 평균과 비교
-      //    (폭증 종목이 평균에 포함되면 배수가 희석되므로)
-      if(stocks.length >= SIG.MIN_STOCKS){
-        for(const s of stocks){
-          const vol = _quotes[s.code].volume || 0;
-          if(vol <= 50000) continue;
-          const peers = stocks
-            .filter(x => x.code !== s.code)
-            .map(x => (_quotes[x.code].volume || 0))
-            .filter(v => v > 0);
-          if(peers.length < 1) continue;
-          const peerAvg = peers.reduce((a,b) => a+b, 0) / peers.length;
-          if(peerAvg <= 0) continue;
-          const mult = vol / peerAvg;
-          if(mult >= SIG.VOL_MULT){
-            const v = _quotes[s.code][k];
-            out.push(Object.assign({}, base, {
-              type: 'volume', icon: '📊', score: Math.min(mult, 20),
-              stockName: s.name, stockCode: s.code,
-              detail: '같은 테마 다른 종목 대비 거래량 ' + mult.toFixed(1) + '배 · ' +
-                      '등락 ' + (v>0?'+':'') + v.toFixed(2) + '%',
-              val: mult.toFixed(1) + '배',
-              valCls: v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'),
-            }));
-          }
-        }
-      }
-
-      // ④ 그룹 내 분열 (최고 - 최저)
+      // ③ 그룹 내 분열 (최고 - 최저)
       const maxV = Math.max(...vals), minV = Math.min(...vals);
       if((maxV - minV) >= SIG.SPLIT_GAP && stocks.length >= 3){
         const top = stocks.find(s => _quotes[s.code][k] === maxV);
@@ -1745,7 +1885,7 @@ function renderSignals(){
   }
 
   const labels = {surge:'동반 급등', plunge:'동반 급락', solo:'단독 급변',
-                  volume:'거래량 폭증', split:'테마 내 분열'};
+                  split:'테마 내 분열'};
 
   box.innerHTML = '<div class="signal-head">🚨 특이 시그널 · ' + basis + ' 기준 · ' + sigs.length + '건</div>' +
     '<div class="signal-list">' +
@@ -1767,6 +1907,8 @@ function renderSignals(){
 
 // 시그널 클릭 → 해당 섹터/그룹으로 이동
 function gotoSignal(sectorId, groupId){
+  const fbox = document.getElementById('find-result');
+  if(fbox) fbox.classList.remove('open');
   if(_view === 'rank'){
     _openSectors[sectorId] = true;
     _openGroups[groupId] = true;
@@ -1965,6 +2107,10 @@ document.addEventListener('keydown', (e) => {
   if(e.key === 'Escape'){
     const ov = document.getElementById('bulk-overlay');
     if(ov && ov.classList.contains('open')) closeBulk();
+    const mv = document.getElementById('move-overlay');
+    if(mv && mv.classList.contains('open')) closeMove();
+    const fb = document.getElementById('find-result');
+    if(fb) fb.classList.remove('open');
   }
 });
 
