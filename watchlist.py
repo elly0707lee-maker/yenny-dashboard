@@ -37,6 +37,34 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .wrap{max-width:1600px;margin:0 auto;padding:16px 24px}
 .updated{font-size:11px;color:#7a8099;margin-bottom:10px}
 
+/* 🆕 컨트롤 바 */
+.controlbar{
+  background:#fff;border-bottom:1px solid #e5e7eb;
+  padding:10px 24px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;
+  position:sticky;top:57px;z-index:90;
+}
+.ctrl-group{display:flex;gap:4px;align-items:center}
+.ctrl-label{font-size:11px;color:#7a8099;font-weight:600;margin-right:4px}
+.seg{
+  padding:5px 11px;border:1px solid #e5e7eb;border-radius:6px;
+  background:#fff;color:#1a1d23;font-size:11.5px;font-weight:500;
+  cursor:pointer;font-family:inherit;transition:all .12s;
+}
+.seg:hover{background:#f1f3f5;border-color:#1a1d23}
+.seg.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
+.chk{font-size:11.5px;color:#1a1d23;display:flex;align-items:center;gap:5px;cursor:pointer}
+.chk input{cursor:pointer}
+.market-hint{font-size:11px;color:#7a8099;font-style:italic}
+
+/* 시장 배지 */
+.mkt-badge{
+  display:inline-block;padding:1px 5px;border-radius:4px;
+  font-size:9.5px;font-weight:700;margin-left:5px;vertical-align:middle;
+}
+.mkt-badge.krx{background:#e3f2fd;color:#0277bd}
+.mkt-badge.nxt{background:#f3e5f5;color:#7b1fa2}
+.mkt-badge.un{background:#f1f3f5;color:#616161}
+
 /* 섹터 탭바 */
 .sector-tabs{
   display:flex;gap:6px;flex-wrap:wrap;padding-bottom:12px;
@@ -110,6 +138,33 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .add-stock input:focus{border-color:#1a1d23}
 .add-stock button{padding:6px 12px;font-size:12px}
+
+/* 🆕 자동완성 */
+.ac-wrap{position:relative;flex:1}
+.ac-wrap input{width:100%}
+.ac-list{
+  display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;
+  background:#fff;border:1px solid #e5e7eb;border-radius:8px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.1);z-index:50;
+  max-height:260px;overflow-y:auto;
+}
+.ac-list.open{display:block}
+.ac-item{
+  padding:8px 12px;font-size:12.5px;cursor:pointer;
+  display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid #f1f3f5;
+}
+.ac-item:last-child{border-bottom:none}
+.ac-item:hover,.ac-item.sel{background:#f1f3f5}
+.ac-item-name{font-weight:600;color:#1a1d23}
+.ac-item-code{font-size:10.5px;color:#a8b0bd}
+.ac-item-market{
+  margin-left:auto;font-size:10px;padding:1px 6px;border-radius:8px;
+  background:#f1f3f5;color:#7a8099;
+}
+.ac-loading{padding:10px 12px;font-size:12px;color:#a8b0bd;font-style:italic}
+.ac-empty{padding:10px 12px;font-size:12px;color:#a8b0bd}
+
 .add-group-btn{
   padding:8px 14px;border:1px dashed #999;border-radius:8px;
   background:transparent;color:#666;font-size:12px;cursor:pointer;
@@ -152,6 +207,31 @@ body.edit-mode .add-group-btn{display:inline-block}
   </div>
 </div>
 
+<div class="controlbar">
+  <!-- 시장 선택 -->
+  <div class="ctrl-group">
+    <span class="ctrl-label">시장</span>
+    <button class="seg" data-mkt="UN" onclick="setMarket('UN')" title="KRX+NXT 통합 (체결 있는 쪽)">통합</button>
+    <button class="seg" data-mkt="J" onclick="setMarket('J')" title="한국거래소 정규장">KRX</button>
+    <button class="seg" data-mkt="NX" onclick="setMarket('NX')" title="넥스트레이드 (프리·애프터)">NXT</button>
+  </div>
+  <!-- 정렬 -->
+  <div class="ctrl-group">
+    <span class="ctrl-label">정렬</span>
+    <button class="seg" data-sort="manual" onclick="setSort('manual')">기본</button>
+    <button class="seg" data-sort="chg_desc" onclick="setSort('chg_desc')">등락률 ↓</button>
+    <button class="seg" data-sort="chg_asc" onclick="setSort('chg_asc')">등락률 ↑</button>
+    <button class="seg" data-sort="vol_desc" onclick="setSort('vol_desc')">거래량 ↓</button>
+  </div>
+  <!-- 보기 -->
+  <div class="ctrl-group">
+    <label class="chk"><input type="checkbox" id="flat-view" onchange="toggleFlat()"/> 그룹 무시하고 전체 정렬</label>
+  </div>
+  <div class="ctrl-group" style="margin-left:auto">
+    <span class="market-hint" id="market-hint"></span>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="updated" id="updated"></div>
   <div class="sector-tabs" id="sector-tabs"></div>
@@ -177,14 +257,75 @@ body.edit-mode .add-group-btn{display:inline-block}
 })();
 
 let _data = {sectors: [], currentSectorId: null};
-let _quotes = {};         // { code: {price, chg, chg_pct, volume, ...} }
+let _quotes = {};
 let _saveTimer = null;
 let _editing = false;
 let _autoRefreshTimer = null;
+let _market = 'UN';           // 🆕 UN(통합) | J(KRX) | NX(NXT)
+let _sort = 'manual';         // 🆕 manual | chg_desc | chg_asc | vol_desc
+let _flatView = false;        // 🆕 그룹 무시하고 전체 정렬
 
 function genId(){ return 'x' + Math.random().toString(36).slice(2, 10); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function num(n){ return n === undefined || n === null ? '—' : Number(n).toLocaleString('ko-KR'); }
+
+// 🆕 시장 라벨 / 힌트
+const MKT_LABEL = {'UN':'통합', 'J':'KRX', 'NX':'NXT'};
+const MKT_CLASS = {'UN':'un', 'J':'krx', 'NX':'nxt'};
+
+function updateMarketHint(){
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes();
+  const t = h * 60 + m;
+  let phase = '';
+  if(t >= 8*60 && t < 9*60)          phase = '프리마켓 (NXT 유효)';
+  else if(t >= 9*60 && t < 15*60+30) phase = '정규장 (KRX 유효)';
+  else if(t >= 15*60+30 && t < 16*60) phase = '장 마감 정리';
+  else if(t >= 16*60 && t < 20*60)   phase = '애프터마켓 (NXT 유효)';
+  else                                phase = '장외 시간 (마지막 종가)';
+  const el = document.getElementById('market-hint');
+  if(el) el.textContent = '🕐 ' + phase + ' · 현재 ' + MKT_LABEL[_market] + ' 조회 중';
+}
+
+function setMarket(mkt){
+  if(_market === mkt) return;
+  _market = mkt;
+  document.querySelectorAll('.seg[data-mkt]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-mkt') === mkt);
+  });
+  updateMarketHint();
+  _quotes = {};   // 시장 바뀌면 기존 시세 무효
+  renderBody();
+  refreshQuotes();
+}
+
+function setSort(s){
+  _sort = s;
+  document.querySelectorAll('.seg[data-sort]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-sort') === s);
+  });
+  renderBody();
+}
+
+function toggleFlat(){
+  _flatView = document.getElementById('flat-view').checked;
+  renderBody();
+}
+
+// 🆕 정렬 적용
+function sortStocks(stocks){
+  if(_sort === 'manual') return stocks.slice();
+  const arr = stocks.slice();
+  arr.sort((a, b) => {
+    const qa = _quotes[a.code] || {};
+    const qb = _quotes[b.code] || {};
+    if(_sort === 'chg_desc') return (qb.chg_pct ?? -999) - (qa.chg_pct ?? -999);
+    if(_sort === 'chg_asc')  return (qa.chg_pct ??  999) - (qb.chg_pct ??  999);
+    if(_sort === 'vol_desc') return (qb.volume  ??   -1) - (qa.volume  ??   -1);
+    return 0;
+  });
+  return arr;
+}
 
 // ── 저장 / 로드 ──────────────────────────
 function scheduleSave(){
@@ -279,9 +420,34 @@ function renderBody(){
   const body = document.getElementById('watchlist-body');
   const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
   if(!sector){
-    body.innerHTML = '<span class="content-empty">섹터가 없음. + 눌러서 추가하세요.</span>';
+    body.innerHTML = '<span class="content-empty">섹터가 없음. 편집 모드에서 + 눌러 추가하세요.</span>';
     return;
   }
+  // 🆕 flat view — 그룹 무시, 전체 종목 하나의 표로
+  if(_flatView){
+    const all = [];
+    for(const g of sector.groups){
+      for(const st of (g.stocks || [])){
+        all.push(Object.assign({}, st, {_group: g.name, _groupId: g.id}));
+      }
+    }
+    if(!all.length){
+      body.innerHTML = '<span class="content-empty">종목 없음</span>';
+      return;
+    }
+    const sorted = sortStocks(all);
+    body.innerHTML =
+      '<div class="group"><div class="group-header"><span class="group-icon">📊</span>' +
+      '<span>' + esc(sector.name) + ' 전체 (' + all.length + '종목)</span></div>' +
+      '<table class="stock-table"><thead><tr>' +
+      '<th>종목명</th><th>그룹</th>' +
+      '<th class="num">현재가</th><th class="num">등락</th><th class="num">등락률</th><th class="num">거래량</th><th></th>' +
+      '</tr></thead><tbody>' +
+      sorted.map(st => renderStockRow(st._groupId, st, true)).join('') +
+      '</tbody></table></div>';
+    return;
+  }
+
   if(!sector.groups.length){
     body.innerHTML = '<span class="content-empty">그룹이 없음. 편집 모드에서 그룹 추가.</span>' +
       (_editing ? '<div style="text-align:center"><button class="add-group-btn" onclick="addGroup()">+ 새 그룹</button></div>' : '');
@@ -299,7 +465,9 @@ function renderBody(){
 
 function renderGroup(sectorId, group){
   let rows = '';
-  if(group.stocks && group.stocks.length){
+  const stocks = group.stocks || [];
+  if(stocks.length){
+    const sorted = sortStocks(stocks);
     rows = '<table class="stock-table">' +
       '<thead><tr>' +
       '<th>종목명</th>' +
@@ -309,37 +477,67 @@ function renderGroup(sectorId, group){
       '<th class="num">거래량</th>' +
       '<th></th>' +
       '</tr></thead><tbody>' +
-      group.stocks.map(st => renderStockRow(group.id, st)).join('') +
+      sorted.map(st => renderStockRow(group.id, st)).join('') +
       '</tbody></table>';
   } else {
     rows = '<div class="content-empty" style="padding:20px">종목 없음</div>';
+  }
+  // 그룹 요약 (평균 등락률)
+  let summary = '';
+  if(stocks.length){
+    const vals = stocks.map(s => (_quotes[s.code] || {}).chg_pct).filter(v => v !== undefined);
+    if(vals.length){
+      const avg = vals.reduce((a,b)=>a+b, 0) / vals.length;
+      const cls = avg > 0 ? 'up' : (avg < 0 ? 'down' : 'flat');
+      summary = '<span style="margin-left:8px;font-size:11.5px;font-weight:500;" class="' + cls + '">평균 ' + (avg>0?'+':'') + avg.toFixed(2) + '%</span>';
+    }
   }
   return '<div class="group" data-group-id="' + group.id + '">' +
     '<div class="group-header">' +
       '<span class="group-icon">📌</span>' +
       '<span class="group-name" contenteditable="' + (_editing?'true':'false') + '" onblur="renameGroup(\'' + group.id + '\', this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">' + esc(group.name) + '</span>' +
+      summary +
       (_editing ? '<span class="group-actions"><button class="btn btn-mini btn-danger" onclick="deleteGroup(\'' + group.id + '\')" title="그룹 삭제">🗑</button></span>' : '') +
     '</div>' +
     rows +
     '<div class="add-stock">' +
-      '<input type="text" placeholder="종목코드 6자리 (예: 005930)" id="add-code-' + group.id + '" maxlength="6"/>' +
-      '<input type="text" placeholder="종목명 (예: 삼성전자)" id="add-name-' + group.id + '"/>' +
+      '<div class="ac-wrap">' +
+        '<input type="text" placeholder="종목명 입력 (예: 두산에너빌리티)" ' +
+               'id="ac-input-' + group.id + '" autocomplete="off" ' +
+               'oninput="acSearch(\'' + group.id + '\', this.value)" ' +
+               'onkeydown="acKeydown(event, \'' + group.id + '\')" ' +
+               'onblur="setTimeout(()=>acClose(\'' + group.id + '\'), 200)"/>' +
+        '<div class="ac-list" id="ac-list-' + group.id + '"></div>' +
+      '</div>' +
+      '<button class="btn" onclick="acManualToggle(\'' + group.id + '\')" title="종목코드로 직접 입력">#</button>' +
+    '</div>' +
+    '<div class="add-stock manual" id="manual-' + group.id + '" style="display:none;">' +
+      '<input type="text" placeholder="종목코드 6자리" id="add-code-' + group.id + '" maxlength="6"/>' +
+      '<input type="text" placeholder="종목명" id="add-name-' + group.id + '"/>' +
       '<button class="btn btn-primary" onclick="addStock(\'' + group.id + '\')">+ 추가</button>' +
     '</div>' +
     '</div>';
 }
 
-function renderStockRow(groupId, st){
+function renderStockRow(groupId, st, showGroup){
   const q = _quotes[st.code] || {};
-  const price = q.price !== undefined ? num(q.price) : '—';
+  const has = q.price !== undefined;
+  const price = has ? num(q.price) : '—';
   const chg = q.chg !== undefined ? (q.chg > 0 ? '+' : '') + num(q.chg) : '';
   const chgPct = q.chg_pct !== undefined ? (q.chg_pct > 0 ? '+' : '') + q.chg_pct.toFixed(2) + '%' : '';
   const volume = q.volume !== undefined ? num(q.volume) : '—';
   const cls = q.chg_pct > 0 ? 'up' : (q.chg_pct < 0 ? 'down' : 'flat');
   const hotBadge = q.chg_pct !== undefined && Math.abs(q.chg_pct) >= 5
     ? '<span class="hot">🔥</span>' : '';
+  // 🆕 시장 배지 — 이 시세가 어느 시장인지 명시
+  const mkt = q.market || _market;
+  const mktBadge = has
+    ? '<span class="mkt-badge ' + (MKT_CLASS[mkt]||'un') + '">' + (MKT_LABEL[mkt]||mkt) + '</span>'
+    : '';
+  const groupCol = showGroup ? '<td style="font-size:11.5px;color:#7a8099">' + esc(st._group || '') + '</td>' : '';
   return '<tr class="stock-row" data-code="' + st.code + '">' +
-    '<td><span class="stock-name">' + esc(st.name) + '</span><span class="stock-code">' + esc(st.code) + '</span>' + hotBadge + '</td>' +
+    '<td><span class="stock-name">' + esc(st.name) + '</span><span class="stock-code">' + esc(st.code) + '</span>' + mktBadge + hotBadge + '</td>' +
+    groupCol +
     '<td class="num">' + price + '</td>' +
     '<td class="num ' + cls + '">' + chg + '</td>' +
     '<td class="num ' + cls + '">' + chgPct + '</td>' +
@@ -423,33 +621,160 @@ function deleteGroup(id){
 }
 
 // ── 종목 관리 ─────────────────────────────
-function addStock(groupId){
-  const codeEl = document.getElementById('add-code-' + groupId);
-  const nameEl = document.getElementById('add-name-' + groupId);
-  const code = (codeEl.value || '').trim();
-  const name = (nameEl.value || '').trim();
-  if(!code || code.length !== 6 || !/^\d{6}$/.test(code)){
-    alert('종목코드는 6자리 숫자 (예: 005930)');
+// ── 🆕 종목명 자동완성 ────────────────────
+const _acState = {};   // { groupId: {timer, items, sel, q} }
+
+function acSearch(groupId, q){
+  q = (q || '').trim();
+  const st = _acState[groupId] = _acState[groupId] || {};
+  if(st.timer) clearTimeout(st.timer);
+  const listEl = document.getElementById('ac-list-' + groupId);
+  if(!listEl) return;
+  if(q.length < 1){
+    acClose(groupId);
     return;
   }
-  if(!name){
-    alert('종목명을 입력해주세요');
+  // 6자리 숫자면 코드 직접 입력으로 간주
+  if(/^\d{6}$/.test(q)){
+    listEl.innerHTML = '<div class="ac-item" onclick="acPickRaw(\'' + groupId + '\', \'' + q + '\')">' +
+      '<span class="ac-item-name">종목코드 ' + q + '</span>' +
+      '<span class="ac-item-code">직접 추가</span></div>';
+    listEl.classList.add('open');
     return;
   }
+  listEl.innerHTML = '<div class="ac-loading">검색 중...</div>';
+  listEl.classList.add('open');
+  st.timer = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/watchlist/search?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      const items = data.items || [];
+      st.items = items;
+      st.sel = -1;
+      if(!items.length){
+        listEl.innerHTML = '<div class="ac-empty">검색 결과 없음 · # 버튼으로 코드 직접 입력</div>';
+        return;
+      }
+      listEl.innerHTML = items.map((it, i) =>
+        '<div class="ac-item" data-idx="' + i + '" onclick="acPick(\'' + groupId + '\', ' + i + ')">' +
+        '<span class="ac-item-name">' + esc(it.name) + '</span>' +
+        '<span class="ac-item-code">' + esc(it.code) + '</span>' +
+        (it.market ? '<span class="ac-item-market">' + esc(it.market) + '</span>' : '') +
+        '</div>'
+      ).join('');
+    } catch(e){
+      listEl.innerHTML = '<div class="ac-empty">검색 실패 · # 버튼으로 코드 직접 입력</div>';
+    }
+  }, 300);
+}
+
+function acKeydown(e, groupId){
+  const st = _acState[groupId];
+  const listEl = document.getElementById('ac-list-' + groupId);
+  if(!st || !st.items || !st.items.length || !listEl || !listEl.classList.contains('open')){
+    if(e.key === 'Enter'){
+      // 6자리 코드면 바로 추가
+      const v = (document.getElementById('ac-input-' + groupId).value || '').trim();
+      if(/^\d{6}$/.test(v)) acPickRaw(groupId, v);
+    }
+    return;
+  }
+  if(e.key === 'ArrowDown'){
+    e.preventDefault();
+    st.sel = Math.min((st.sel === undefined ? -1 : st.sel) + 1, st.items.length - 1);
+    acHighlight(groupId);
+  } else if(e.key === 'ArrowUp'){
+    e.preventDefault();
+    st.sel = Math.max((st.sel === undefined ? 0 : st.sel) - 1, 0);
+    acHighlight(groupId);
+  } else if(e.key === 'Enter'){
+    e.preventDefault();
+    const idx = (st.sel === undefined || st.sel < 0) ? 0 : st.sel;
+    acPick(groupId, idx);
+  } else if(e.key === 'Escape'){
+    acClose(groupId);
+  }
+}
+
+function acHighlight(groupId){
+  const st = _acState[groupId];
+  const listEl = document.getElementById('ac-list-' + groupId);
+  if(!listEl) return;
+  listEl.querySelectorAll('.ac-item').forEach(el => el.classList.remove('sel'));
+  const target = listEl.querySelector('[data-idx="' + st.sel + '"]');
+  if(target){
+    target.classList.add('sel');
+    target.scrollIntoView({block:'nearest'});
+  }
+}
+
+function acPick(groupId, idx){
+  const st = _acState[groupId];
+  if(!st || !st.items || !st.items[idx]) return;
+  const it = st.items[idx];
+  addStockDirect(groupId, it.code, it.name);
+  const inputEl = document.getElementById('ac-input-' + groupId);
+  if(inputEl) inputEl.value = '';
+  acClose(groupId);
+}
+
+function acPickRaw(groupId, code){
+  addStockDirect(groupId, code, code);   // 이름 = 코드 (나중에 시세 조회 후 갱신 가능)
+  const inputEl = document.getElementById('ac-input-' + groupId);
+  if(inputEl) inputEl.value = '';
+  acClose(groupId);
+}
+
+function acClose(groupId){
+  const listEl = document.getElementById('ac-list-' + groupId);
+  if(listEl) listEl.classList.remove('open');
+}
+
+function acManualToggle(groupId){
+  const el = document.getElementById('manual-' + groupId);
+  if(!el) return;
+  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+}
+
+// 공통 추가 로직
+function addStockDirect(groupId, code, name){
+  code = (code || '').trim();
+  name = (name || '').trim();
+  if(!/^\d{6}$/.test(code)){ alert('종목코드는 6자리 숫자'); return; }
+  if(!name) name = code;
   const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
   if(!sector) return;
   const g = sector.groups.find(x => x.id === groupId);
   if(!g) return;
   if(g.stocks.find(s => s.code === code)){
-    alert('이미 이 그룹에 있는 종목');
+    showSaved('⚠️ 이미 있는 종목: ' + name);
     return;
   }
   g.stocks.push({code, name});
-  codeEl.value = '';
-  nameEl.value = '';
   render();
   refreshQuotes([code]);
   scheduleSave();
+  showSaved('✅ ' + name + ' 추가됨');
+  // 추가 후 다시 입력창에 포커스 (연속 추가 편하게)
+  setTimeout(() => {
+    const inputEl = document.getElementById('ac-input-' + groupId);
+    if(inputEl) inputEl.focus();
+  }, 100);
+}
+
+function addStock(groupId){
+  const codeEl = document.getElementById('add-code-' + groupId);
+  const nameEl = document.getElementById('add-name-' + groupId);
+  const code = (codeEl.value || '').trim();
+  const name = (nameEl.value || '').trim();
+  if(!code || !/^\d{6}$/.test(code)){
+    alert('종목코드는 6자리 숫자 (예: 005930)');
+    return;
+  }
+  if(!name){ alert('종목명을 입력해주세요'); return; }
+  addStockDirect(groupId, code, name);
+  codeEl.value = '';
+  nameEl.value = '';
 }
 
 function deleteStock(groupId, code){
@@ -498,12 +823,29 @@ async function refreshQuotes(codes){
     const res = await fetch('/api/watchlist/quotes', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({codes: allCodes})
+      body: JSON.stringify({codes: allCodes, market: _market})
     });
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     Object.assign(_quotes, data.quotes || {});
-    document.getElementById('updated').textContent = '📊 시세 갱신 ' + new Date().toLocaleTimeString('ko-KR');
+    // 종목명이 코드로만 되어 있으면 API가 준 이름으로 자동 보정
+    let renamed = false;
+    for(const s of _data.sectors){
+      for(const g of s.groups){
+        for(const st of g.stocks){
+          const q = _quotes[st.code];
+          if(q && q.api_name && (st.name === st.code || !st.name)){
+            st.name = q.api_name;
+            renamed = true;
+          }
+        }
+      }
+    }
+    if(renamed) scheduleSave();
+    document.getElementById('updated').textContent =
+      '📊 ' + MKT_LABEL[_market] + ' 시세 · ' + new Date().toLocaleTimeString('ko-KR') +
+      ' · ' + Object.keys(data.quotes || {}).length + '/' + allCodes.length + '종목';
+    updateMarketHint();
     renderBody();
   } catch(e){
     document.getElementById('updated').textContent = '⚠️ 시세 조회 실패: ' + e.message;
@@ -525,6 +867,19 @@ document.addEventListener('visibilitychange', () => {
   if(!document.hidden) refreshQuotes();
 });
 
+// 초기 컨트롤 상태 세팅
+function initControls(){
+  document.querySelectorAll('.seg[data-mkt]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-mkt') === _market);
+  });
+  document.querySelectorAll('.seg[data-sort]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-sort') === _sort);
+  });
+  updateMarketHint();
+  setInterval(updateMarketHint, 60000);
+}
+
+initControls();
 loadData();
 startAutoRefresh();
 </script>
@@ -533,41 +888,113 @@ startAutoRefresh();
 """
 
 
-def fetch_stock_quotes(codes: list, kis_get_fn) -> dict:
-    """KIS API로 여러 종목 시세 조회 (순차, 각각 별도 요청)"""
+def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN") -> dict:
+    """
+    KIS API로 여러 종목 시세 조회 (병렬 + rate limit 준수)
+
+    market:
+      'J'  = KRX (정규장)
+      'NX' = NXT (넥스트레이드)
+      'UN' = 통합 (KRX+NXT 중 체결 있는 쪽)
+    """
+    import concurrent.futures
+    import threading
+    import time as _time
+
+    if market not in ("J", "NX", "UN"):
+        market = "UN"
+
     quotes = {}
-    for code in codes:
+    lock = threading.Lock()
+    # KIS rate limit: 초당 20건 → 안전하게 초당 12건
+    rate_lock = threading.Semaphore(6)
+    last_call = {"t": 0.0}
+    time_lock = threading.Lock()
+
+    def throttle():
+        with time_lock:
+            now = _time.time()
+            gap = now - last_call["t"]
+            if gap < 0.08:      # 최소 80ms 간격
+                _time.sleep(0.08 - gap)
+            last_call["t"] = _time.time()
+
+    def fetch_one(code):
         if not code or len(code) != 6:
-            continue
-        try:
-            r = kis_get_fn(
-                "/uapi/domestic-stock/v1/quotations/inquire-price",
-                "FHKST01010100",
-                {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
-            )
-            out = r.get("output", {}) if isinstance(r, dict) else {}
-            if not out:
-                continue
-            try: price = int(out.get("stck_prpr", 0) or 0)
-            except: price = 0
-            try: chg = int(out.get("prdy_vrss", 0) or 0)
-            except: chg = 0
-            try: chg_pct = float(out.get("prdy_ctrt", 0) or 0)
-            except: chg_pct = 0
-            try: volume = int(out.get("acml_vol", 0) or 0)
-            except: volume = 0
-            # 부호: 1(상한),2(상승) = +, 4(하한),5(하락) = -
-            sign = out.get("prdy_vrss_sign", "3")
-            if sign in ("4", "5") and chg > 0:
-                chg = -chg
-            if sign in ("4", "5") and chg_pct > 0:
-                chg_pct = -chg_pct
-            quotes[code] = {
-                "price": price,
-                "chg": chg,
-                "chg_pct": chg_pct,
-                "volume": volume,
-            }
-        except Exception as e:
-            print(f"[watchlist] {code} 시세 조회 실패: {e}")
+            return
+        with rate_lock:
+            throttle()
+            try:
+                r = kis_get_fn(
+                    "/uapi/domestic-stock/v1/quotations/inquire-price",
+                    "FHKST01010100",
+                    {"FID_COND_MRKT_DIV_CODE": market, "FID_INPUT_ISCD": code}
+                )
+                out = r.get("output", {}) if isinstance(r, dict) else {}
+                if not out:
+                    return
+                def _i(k, d=0):
+                    try: return int(float(out.get(k, d) or d))
+                    except: return d
+                def _f(k, d=0.0):
+                    try: return float(out.get(k, d) or d)
+                    except: return d
+
+                price = _i("stck_prpr")
+                chg = _i("prdy_vrss")
+                chg_pct = _f("prdy_ctrt")
+                volume = _i("acml_vol")
+                # 부호: 1(상한) 2(상승) 3(보합) 4(하한) 5(하락)
+                sign = str(out.get("prdy_vrss_sign", "3"))
+                if sign in ("4", "5"):
+                    chg = -abs(chg)
+                    chg_pct = -abs(chg_pct)
+                elif sign in ("1", "2"):
+                    chg = abs(chg)
+                    chg_pct = abs(chg_pct)
+
+                # 종목명 (API가 주면 사용)
+                api_name = (out.get("hts_kor_isnm") or "").strip()
+
+                with lock:
+                    quotes[code] = {
+                        "price": price,
+                        "chg": chg,
+                        "chg_pct": chg_pct,
+                        "volume": volume,
+                        "market": market,
+                        "api_name": api_name,
+                        "high": _i("stck_hgpr"),
+                        "low": _i("stck_lwpr"),
+                        "open": _i("stck_oprc"),
+                        "prev_close": _i("stck_sdpr"),
+                    }
+            except Exception as e:
+                print(f"[watchlist] {code} ({market}) 시세 실패: {e}")
+
+    uniq = []
+    seen = set()
+    for c in codes:
+        c = str(c).strip()
+        if c and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        list(ex.map(fetch_one, uniq))
+
     return quotes
+
+
+def resolve_stock_name(code: str, kis_get_fn) -> str:
+    """종목코드 → 종목명 (KIS API)"""
+    try:
+        r = kis_get_fn(
+            "/uapi/domestic-stock/v1/quotations/inquire-price",
+            "FHKST01010100",
+            {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code}
+        )
+        out = r.get("output", {}) if isinstance(r, dict) else {}
+        return (out.get("hts_kor_isnm") or "").strip()
+    except Exception:
+        return ""
