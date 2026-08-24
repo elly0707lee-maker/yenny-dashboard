@@ -5,6 +5,39 @@
 - 편집 모드 (섹터/그룹/종목 관리)
 - 자동 저장
 """
+import threading
+
+# ── 전역 Session 풀 (프로세스 살아있는 동안 재사용) ───────
+# 매 요청마다 Session을 새로 만들면 TLS 핸드셰이크가 반복됨.
+# 모듈 레벨에 하나 두고 계속 재사용 → 커넥션이 살아있어서 훨씬 빠름.
+_session_lock = threading.Lock()
+_shared_session = {"s": None, "token": ""}
+
+
+def _get_session(token: str, app_key: str, app_secret: str):
+    import requests as _rq
+    with _session_lock:
+        s = _shared_session["s"]
+        if s is None:
+            s = _rq.Session()
+            adapter = _rq.adapters.HTTPAdapter(
+                pool_connections=32, pool_maxsize=32, max_retries=0
+            )
+            s.mount("https://", adapter)
+            _shared_session["s"] = s
+        # 토큰이 바뀌었을 때만 헤더 갱신
+        if _shared_session["token"] != token:
+            s.headers.update({
+                "authorization": f"Bearer {token}",
+                "appkey": app_key,
+                "appsecret": app_secret,
+                "tr_id": "FHKST01010100",
+                "Content-Type": "application/json",
+                "Connection": "keep-alive",
+            })
+            _shared_session["token"] = token
+        return s
+
 
 def get_watchlist_html() -> str:
     return r"""<!DOCTYPE html>
@@ -214,7 +247,7 @@ body.edit-mode .add-group-btn{display:inline-block}
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
     <button class="btn" onclick="toggleEdit()" id="edit-btn">⚙️ 편집</button>
-    <button class="btn btn-primary" onclick="refreshQuotes()" id="refresh-btn">🔄 시세 갱신</button>
+    <button class="btn btn-primary" onclick="refreshQuotes(allCodesEverywhere(), {force:true})" id="refresh-btn">🔄 시세 갱신</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
   </div>
 </div>
@@ -316,7 +349,7 @@ function setMarket(mkt){
   updateMarketHint();
   _quotes = {};
   renderBody();
-  refreshQuotes();
+  refreshQuotes(allCodesEverywhere(), {force:true});
 }
 
 function setSort(s){
@@ -385,7 +418,8 @@ async function loadData(){
       _data.currentSectorId = _data.sectors[0].id;
     }
     render();
-    refreshQuotes();
+    // ⚡ 전체 섹터 시세를 한 번에 — 탭 전환이 즉시 반응함
+    refreshQuotes(allCodesEverywhere());
   } catch(e){ console.error(e); initEmpty(); }
 }
 
@@ -661,9 +695,19 @@ function renderStockRow(groupId, st, showGroup){
 function switchSector(id){
   if(_data.currentSectorId === id) return;
   _data.currentSectorId = id;
-  render();
-  refreshQuotes();
+  render();          // ⚡ 캐시된 시세로 즉시 렌더 (기다림 없음)
   scheduleSave();
+  // 아직 시세 없는 종목만 추가 조회
+  const sector = _data.sectors.find(s => s.id === id);
+  if(sector){
+    const missing = [];
+    for(const g of (sector.groups || [])){
+      for(const st of (g.stocks || [])){
+        if(!_quotes[st.code]) missing.push(st.code);
+      }
+    }
+    if(missing.length) refreshQuotes(missing);
+  }
 }
 
 function addSector(){
@@ -763,7 +807,13 @@ function acSearch(groupId, q){
       st.items = items;
       st.sel = -1;
       if(!items.length){
-        listEl.innerHTML = '<div class="ac-empty">검색 결과 없음 · # 버튼으로 코드 직접 입력</div>';
+        const ms = data.master_size || 0;
+        if(ms === 0){
+          listEl.innerHTML = '<div class="ac-empty">📥 종목 목록 준비 중 (첫 검색은 20~30초)<br>' +
+            '<span style="font-size:11px">잠시 후 다시 입력하거나 # 버튼으로 코드 직접 입력</span></div>';
+        } else {
+          listEl.innerHTML = '<div class="ac-empty">검색 결과 없음 (' + ms + '종목 중) · # 버튼으로 코드 직접 입력</div>';
+        }
         return;
       }
       listEl.innerHTML = items.map((it, i) =>
@@ -912,9 +962,20 @@ function toggleEdit(){
 // ── KIS 시세 조회 ──────────────────────────
 let _fetching = false;
 
-async function refreshQuotes(codes){
-  // 이미 조회 중이면 중복 요청 방지
-  if(_fetching) return;
+// ⚡ 전체 섹터 종목 코드 (탭 전환 시 즉시 표시용)
+function allCodesEverywhere(){
+  const set = new Set();
+  for(const s of _data.sectors){
+    for(const g of (s.groups || [])){
+      for(const st of (g.stocks || [])) set.add(st.code);
+    }
+  }
+  return Array.from(set);
+}
+
+async function refreshQuotes(codes, opts){
+  opts = opts || {};
+  if(_fetching && !opts.force) return;
   const btn = document.getElementById('refresh-btn');
   const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
   if(!sector){ return; }
@@ -940,7 +1001,7 @@ async function refreshQuotes(codes){
     const res = await fetch('/api/watchlist/quotes', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({codes: allCodes, market: _market})
+      body: JSON.stringify({codes: allCodes, market: _market, force: !!opts.force})
     });
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
@@ -980,12 +1041,12 @@ function startAutoRefresh(){
   if(_autoRefreshTimer) clearInterval(_autoRefreshTimer);
   _autoRefreshTimer = setInterval(() => {
     if(document.hidden) return;
-    refreshQuotes();
+    refreshQuotes(allCodesEverywhere());
   }, 30000);
 }
 
 document.addEventListener('visibilitychange', () => {
-  if(!document.hidden) refreshQuotes();
+  if(!document.hidden) refreshQuotes(allCodesEverywhere());
 });
 
 // 초기 컨트롤 상태 세팅
@@ -1003,6 +1064,17 @@ function initControls(){
 initControls();
 loadData();
 startAutoRefresh();
+
+// 종목 마스터 미리 예열 (첫 검색 빠르게)
+fetch('/api/watchlist/master-status')
+  .then(r => r.json())
+  .then(d => {
+    if(!d.loaded){
+      // 백그라운드로 로드 트리거 (응답 안 기다림)
+      fetch('/api/watchlist/search?q=삼성');
+    }
+  })
+  .catch(() => {});
 </script>
 </body>
 </html>
@@ -1039,22 +1111,9 @@ def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN",
     if not uniq:
         return {}
 
-    # ── 빠른 경로: Session 재사용 (TLS 핸드셰이크 1회로 끝) ──
+    # ── 빠른 경로: 전역 Session 재사용 ──
     use_session = bool(token and app_key and app_secret)
-    session = None
-    if use_session:
-        session = _rq.Session()
-        adapter = _rq.adapters.HTTPAdapter(
-            pool_connections=24, pool_maxsize=24, max_retries=0
-        )
-        session.mount("https://", adapter)
-        session.headers.update({
-            "authorization": f"Bearer {token}",
-            "appkey": app_key,
-            "appsecret": app_secret,
-            "tr_id": "FHKST01010100",
-            "Content-Type": "application/json",
-        })
+    session = _get_session(token, app_key, app_secret) if use_session else None
 
     URL = "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-price"
 
@@ -1108,47 +1167,75 @@ def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN",
         except Exception as e:
             print(f"[watchlist] {code} ({market}) 실패: {e}")
 
-    # 워커 12개 (KIS 초당 20건 제한 내)
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-            list(ex.map(fetch_one, uniq))
-    finally:
-        if session:
-            try: session.close()
-            except Exception: pass
+    # 워커 16개 — 전역 세션 풀(32) 안에서 최대 병렬
+    workers = min(16, max(4, len(uniq)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(fetch_one, uniq))
 
     return quotes
+
+
+_krx_close_cache = {"date": "", "prices": {}}    # {code: {price, chg_pct}}
 
 
 def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
                           token: str = "", app_key: str = "", app_secret: str = "") -> dict:
     """
-    NXT 선택 시 KRX 정규장 마감가를 같이 받아 '괴리율'을 계산.
+    NXT 선택 시 KRX 정규장 마감가를 같이 받아 '괴리율' 계산.
 
     gap_pct = (NXT 현재가 - KRX 종가) / KRX 종가 * 100
-      → 시간외에서 정규장 대비 얼마나 움직였는지
 
-    market != 'NX' 이면 그냥 단일 조회.
+    ⚡ 최적화: 장 마감(15:30) 이후엔 KRX 종가가 고정이므로 캐시.
+       → 30초마다 갱신할 때 NXT만 조회 (요청 절반)
     """
     import concurrent.futures
+    from datetime import datetime as _dt
 
     if market != "NX":
         return fetch_stock_quotes(codes, kis_get_fn, market, token, app_key, app_secret)
 
-    # NXT + KRX 동시 조회
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        f_nx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "NX", token, app_key, app_secret)
-        f_krx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "J", token, app_key, app_secret)
-        nx = f_nx.result()
-        krx = f_krx.result()
+    now = _dt.now()
+    today = now.strftime("%Y-%m-%d")
+    after_close = (now.hour * 60 + now.minute) >= 15 * 60 + 40   # 15:40 이후 = 종가 확정
+
+    # 캐시 날짜가 다르면 초기화
+    if _krx_close_cache["date"] != today:
+        _krx_close_cache["date"] = today
+        _krx_close_cache["prices"] = {}
+
+    need_krx = [c for c in codes if str(c).strip() not in _krx_close_cache["prices"]]
+    # 장중이면 KRX도 계속 변하므로 항상 다시 받음
+    if not after_close:
+        need_krx = list(codes)
+
+    if need_krx:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+            f_nx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "NX",
+                             token, app_key, app_secret)
+            f_krx = ex.submit(fetch_stock_quotes, need_krx, kis_get_fn, "J",
+                              token, app_key, app_secret)
+            nx = f_nx.result()
+            krx_new = f_krx.result()
+        # 종가 확정 이후에만 캐시에 적재
+        if after_close:
+            for c, k in krx_new.items():
+                _krx_close_cache["prices"][c] = {
+                    "price": k.get("price", 0),
+                    "chg_pct": k.get("chg_pct"),
+                }
+        krx = dict(_krx_close_cache["prices"])
+        krx.update(krx_new)
+    else:
+        # KRX는 캐시로 해결 → NXT만 조회 (요청 절반!)
+        nx = fetch_stock_quotes(codes, kis_get_fn, "NX", token, app_key, app_secret)
+        krx = dict(_krx_close_cache["prices"])
 
     out = {}
     for code, q in nx.items():
         k = krx.get(code, {})
         krx_close = k.get("price", 0)
         nxt_price = q.get("price", 0)
-        gap = None
-        gap_pct = None
+        gap = gap_pct = None
         if krx_close and nxt_price:
             gap = nxt_price - krx_close
             gap_pct = round(gap / krx_close * 100, 2)
@@ -1159,17 +1246,21 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
         q["gap_pct"] = gap_pct
         out[code] = q
 
-    # NXT에 없고 KRX만 있는 종목 (시간외 거래 없음) → KRX 값으로 채움
+    # NXT 체결 없는 종목 → KRX 값으로 채움
     for code, k in krx.items():
-        if code not in out:
-            k = dict(k)
-            k["market"] = "NX"
-            k["krx_close"] = k.get("price", 0)
-            k["krx_chg_pct"] = k.get("chg_pct")
-            k["gap"] = 0
-            k["gap_pct"] = 0.0
-            k["no_nxt"] = True
-            out[code] = k
+        if code not in out and k.get("price"):
+            out[code] = {
+                "price": k["price"],
+                "chg": 0,
+                "chg_pct": k.get("chg_pct", 0),
+                "volume": 0,
+                "market": "NX",
+                "krx_close": k["price"],
+                "krx_chg_pct": k.get("chg_pct"),
+                "gap": 0,
+                "gap_pct": 0.0,
+                "no_nxt": True,
+            }
 
     return out
 
