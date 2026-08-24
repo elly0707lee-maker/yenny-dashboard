@@ -462,17 +462,93 @@ def watchlist_page():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/api/watchlist/search")
+@requires_auth
+def api_watchlist_search():
+    """종목명 검색 — 네이버 금융 자동완성 API."""
+    q = (request.args.get("q") or "").strip()
+    if not q or len(q) < 1:
+        return jsonify({"ok": True, "items": []})
+    try:
+        r = requests.get(
+            "https://ac.finance.naver.com/ac",
+            params={
+                "q": q,
+                "q_enc": "euc-kr",
+                "st": 111,
+                "frm": "stock",
+                "r_format": "json",
+                "r_enc": "utf-8",
+                "r_unicode": 0,
+                "t_koreng": 1,
+                "r_lt": 111,
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://finance.naver.com/",
+            },
+            timeout=6,
+        )
+        data = r.json()
+        items = []
+        # 네이버 응답 구조가 버전마다 다를 수 있어 재귀적으로 (6자리코드, 종목명) 쌍 탐색
+        def walk(node, depth=0):
+            if depth > 6:
+                return
+            if isinstance(node, list):
+                # [[코드],[이름],...] 형태 감지
+                flat = []
+                for el in node:
+                    if isinstance(el, list) and len(el) == 1 and isinstance(el[0], str):
+                        flat.append(el[0])
+                    elif isinstance(el, str):
+                        flat.append(el)
+                    else:
+                        flat.append(None)
+                # 첫 요소가 6자리 숫자 + 두번째가 문자열이면 종목
+                if len(flat) >= 2 and flat[0] and flat[1]:
+                    c, n = str(flat[0]).strip(), str(flat[1]).strip()
+                    if len(c) == 6 and c.isdigit() and n and not n.isdigit():
+                        mk = ""
+                        if len(flat) > 2 and flat[2]:
+                            mk = str(flat[2]).strip()
+                        items.append({"code": c, "name": n, "market": mk})
+                        return
+                for el in node:
+                    walk(el, depth + 1)
+            elif isinstance(node, dict):
+                for v in node.values():
+                    walk(v, depth + 1)
+
+        walk(data)
+        # 중복 제거
+        seen = set()
+        uniq = []
+        for it in items:
+            if it["code"] in seen:
+                continue
+            seen.add(it["code"])
+            uniq.append(it)
+        return jsonify({"ok": True, "items": uniq[:10]})
+    except Exception as e:
+        print(f"[watchlist search] {e}")
+        return jsonify({"ok": True, "items": [], "error": str(e)[:80]})
+
+
 @app.route("/api/watchlist/quotes", methods=["POST"])
 @requires_auth
 def api_watchlist_quotes():
-    """관심종목 시세 조회 (KIS API)."""
+    """관심종목 시세 조회 (KIS API). market: J=KRX, NX=NXT, UN=통합"""
     body = request.json or {}
     codes = body.get("codes", [])
+    market = (body.get("market") or "UN").strip().upper()
+    if market not in ("J", "NX", "UN"):
+        market = "UN"
     if not codes or not isinstance(codes, list):
         return jsonify({"error": "codes list required"}), 400
     try:
-        quotes = fetch_stock_quotes(codes, kis_get)
-        return jsonify({"ok": True, "quotes": quotes})
+        quotes = fetch_stock_quotes(codes, kis_get, market)
+        return jsonify({"ok": True, "quotes": quotes, "market": market})
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
