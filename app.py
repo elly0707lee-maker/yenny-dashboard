@@ -12,7 +12,7 @@ from checkpoint_page import get_checkpoint_page_html
 from postit_board import get_postit_board_html
 from sector_news import get_sector_news_html, fetch_all_sectors_sync
 from telegram_pulse import generate_pulse_sync
-from watchlist import get_watchlist_html, fetch_stock_quotes
+from watchlist import get_watchlist_html, fetch_stock_quotes, fetch_quotes_with_gap
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -535,20 +535,44 @@ def api_watchlist_search():
         return jsonify({"ok": True, "items": [], "error": str(e)[:80]})
 
 
+_wl_cache = {"key": "", "at": 0.0, "quotes": {}}
+
+
 @app.route("/api/watchlist/quotes", methods=["POST"])
 @requires_auth
 def api_watchlist_quotes():
     """관심종목 시세 조회 (KIS API). market: J=KRX, NX=NXT, UN=통합"""
+    import time as _t
     body = request.json or {}
     codes = body.get("codes", [])
     market = (body.get("market") or "UN").strip().upper()
+    force = bool(body.get("force"))
     if market not in ("J", "NX", "UN"):
         market = "UN"
     if not codes or not isinstance(codes, list):
         return jsonify({"error": "codes list required"}), 400
+
+    # 3초 캐시 — 여러 탭/중복 호출 방어
+    cache_key = market + "|" + ",".join(sorted(str(c) for c in codes))
+    if not force and _wl_cache["key"] == cache_key and (_t.time() - _wl_cache["at"]) < 3:
+        return jsonify({"ok": True, "quotes": _wl_cache["quotes"],
+                        "market": market, "cached": True})
+
     try:
-        quotes = fetch_stock_quotes(codes, kis_get, market)
-        return jsonify({"ok": True, "quotes": quotes, "market": market})
+        t0 = _t.time()
+        # 토큰 미리 받아서 넘김 → 워커들이 Session 재사용 (핸드셰이크 1회)
+        token = get_kis_token()
+        quotes = fetch_quotes_with_gap(codes, kis_get, market,
+                                    token=token,
+                                    app_key=KIS_APP_KEY,
+                                    app_secret=KIS_APP_SECRET)
+        elapsed = round(_t.time() - t0, 2)
+        _wl_cache["key"] = cache_key
+        _wl_cache["at"] = _t.time()
+        _wl_cache["quotes"] = quotes
+        print(f"[watchlist] {len(quotes)}/{len(codes)}종목 {market} {elapsed}초")
+        return jsonify({"ok": True, "quotes": quotes, "market": market,
+                        "elapsed": elapsed})
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
