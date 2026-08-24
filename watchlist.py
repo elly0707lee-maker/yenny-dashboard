@@ -15,6 +15,7 @@ def get_watchlist_html() -> str:
 <title>관심종목 시황 · Yenny Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2280%22>📊</text></svg>">
 <link rel="stylesheet" href="https://webfontworld.github.io/gmarket/GmarketSans.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{
@@ -55,6 +56,17 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk{font-size:11.5px;color:#1a1d23;display:flex;align-items:center;gap:5px;cursor:pointer}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
+
+/* 🆕 드래그 핸들 */
+.drag-dots,.group-drag{
+  cursor:grab;font-size:12px;letter-spacing:-2px;
+  color:rgba(255,255,255,0.5);user-select:none;margin-right:2px;
+}
+.group-drag{color:#c5ccd6;margin-right:6px}
+.sector-tab:not(.active) .drag-dots{color:#c5ccd6}
+.drag-dots:active,.group-drag:active{cursor:grabbing}
+.sortable-ghost{opacity:0.4}
+.sortable-drag{opacity:0.9}
 
 /* 시장 배지 */
 .mkt-badge{
@@ -222,6 +234,8 @@ body.edit-mode .add-group-btn{display:inline-block}
     <button class="seg" data-sort="chg_desc" onclick="setSort('chg_desc')">등락률 ↓</button>
     <button class="seg" data-sort="chg_asc" onclick="setSort('chg_asc')">등락률 ↑</button>
     <button class="seg" data-sort="vol_desc" onclick="setSort('vol_desc')">거래량 ↓</button>
+    <button class="seg gap-only" data-sort="gap_desc" onclick="setSort('gap_desc')" style="display:none;">괴리율 ↓</button>
+    <button class="seg gap-only" data-sort="gap_asc" onclick="setSort('gap_asc')" style="display:none;">괴리율 ↑</button>
   </div>
   <!-- 보기 -->
   <div class="ctrl-group">
@@ -293,8 +307,14 @@ function setMarket(mkt){
   document.querySelectorAll('.seg[data-mkt]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkt') === mkt);
   });
+  // 🆕 NXT일 때만 괴리율 정렬 버튼 노출
+  const isNxt = (mkt === 'NX');
+  document.querySelectorAll('.gap-only').forEach(b => {
+    b.style.display = isNxt ? '' : 'none';
+  });
+  if(!isNxt && (_sort === 'gap_desc' || _sort === 'gap_asc')) setSort('chg_desc');
   updateMarketHint();
-  _quotes = {};   // 시장 바뀌면 기존 시세 무효
+  _quotes = {};
   renderBody();
   refreshQuotes();
 }
@@ -312,7 +332,7 @@ function toggleFlat(){
   renderBody();
 }
 
-// 🆕 정렬 적용
+// 정렬 적용
 function sortStocks(stocks){
   if(_sort === 'manual') return stocks.slice();
   const arr = stocks.slice();
@@ -322,6 +342,8 @@ function sortStocks(stocks){
     if(_sort === 'chg_desc') return (qb.chg_pct ?? -999) - (qa.chg_pct ?? -999);
     if(_sort === 'chg_asc')  return (qa.chg_pct ??  999) - (qb.chg_pct ??  999);
     if(_sort === 'vol_desc') return (qb.volume  ??   -1) - (qa.volume  ??   -1);
+    if(_sort === 'gap_desc') return (qb.gap_pct ?? -999) - (qa.gap_pct ?? -999);
+    if(_sort === 'gap_asc')  return (qa.gap_pct ??  999) - (qb.gap_pct ??  999);
     return 0;
   });
   return arr;
@@ -402,11 +424,15 @@ function render(){
   renderBody();
 }
 
+let _sortableTabs = null;
+let _sortableGroups = null;
+
 function renderTabs(){
   const el = document.getElementById('sector-tabs');
   el.innerHTML = _data.sectors.map(s => {
     const active = s.id === _data.currentSectorId;
-    return '<button class="sector-tab ' + (active?'active':'') + '" onclick="switchSector(\'' + s.id + '\')">' +
+    return '<button class="sector-tab ' + (active?'active':'') + '" data-sector-id="' + s.id + '" onclick="switchSector(\'' + s.id + '\')">' +
+           (_editing ? '<span class="drag-dots" title="드래그로 순서 변경">⋮⋮</span>' : '') +
            '<span class="sector-tab-name" contenteditable="' + (active && _editing ? 'true' : 'false') + '" onblur="renameSector(\'' + s.id + '\', this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">' + esc(s.name) + '</span>' +
            (active && _editing ? ' <button class="btn-mini btn-danger" onclick="event.stopPropagation();deleteSector(\'' + s.id + '\')" style="background:transparent;border:0;color:#fff;padding:2px 4px;">✕</button>' : '') +
            '</button>';
@@ -414,6 +440,56 @@ function renderTabs(){
   if(_editing){
     el.innerHTML += '<button class="sector-add" onclick="addSector()" title="새 섹터">+</button>';
   }
+  initSortableTabs();
+}
+
+// 🆕 섹터 탭 드래그 정렬
+function initSortableTabs(){
+  const el = document.getElementById('sector-tabs');
+  if(!el || typeof Sortable === 'undefined') return;
+  if(_sortableTabs){ try{ _sortableTabs.destroy(); }catch(e){} _sortableTabs = null; }
+  if(!_editing) return;   // 편집 모드에서만 드래그 허용
+  _sortableTabs = Sortable.create(el, {
+    animation: 150,
+    handle: '.drag-dots',
+    filter: '.sector-add',
+    draggable: '.sector-tab',
+    onEnd: function(){
+      const order = Array.from(el.querySelectorAll('.sector-tab'))
+        .map(n => n.getAttribute('data-sector-id'))
+        .filter(Boolean);
+      const map = {};
+      for(const s of _data.sectors) map[s.id] = s;
+      _data.sectors = order.map(id => map[id]).filter(Boolean);
+      scheduleSave();
+      showSaved('✅ 섹터 순서 변경됨');
+    }
+  });
+}
+
+// 🆕 그룹 드래그 정렬
+function initSortableGroups(){
+  const body = document.getElementById('watchlist-body');
+  if(!body || typeof Sortable === 'undefined') return;
+  if(_sortableGroups){ try{ _sortableGroups.destroy(); }catch(e){} _sortableGroups = null; }
+  if(!_editing || _flatView) return;
+  _sortableGroups = Sortable.create(body, {
+    animation: 150,
+    handle: '.group-drag',
+    draggable: '.group',
+    onEnd: function(){
+      const order = Array.from(body.querySelectorAll('.group'))
+        .map(n => n.getAttribute('data-group-id'))
+        .filter(Boolean);
+      const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
+      if(!sector) return;
+      const map = {};
+      for(const g of sector.groups) map[g.id] = g;
+      sector.groups = order.map(id => map[id]).filter(Boolean);
+      scheduleSave();
+      showSaved('✅ 그룹 순서 변경됨');
+    }
+  });
 }
 
 function renderBody(){
@@ -436,15 +512,20 @@ function renderBody(){
       return;
     }
     const sorted = sortStocks(all);
+    const isNxtF = (_market === 'NX');
     body.innerHTML =
       '<div class="group"><div class="group-header"><span class="group-icon">📊</span>' +
       '<span>' + esc(sector.name) + ' 전체 (' + all.length + '종목)</span></div>' +
       '<table class="stock-table"><thead><tr>' +
       '<th>종목명</th><th>그룹</th>' +
-      '<th class="num">현재가</th><th class="num">등락</th><th class="num">등락률</th><th class="num">거래량</th><th></th>' +
+      (isNxtF ? '<th class="num">KRX 종가</th>' : '') +
+      '<th class="num">' + (isNxtF ? 'NXT 현재가' : '현재가') + '</th>' +
+      (isNxtF ? '<th class="num">괴리</th><th class="num">괴리율</th>' : '<th class="num">등락</th><th class="num">등락률</th>') +
+      '<th class="num">거래량</th><th></th>' +
       '</tr></thead><tbody>' +
       sorted.map(st => renderStockRow(st._groupId, st, true)).join('') +
       '</tbody></table></div>';
+    initSortableGroups();
     return;
   }
 
@@ -461,19 +542,21 @@ function renderBody(){
     html += '<div style="text-align:center"><button class="add-group-btn" onclick="addGroup()">+ 새 그룹</button></div>';
   }
   body.innerHTML = html;
+  initSortableGroups();
 }
 
 function renderGroup(sectorId, group){
   let rows = '';
   const stocks = group.stocks || [];
+  const isNxt = (_market === 'NX');
   if(stocks.length){
     const sorted = sortStocks(stocks);
     rows = '<table class="stock-table">' +
       '<thead><tr>' +
       '<th>종목명</th>' +
-      '<th class="num">현재가</th>' +
-      '<th class="num">등락</th>' +
-      '<th class="num">등락률</th>' +
+      (isNxt ? '<th class="num">KRX 종가</th>' : '') +
+      '<th class="num">' + (isNxt ? 'NXT 현재가' : '현재가') + '</th>' +
+      (isNxt ? '<th class="num">괴리</th><th class="num">괴리율</th>' : '<th class="num">등락</th><th class="num">등락률</th>') +
       '<th class="num">거래량</th>' +
       '<th></th>' +
       '</tr></thead><tbody>' +
@@ -482,18 +565,20 @@ function renderGroup(sectorId, group){
   } else {
     rows = '<div class="content-empty" style="padding:20px">종목 없음</div>';
   }
-  // 그룹 요약 (평균 등락률)
+  // 그룹 요약 (평균)
   let summary = '';
   if(stocks.length){
-    const vals = stocks.map(s => (_quotes[s.code] || {}).chg_pct).filter(v => v !== undefined);
+    const key = isNxt ? 'gap_pct' : 'chg_pct';
+    const vals = stocks.map(s => (_quotes[s.code] || {})[key]).filter(v => v !== undefined && v !== null);
     if(vals.length){
       const avg = vals.reduce((a,b)=>a+b, 0) / vals.length;
       const cls = avg > 0 ? 'up' : (avg < 0 ? 'down' : 'flat');
-      summary = '<span style="margin-left:8px;font-size:11.5px;font-weight:500;" class="' + cls + '">평균 ' + (avg>0?'+':'') + avg.toFixed(2) + '%</span>';
+      summary = '<span style="margin-left:8px;font-size:11.5px;font-weight:500;" class="' + cls + '">평균 ' + (isNxt?'괴리 ':'') + (avg>0?'+':'') + avg.toFixed(2) + '%</span>';
     }
   }
   return '<div class="group" data-group-id="' + group.id + '">' +
     '<div class="group-header">' +
+      (_editing ? '<span class="group-drag" title="드래그로 순서 변경">⋮⋮</span>' : '') +
       '<span class="group-icon">📌</span>' +
       '<span class="group-name" contenteditable="' + (_editing?'true':'false') + '" onblur="renameGroup(\'' + group.id + '\', this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">' + esc(group.name) + '</span>' +
       summary +
@@ -522,25 +607,51 @@ function renderGroup(sectorId, group){
 function renderStockRow(groupId, st, showGroup){
   const q = _quotes[st.code] || {};
   const has = q.price !== undefined;
-  const price = has ? num(q.price) : '—';
-  const chg = q.chg !== undefined ? (q.chg > 0 ? '+' : '') + num(q.chg) : '';
-  const chgPct = q.chg_pct !== undefined ? (q.chg_pct > 0 ? '+' : '') + q.chg_pct.toFixed(2) + '%' : '';
+  const isNxt = (_market === 'NX');
   const volume = q.volume !== undefined ? num(q.volume) : '—';
-  const cls = q.chg_pct > 0 ? 'up' : (q.chg_pct < 0 ? 'down' : 'flat');
-  const hotBadge = q.chg_pct !== undefined && Math.abs(q.chg_pct) >= 5
-    ? '<span class="hot">🔥</span>' : '';
-  // 🆕 시장 배지 — 이 시세가 어느 시장인지 명시
   const mkt = q.market || _market;
   const mktBadge = has
     ? '<span class="mkt-badge ' + (MKT_CLASS[mkt]||'un') + '">' + (MKT_LABEL[mkt]||mkt) + '</span>'
     : '';
   const groupCol = showGroup ? '<td style="font-size:11.5px;color:#7a8099">' + esc(st._group || '') + '</td>' : '';
+
+  let priceCols;
+  let mainPct;   // 색상 기준
+  if(isNxt){
+    // KRX 종가 · NXT 현재가 · 괴리 · 괴리율
+    const krxClose = q.krx_close ? num(q.krx_close) : '—';
+    const nxtPrice = has ? num(q.price) : '—';
+    const gapVal = (q.gap !== undefined && q.gap !== null) ? (q.gap > 0 ? '+' : '') + num(q.gap) : '—';
+    const gapPctVal = (q.gap_pct !== undefined && q.gap_pct !== null)
+      ? (q.gap_pct > 0 ? '+' : '') + q.gap_pct.toFixed(2) + '%' : '—';
+    mainPct = q.gap_pct;
+    const gcls = mainPct > 0 ? 'up' : (mainPct < 0 ? 'down' : 'flat');
+    const noNxt = q.no_nxt ? '<span class="hot" style="background:#f1f3f5;color:#7a8099">시간외X</span>' : '';
+    priceCols =
+      '<td class="num" style="color:#7a8099">' + krxClose + '</td>' +
+      '<td class="num">' + nxtPrice + noNxt + '</td>' +
+      '<td class="num ' + gcls + '">' + gapVal + '</td>' +
+      '<td class="num ' + gcls + '" style="font-weight:700">' + gapPctVal + '</td>';
+  } else {
+    const price = has ? num(q.price) : '—';
+    const chg = q.chg !== undefined ? (q.chg > 0 ? '+' : '') + num(q.chg) : '';
+    const chgPct = q.chg_pct !== undefined ? (q.chg_pct > 0 ? '+' : '') + q.chg_pct.toFixed(2) + '%' : '';
+    mainPct = q.chg_pct;
+    const cls = mainPct > 0 ? 'up' : (mainPct < 0 ? 'down' : 'flat');
+    priceCols =
+      '<td class="num">' + price + '</td>' +
+      '<td class="num ' + cls + '">' + chg + '</td>' +
+      '<td class="num ' + cls + '">' + chgPct + '</td>';
+  }
+
+  // 🔥 뱃지 — NXT면 괴리율 기준, 아니면 등락률 기준
+  const hotBadge = (mainPct !== undefined && mainPct !== null && Math.abs(mainPct) >= (isNxt ? 3 : 5))
+    ? '<span class="hot">🔥</span>' : '';
+
   return '<tr class="stock-row" data-code="' + st.code + '">' +
     '<td><span class="stock-name">' + esc(st.name) + '</span><span class="stock-code">' + esc(st.code) + '</span>' + mktBadge + hotBadge + '</td>' +
     groupCol +
-    '<td class="num">' + price + '</td>' +
-    '<td class="num ' + cls + '">' + chg + '</td>' +
-    '<td class="num ' + cls + '">' + chgPct + '</td>' +
+    priceCols +
     '<td class="num">' + volume + '</td>' +
     '<td><span class="row-actions"><button class="btn btn-mini btn-danger" onclick="deleteStock(\'' + groupId + '\', \'' + st.code + '\')" title="삭제">✕</button></span></td>' +
     '</tr>';
@@ -799,11 +910,17 @@ function toggleEdit(){
 }
 
 // ── KIS 시세 조회 ──────────────────────────
+let _fetching = false;
+
 async function refreshQuotes(codes){
+  // 이미 조회 중이면 중복 요청 방지
+  if(_fetching) return;
   const btn = document.getElementById('refresh-btn');
-  if(btn){ btn.disabled = true; btn.textContent = '⏳ 조회 중...'; }
   const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
-  if(!sector){ if(btn){ btn.disabled = false; btn.textContent = '🔄 시세 갱신';} return; }
+  if(!sector){ return; }
+  _fetching = true;
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 조회 중...'; }
+  const t0 = performance.now();
   // codes가 주어지면 그것만, 아니면 현재 섹터의 모든 종목
   let allCodes;
   if(codes && codes.length){
@@ -842,14 +959,18 @@ async function refreshQuotes(codes){
       }
     }
     if(renamed) scheduleSave();
+    const ms = Math.round(performance.now() - t0);
+    const got = Object.keys(data.quotes || {}).length;
     document.getElementById('updated').textContent =
       '📊 ' + MKT_LABEL[_market] + ' 시세 · ' + new Date().toLocaleTimeString('ko-KR') +
-      ' · ' + Object.keys(data.quotes || {}).length + '/' + allCodes.length + '종목';
+      ' · ' + got + '/' + allCodes.length + '종목 · ' + ms + 'ms' +
+      (data.cached ? ' (캐시)' : '');
     updateMarketHint();
     renderBody();
   } catch(e){
     document.getElementById('updated').textContent = '⚠️ 시세 조회 실패: ' + e.message;
   } finally {
+    _fetching = false;
     if(btn){ btn.disabled = false; btn.textContent = '🔄 시세 갱신'; }
   }
 }
@@ -888,102 +1009,169 @@ startAutoRefresh();
 """
 
 
-def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN") -> dict:
+def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN",
+                       token: str = "", app_key: str = "", app_secret: str = "") -> dict:
     """
-    KIS API로 여러 종목 시세 조회 (병렬 + rate limit 준수)
+    KIS API로 여러 종목 시세 조회 (병렬 + 커넥션 재사용)
 
-    market:
-      'J'  = KRX (정규장)
-      'NX' = NXT (넥스트레이드)
-      'UN' = 통합 (KRX+NXT 중 체결 있는 쪽)
+    token/app_key/app_secret이 주어지면 requests.Session으로 직접 호출 (훨씬 빠름).
+    없으면 kis_get_fn 폴백.
+
+    market: 'J'=KRX, 'NX'=NXT, 'UN'=통합
     """
     import concurrent.futures
     import threading
-    import time as _time
+    import requests as _rq
 
     if market not in ("J", "NX", "UN"):
         market = "UN"
 
     quotes = {}
     lock = threading.Lock()
-    # KIS rate limit: 초당 20건 → 안전하게 초당 12건
-    rate_lock = threading.Semaphore(6)
-    last_call = {"t": 0.0}
-    time_lock = threading.Lock()
 
-    def throttle():
-        with time_lock:
-            now = _time.time()
-            gap = now - last_call["t"]
-            if gap < 0.08:      # 최소 80ms 간격
-                _time.sleep(0.08 - gap)
-            last_call["t"] = _time.time()
+    # 중복 제거 + 유효 코드만
+    uniq, seen = [], set()
+    for c in codes:
+        c = str(c).strip()
+        if c and len(c) == 6 and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    if not uniq:
+        return {}
+
+    # ── 빠른 경로: Session 재사용 (TLS 핸드셰이크 1회로 끝) ──
+    use_session = bool(token and app_key and app_secret)
+    session = None
+    if use_session:
+        session = _rq.Session()
+        adapter = _rq.adapters.HTTPAdapter(
+            pool_connections=24, pool_maxsize=24, max_retries=0
+        )
+        session.mount("https://", adapter)
+        session.headers.update({
+            "authorization": f"Bearer {token}",
+            "appkey": app_key,
+            "appsecret": app_secret,
+            "tr_id": "FHKST01010100",
+            "Content-Type": "application/json",
+        })
+
+    URL = "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-price"
+
+    def parse_out(out, code):
+        if not out:
+            return
+        def _i(k, d=0):
+            try: return int(float(out.get(k, d) or d))
+            except: return d
+        def _f(k, d=0.0):
+            try: return float(out.get(k, d) or d)
+            except: return d
+        chg = _i("prdy_vrss")
+        chg_pct = _f("prdy_ctrt")
+        sign = str(out.get("prdy_vrss_sign", "3"))
+        if sign in ("4", "5"):
+            chg, chg_pct = -abs(chg), -abs(chg_pct)
+        elif sign in ("1", "2"):
+            chg, chg_pct = abs(chg), abs(chg_pct)
+        with lock:
+            quotes[code] = {
+                "price": _i("stck_prpr"),
+                "chg": chg,
+                "chg_pct": chg_pct,
+                "volume": _i("acml_vol"),
+                "market": market,
+                "api_name": (out.get("hts_kor_isnm") or "").strip(),
+                "high": _i("stck_hgpr"),
+                "low": _i("stck_lwpr"),
+                "open": _i("stck_oprc"),
+                "prev_close": _i("stck_sdpr"),
+            }
 
     def fetch_one(code):
-        if not code or len(code) != 6:
-            return
-        with rate_lock:
-            throttle()
-            try:
+        try:
+            if use_session:
+                r = session.get(
+                    URL,
+                    params={"FID_COND_MRKT_DIV_CODE": market, "FID_INPUT_ISCD": code},
+                    timeout=(2, 3),   # (연결 2초, 읽기 3초) — 하나 느려도 전체 안 막힘
+                )
+                out = r.json().get("output", {})
+            else:
                 r = kis_get_fn(
                     "/uapi/domestic-stock/v1/quotations/inquire-price",
                     "FHKST01010100",
                     {"FID_COND_MRKT_DIV_CODE": market, "FID_INPUT_ISCD": code}
                 )
                 out = r.get("output", {}) if isinstance(r, dict) else {}
-                if not out:
-                    return
-                def _i(k, d=0):
-                    try: return int(float(out.get(k, d) or d))
-                    except: return d
-                def _f(k, d=0.0):
-                    try: return float(out.get(k, d) or d)
-                    except: return d
+            parse_out(out, code)
+        except Exception as e:
+            print(f"[watchlist] {code} ({market}) 실패: {e}")
 
-                price = _i("stck_prpr")
-                chg = _i("prdy_vrss")
-                chg_pct = _f("prdy_ctrt")
-                volume = _i("acml_vol")
-                # 부호: 1(상한) 2(상승) 3(보합) 4(하한) 5(하락)
-                sign = str(out.get("prdy_vrss_sign", "3"))
-                if sign in ("4", "5"):
-                    chg = -abs(chg)
-                    chg_pct = -abs(chg_pct)
-                elif sign in ("1", "2"):
-                    chg = abs(chg)
-                    chg_pct = abs(chg_pct)
-
-                # 종목명 (API가 주면 사용)
-                api_name = (out.get("hts_kor_isnm") or "").strip()
-
-                with lock:
-                    quotes[code] = {
-                        "price": price,
-                        "chg": chg,
-                        "chg_pct": chg_pct,
-                        "volume": volume,
-                        "market": market,
-                        "api_name": api_name,
-                        "high": _i("stck_hgpr"),
-                        "low": _i("stck_lwpr"),
-                        "open": _i("stck_oprc"),
-                        "prev_close": _i("stck_sdpr"),
-                    }
-            except Exception as e:
-                print(f"[watchlist] {code} ({market}) 시세 실패: {e}")
-
-    uniq = []
-    seen = set()
-    for c in codes:
-        c = str(c).strip()
-        if c and c not in seen:
-            seen.add(c)
-            uniq.append(c)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
-        list(ex.map(fetch_one, uniq))
+    # 워커 12개 (KIS 초당 20건 제한 내)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+            list(ex.map(fetch_one, uniq))
+    finally:
+        if session:
+            try: session.close()
+            except Exception: pass
 
     return quotes
+
+
+def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
+                          token: str = "", app_key: str = "", app_secret: str = "") -> dict:
+    """
+    NXT 선택 시 KRX 정규장 마감가를 같이 받아 '괴리율'을 계산.
+
+    gap_pct = (NXT 현재가 - KRX 종가) / KRX 종가 * 100
+      → 시간외에서 정규장 대비 얼마나 움직였는지
+
+    market != 'NX' 이면 그냥 단일 조회.
+    """
+    import concurrent.futures
+
+    if market != "NX":
+        return fetch_stock_quotes(codes, kis_get_fn, market, token, app_key, app_secret)
+
+    # NXT + KRX 동시 조회
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        f_nx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "NX", token, app_key, app_secret)
+        f_krx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "J", token, app_key, app_secret)
+        nx = f_nx.result()
+        krx = f_krx.result()
+
+    out = {}
+    for code, q in nx.items():
+        k = krx.get(code, {})
+        krx_close = k.get("price", 0)
+        nxt_price = q.get("price", 0)
+        gap = None
+        gap_pct = None
+        if krx_close and nxt_price:
+            gap = nxt_price - krx_close
+            gap_pct = round(gap / krx_close * 100, 2)
+        q = dict(q)
+        q["krx_close"] = krx_close
+        q["krx_chg_pct"] = k.get("chg_pct")
+        q["gap"] = gap
+        q["gap_pct"] = gap_pct
+        out[code] = q
+
+    # NXT에 없고 KRX만 있는 종목 (시간외 거래 없음) → KRX 값으로 채움
+    for code, k in krx.items():
+        if code not in out:
+            k = dict(k)
+            k["market"] = "NX"
+            k["krx_close"] = k.get("price", 0)
+            k["krx_chg_pct"] = k.get("chg_pct")
+            k["gap"] = 0
+            k["gap_pct"] = 0.0
+            k["no_nxt"] = True
+            out[code] = k
+
+    return out
 
 
 def resolve_stock_name(code: str, kis_get_fn) -> str:
