@@ -12,6 +12,7 @@ from checkpoint_page import get_checkpoint_page_html
 from postit_board import get_postit_board_html
 from sector_news import get_sector_news_html, fetch_all_sectors_sync
 from telegram_pulse import generate_pulse_sync
+from watchlist import get_watchlist_html, fetch_stock_quotes
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -292,6 +293,7 @@ POST_TYPE_KEEP = {
     "buzz": 1,       # 커뮤니티 버즈 — 매번 새로 생성, 최신만 필요
     "postit": 1,     # 질문 보드 — 최신 1개
     "tgpulse": 1,    # 텔레 크로스체크 — 최신 1개
+    "watchlist": 1,  # 관심종목 시황 — 최신 1개
 }
 
 def save_post(t, content, date):
@@ -451,6 +453,31 @@ def api_telegram_pulse():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/watchlist")
+@requires_auth
+def watchlist_page():
+    html = get_watchlist_html()
+    secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret_script}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/api/watchlist/quotes", methods=["POST"])
+@requires_auth
+def api_watchlist_quotes():
+    """관심종목 시세 조회 (KIS API)."""
+    body = request.json or {}
+    codes = body.get("codes", [])
+    if not codes or not isinstance(codes, list):
+        return jsonify({"error": "codes list required"}), 400
+    try:
+        quotes = fetch_stock_quotes(codes, kis_get)
+        return jsonify({"ok": True, "quotes": quotes})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/onair")
 @requires_auth
 def wandaebon_page():
@@ -517,7 +544,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -527,7 +554,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -570,7 +597,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -583,8 +610,8 @@ def api_save_post(pt):
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
     if not content:
-        # mindmap/checkpoint/closing/onair/buzz/postit/tgpulse는 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse"):
+        # mindmap/checkpoint/closing/onair/buzz/postit/tgpulse/watchlist는 빈 콘텐츠 저장 허용 (초기화용)
+        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse", "watchlist"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
@@ -1757,16 +1784,17 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
     <div id="theme-price-result" style="margin-top:14px;"></div>
   </div>
 
-  <!-- ON AIR — 마인드맵 / 질문 보드 / 체크포인트 / 섹터 뉴스 -->
+  <!-- ON AIR — 마인드맵 / 질문 보드 / 체크포인트 / 섹터 뉴스 / 관심종목 -->
   <div class="section-label">🎙️ ON AIR</div>
   <div class="content-card" style="padding:14px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <span style="font-size:13px;color:#636e72;">오늘 방송 흐름 정리 · 질문 보드 · 체크포인트 · 섹터 뉴스</span>
+      <span style="font-size:13px;color:#636e72;">방송 흐름 · 질문 · 체크포인트 · 뉴스 · 관심종목</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="/mindmap" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗺️ 마인드맵 →</a>
         <a href="/postit" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">🗂️ 질문 보드 →</a>
         <a href="/checkpoint" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">☑ 체크포인트 →</a>
         <a href="/sector-news" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">📰 섹터 뉴스 →</a>
+        <a href="/watchlist" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">📊 관심종목 →</a>
       </div>
     </div>
   </div>
