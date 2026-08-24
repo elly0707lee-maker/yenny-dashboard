@@ -131,6 +131,98 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* 🚨 특이 시그널 */
+#signal-box{margin-bottom:14px}
+.signal-head{
+  font-size:11px;color:#7a8099;font-weight:600;margin-bottom:6px;
+  display:flex;align-items:center;gap:6px;
+}
+.signal-list{display:flex;flex-direction:column;gap:6px}
+.signal-card{
+  display:flex;align-items:center;gap:10px;
+  background:#fff;border:1px solid #e5e7eb;border-left-width:4px;
+  border-radius:9px;padding:9px 14px;cursor:pointer;transition:all .12s;
+}
+.signal-card:hover{box-shadow:0 2px 10px rgba(0,0,0,0.08);transform:translateX(2px)}
+.signal-card.surge{border-left-color:#d63031;background:#fff6f5}
+.signal-card.plunge{border-left-color:#0984e3;background:#f4f9ff}
+.signal-card.solo{border-left-color:#e17055;background:#fff9f4}
+.signal-card.volume{border-left-color:#a06d00;background:#fffdf3}
+.signal-card.split{border-left-color:#6c5ce7;background:#f8f7ff}
+.signal-icon{font-size:17px;flex:0 0 auto}
+.signal-text{flex:1;font-size:12.5px;line-height:1.45;min-width:0}
+.signal-where{font-weight:700;color:#1a1d23}
+.signal-detail{color:#636e72}
+.signal-val{
+  font-size:15px;font-weight:700;flex:0 0 auto;
+  font-variant-numeric:tabular-nums;
+}
+.signal-empty{
+  font-size:12px;color:#a8b0bd;font-style:italic;
+  padding:10px 14px;background:#f8f9fa;border-radius:9px;
+}
+
+/* 📥 일괄 추가 모달 */
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);
+  z-index:300;align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex}
+.modal{
+  background:#fff;border-radius:14px;width:100%;max-width:720px;
+  max-height:88vh;display:flex;flex-direction:column;
+  box-shadow:0 12px 40px rgba(0,0,0,0.25);
+}
+.modal-head{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:16px 20px;border-bottom:1px solid #e5e7eb;
+}
+.modal-title{font-size:16px;font-weight:700}
+.modal-body{padding:16px 20px;overflow-y:auto;flex:1}
+.modal-foot{
+  display:flex;justify-content:flex-end;gap:8px;
+  padding:12px 20px;border-top:1px solid #e5e7eb;
+}
+.bulk-hint{
+  font-size:12px;color:#636e72;line-height:1.6;
+  background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:12px;
+}
+.bulk-hint b{color:#1a1d23}
+#bulk-input{
+  width:100%;min-height:130px;resize:vertical;
+  border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  line-height:1.5;outline:none;
+}
+#bulk-input:focus{border-color:#1a1d23}
+.bulk-target{
+  margin:14px 0 10px;display:flex;flex-direction:column;gap:8px;
+  background:#f8f9fa;border-radius:8px;padding:12px;
+}
+.bulk-target-row{display:flex;align-items:center;gap:8px}
+.bulk-target-row select{
+  flex:1;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;
+  font-size:12.5px;font-family:inherit;background:#fff;outline:none;
+}
+.bulk-target-row select:focus{border-color:#1a1d23}
+.bulk-preview-head{
+  display:flex;justify-content:space-between;align-items:center;
+  margin:10px 0 6px;font-size:12px;color:#7a8099;font-weight:600;
+}
+.bulk-preview{
+  max-height:220px;overflow-y:auto;
+  border:1px solid #e5e7eb;border-radius:8px;
+}
+.bulk-preview table{width:100%;border-collapse:collapse}
+.bulk-preview th{
+  position:sticky;top:0;background:#f8f9fa;font-size:10.5px;color:#7a8099;
+  text-align:left;padding:6px 10px;border-bottom:1px solid #e5e7eb;
+}
+.bulk-preview td{padding:6px 10px;font-size:12px;border-bottom:1px solid #f1f3f5}
+.bulk-preview tr.dup{background:#fff8e1;color:#a06d00}
+.bulk-preview tr.dup td:last-child{font-size:10.5px}
+.bulk-preview .empty{padding:24px;text-align:center;color:#b2bec3;font-size:12px;font-style:italic}
+
 /* 🆕 섹터 등락률 랭킹 뷰 */
 .rank-list{display:flex;flex-direction:column;gap:6px}
 .rank-row{
@@ -345,6 +437,7 @@ body.edit-mode .add-group-btn{display:inline-block}
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
     <button class="btn" onclick="toggleEdit()" id="edit-btn">⚙️ 편집</button>
+    <button class="btn" onclick="openBulk()">📥 일괄 추가</button>
     <button class="btn btn-primary" onclick="refreshQuotes(allCodesEverywhere(), {force:true})" id="refresh-btn">🔄 시세 갱신</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
   </div>
@@ -383,6 +476,9 @@ body.edit-mode .add-group-btn{display:inline-block}
   <div class="ctrl-group" id="flat-wrap">
     <label class="chk"><input type="checkbox" id="flat-view" onchange="toggleFlat()"/> 그룹 무시하고 전체 정렬</label>
   </div>
+  <div class="ctrl-group">
+    <label class="chk"><input type="checkbox" id="signal-on" checked onchange="renderSignals()"/> 🚨 시그널</label>
+  </div>
   <div class="ctrl-group" style="margin-left:auto">
     <span class="market-hint" id="market-hint"></span>
   </div>
@@ -390,6 +486,7 @@ body.edit-mode .add-group-btn{display:inline-block}
 
 <div class="wrap">
   <div class="updated" id="updated"></div>
+  <div id="signal-box"></div>
   <div class="sector-tabs" id="sector-tabs"></div>
   <div id="watchlist-body">
     <div class="loading" style="text-align:center;padding:80px;">불러오는 중...</div>
@@ -397,6 +494,47 @@ body.edit-mode .add-group-btn{display:inline-block}
 </div>
 
 <div id="save-indicator" class="save-indicator">💾 저장됨</div>
+
+<!-- 📥 일괄 추가 모달 -->
+<div id="bulk-overlay" class="modal-overlay" onclick="if(event.target===this)closeBulk()">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title">📥 엑셀에서 일괄 추가</span>
+      <button class="btn btn-mini" onclick="closeBulk()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="bulk-hint">
+        엑셀에서 <b>종목명·종목코드가 포함된 범위를 그대로 복사</b>해서 아래에 붙여넣으세요.
+        열 순서·개수는 상관없고, 6자리 숫자를 종목코드로 자동 인식합니다.
+      </div>
+      <textarea id="bulk-input" placeholder="대명에너지&#9;태양광/풍력&#9;...&#9;389260&#10;태경비케이&#9;탄소포집&#9;...&#9;014580"
+        oninput="parseBulk()" onpaste="setTimeout(parseBulk, 30)"></textarea>
+
+      <div class="bulk-target">
+        <div class="bulk-target-row">
+          <span class="ctrl-label">섹터</span>
+          <select id="bulk-sector" onchange="onBulkSectorChange()"></select>
+          <button class="btn btn-mini" onclick="bulkNewSector()">+ 새 섹터</button>
+        </div>
+        <div class="bulk-target-row">
+          <span class="ctrl-label">그룹</span>
+          <select id="bulk-group"></select>
+          <button class="btn btn-mini" onclick="bulkNewGroup()">+ 새 그룹</button>
+        </div>
+      </div>
+
+      <div class="bulk-preview-head">
+        <span id="bulk-count">인식된 종목 0개</span>
+        <label class="chk"><input type="checkbox" id="bulk-skip-dup" checked/> 중복 종목 건너뛰기</label>
+      </div>
+      <div id="bulk-preview" class="bulk-preview"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeBulk()">취소</button>
+      <button class="btn btn-primary" onclick="applyBulk()" id="bulk-apply">추가하기</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (function(){
@@ -453,6 +591,7 @@ const MKT_LABEL = {'UN':'통합', 'J':'KRX', 'NX':'NXT'};
 const MKT_CLASS = {'UN':'un', 'J':'krx', 'NX':'nxt'};
 
 function updateMarketHint(){
+  if(_editing) return;   // 편집 중엔 안내 문구 유지
   const now = new Date();
   const h = now.getHours(), m = now.getMinutes();
   const t = h * 60 + m;
@@ -481,6 +620,7 @@ function setMarket(mkt){
   updateMarketHint();
   _quotes = {};
   renderBody();
+  renderSignals();
   refreshQuotes(allCodesEverywhere(), {force:true});
 }
 
@@ -751,6 +891,7 @@ function initEmpty(){
 
 // ── 렌더 ────────────────────────────────
 function render(){
+  renderSignals();
   if(_view === 'rank'){
     const tabs = document.getElementById('sector-tabs');
     if(tabs) tabs.style.display = 'none';
@@ -832,6 +973,38 @@ function initSortableGroups(){
       showSaved('✅ 그룹 순서 변경됨');
     }
   });
+}
+
+// 리렌더 전후로 포커스·입력값·스크롤 보존
+function withPreservedInput(fn){
+  const active = document.activeElement;
+  const activeId = active && active.id ? active.id : null;
+  const selStart = (active && active.selectionStart !== undefined) ? active.selectionStart : null;
+  // 현재 화면의 모든 input 값 저장
+  const vals = {};
+  document.querySelectorAll('#watchlist-body input[id]').forEach(el => {
+    if(el.value) vals[el.id] = el.value;
+  });
+  const scrollY = window.scrollY;
+
+  fn();
+
+  // 값 복원
+  Object.keys(vals).forEach(id => {
+    const el = document.getElementById(id);
+    if(el && !el.value) el.value = vals[id];
+  });
+  // 포커스 복원
+  if(activeId){
+    const el = document.getElementById(activeId);
+    if(el && typeof el.focus === 'function'){
+      el.focus();
+      if(selStart !== null && el.setSelectionRange){
+        try { el.setSelectionRange(selStart, selStart); } catch(e){}
+      }
+    }
+  }
+  window.scrollTo(0, scrollY);
 }
 
 function renderBody(){
@@ -1262,15 +1435,15 @@ function addStockDirect(groupId, code, name){
     return;
   }
   g.stocks.push({code, name});
-  render();
+  withPreservedInput(render);
   refreshQuotes([code]);
   scheduleSave();
   showSaved('✅ ' + name + ' 추가됨');
   // 추가 후 다시 입력창에 포커스 (연속 추가 편하게)
   setTimeout(() => {
     const inputEl = document.getElementById('ac-input-' + groupId);
-    if(inputEl) inputEl.focus();
-  }, 100);
+    if(inputEl){ inputEl.value = ''; inputEl.focus(); }
+  }, 60);
 }
 
 function addStock(groupId){
@@ -1304,9 +1477,21 @@ function deleteStock(groupId, code){
 function toggleEdit(){
   _editing = !_editing;
   document.body.classList.toggle('edit-mode', _editing);
-  document.getElementById('edit-btn').textContent = _editing ? '✓ 편집 완료' : '⚙️ 편집';
-  document.getElementById('edit-btn').classList.toggle('btn-primary', _editing);
-  // 편집은 리스트 뷰에서만 가능
+  const btn = document.getElementById('edit-btn');
+  btn.textContent = _editing ? '✓ 편집 완료' : '⚙️ 편집';
+  btn.classList.toggle('btn-primary', _editing);
+  // 편집 중엔 자동 갱신 중지 안내
+  const hint = document.getElementById('market-hint');
+  if(hint){
+    if(_editing){
+      hint.dataset.prev = hint.textContent;
+      hint.textContent = '⏸️ 편집 중 — 자동 갱신 멈춤 (🔄 버튼으로 수동 갱신)';
+      hint.style.color = '#d63031';
+    } else {
+      hint.style.color = '';
+      updateMarketHint();
+    }
+  }
   if(_editing && _view === 'rank') setView('list');
   else render();
 }
@@ -1379,7 +1564,8 @@ async function refreshQuotes(codes, opts){
       ' · ' + got + '/' + allCodes.length + '종목 · ' + ms + 'ms' +
       (data.cached ? ' (캐시)' : '');
     updateMarketHint();
-    renderBody();
+    withPreservedInput(renderBody);
+    renderSignals();
   } catch(e){
     document.getElementById('updated').textContent = '⚠️ 시세 조회 실패: ' + e.message;
   } finally {
@@ -1389,19 +1575,401 @@ async function refreshQuotes(codes, opts){
 }
 
 // 30초마다 자동 갱신 (탭 활성 시만)
+// 사용자가 입력 중인지 판단 (편집 방해 방지)
+function isUserTyping(){
+  const el = document.activeElement;
+  if(!el) return false;
+  const tag = (el.tagName || '').toLowerCase();
+  if(tag === 'input' || tag === 'textarea') return true;
+  if(el.isContentEditable) return true;
+  // 자동완성 드롭다운이 열려 있으면 입력 중으로 간주
+  if(document.querySelector('.ac-list.open')) return true;
+  return false;
+}
+
 function startAutoRefresh(){
   if(_autoRefreshTimer) clearInterval(_autoRefreshTimer);
   _autoRefreshTimer = setInterval(() => {
     if(document.hidden) return;
+    if(_editing) return;          // 편집 모드에선 자동 갱신 안 함
+    if(isUserTyping()) return;    // 타이핑 중이면 건너뜀
     refreshQuotes(allCodesEverywhere());
   }, 30000);
 }
 
 document.addEventListener('visibilitychange', () => {
-  if(!document.hidden) refreshQuotes(allCodesEverywhere());
+  if(document.hidden) return;
+  if(_editing || isUserTyping()) return;
+  refreshQuotes(allCodesEverywhere());
 });
 
 // 초기 컨트롤 상태 세팅
+// ── 🚨 특이 시그널 감지 ────────────────────
+// 세부 그룹(테마) 단위로 이상 흐름을 잡아낸다.
+const SIG = {
+  GROUP_MOVE: 3.0,    // 그룹 평균 ±3% 이상 → 동반 급등/급락
+  GROUP_CALM: 1.5,    // 그룹 평균 ±1.5% 이내면 '잠잠'
+  SOLO_MOVE: 5.0,     // 잠잠한 그룹에서 홀로 ±5% → 개별 이슈
+  VOL_MULT: 2.5,      // 그룹 평균 거래량 대비 2.5배 → 거래 폭증
+  SPLIT_GAP: 10.0,    // 그룹 내 최고-최저 10%p 차이 → 분열
+  MIN_STOCKS: 2,      // 그룹 판정 최소 종목 수
+};
+
+function median(arr){
+  if(!arr.length) return 0;
+  const a = arr.slice().sort((x,y) => x-y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m-1] + a[m]) / 2;
+}
+
+function detectSignals(){
+  const k = pctKey();
+  const out = [];
+
+  for(const sector of _data.sectors){
+    for(const g of (sector.groups || [])){
+      const stocks = (g.stocks || []).filter(s => {
+        const q = _quotes[s.code];
+        return q && q[k] !== undefined && q[k] !== null;
+      });
+      if(stocks.length < SIG.MIN_STOCKS) continue;
+
+      const vals = stocks.map(s => _quotes[s.code][k]);
+      const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
+      // 중앙값 — 한 종목이 튀어서 평균을 끌어올리는 걸 걸러냄
+      const med = median(vals);
+      const upN = vals.filter(v => v > 0).length;
+      const downN = vals.filter(v => v < 0).length;
+      const half = stocks.length / 2;
+
+      const base = {sectorId: sector.id, groupId: g.id,
+                    sectorName: sector.name, groupName: g.name,
+                    count: stocks.length};
+
+      // ① 그룹 동반 급등 / 급락 — 평균과 중앙값이 둘 다 커야 '진짜 동반'
+      if(avg >= SIG.GROUP_MOVE && med >= SIG.GROUP_MOVE && upN >= half){
+        out.push(Object.assign({}, base, {
+          type: 'surge', icon: '🔥', score: Math.abs(med) * 2,
+          detail: stocks.length + '종목 중 ' + upN + '개 상승 · 테마 전체가 움직임',
+          val: (avg > 0 ? '+' : '') + avg.toFixed(2) + '%',
+          valCls: 'up',
+        }));
+      } else if(avg <= -SIG.GROUP_MOVE && med <= -SIG.GROUP_MOVE && downN >= half){
+        out.push(Object.assign({}, base, {
+          type: 'plunge', icon: '🧊', score: Math.abs(med) * 2,
+          detail: stocks.length + '종목 중 ' + downN + '개 하락 · 테마 전반 약세',
+          val: avg.toFixed(2) + '%',
+          valCls: 'down',
+        }));
+      }
+
+      // ② 나머지 종목은 잠잠한데 홀로 튀는 종목 (중앙값 기준)
+      if(Math.abs(med) <= SIG.GROUP_CALM){
+        for(const s of stocks){
+          const v = _quotes[s.code][k];
+          if(Math.abs(v) >= SIG.SOLO_MOVE){
+            out.push(Object.assign({}, base, {
+              type: 'solo', icon: '⚡', score: Math.abs(v),
+              stockName: s.name, stockCode: s.code,
+              detail: '나머지 종목은 ' + (med>0?'+':'') + med.toFixed(2) + '% 수준 · 이 종목만 단독 움직임',
+              val: (v > 0 ? '+' : '') + v.toFixed(2) + '%',
+              valCls: v > 0 ? 'up' : 'down',
+            }));
+          }
+        }
+      }
+
+      // ③ 거래량 폭증 — 자기를 뺀 나머지 종목 평균과 비교
+      //    (폭증 종목이 평균에 포함되면 배수가 희석되므로)
+      if(stocks.length >= SIG.MIN_STOCKS){
+        for(const s of stocks){
+          const vol = _quotes[s.code].volume || 0;
+          if(vol <= 50000) continue;
+          const peers = stocks
+            .filter(x => x.code !== s.code)
+            .map(x => (_quotes[x.code].volume || 0))
+            .filter(v => v > 0);
+          if(peers.length < 1) continue;
+          const peerAvg = peers.reduce((a,b) => a+b, 0) / peers.length;
+          if(peerAvg <= 0) continue;
+          const mult = vol / peerAvg;
+          if(mult >= SIG.VOL_MULT){
+            const v = _quotes[s.code][k];
+            out.push(Object.assign({}, base, {
+              type: 'volume', icon: '📊', score: Math.min(mult, 20),
+              stockName: s.name, stockCode: s.code,
+              detail: '같은 테마 다른 종목 대비 거래량 ' + mult.toFixed(1) + '배 · ' +
+                      '등락 ' + (v>0?'+':'') + v.toFixed(2) + '%',
+              val: mult.toFixed(1) + '배',
+              valCls: v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'),
+            }));
+          }
+        }
+      }
+
+      // ④ 그룹 내 분열 (최고 - 최저)
+      const maxV = Math.max(...vals), minV = Math.min(...vals);
+      if((maxV - minV) >= SIG.SPLIT_GAP && stocks.length >= 3){
+        const top = stocks.find(s => _quotes[s.code][k] === maxV);
+        const bot = stocks.find(s => _quotes[s.code][k] === minV);
+        out.push(Object.assign({}, base, {
+          type: 'split', icon: '↔️', score: (maxV - minV) / 2,
+          detail: (top ? top.name : '') + ' ' + (maxV>0?'+':'') + maxV.toFixed(1) + '% ↔ ' +
+                  (bot ? bot.name : '') + ' ' + minV.toFixed(1) + '% · 같은 테마인데 온도차',
+          val: (maxV - minV).toFixed(1) + '%p',
+          valCls: 'flat',
+        }));
+      }
+    }
+  }
+
+  out.sort((a,b) => b.score - a.score);
+  return out.slice(0, 8);
+}
+
+function renderSignals(){
+  const box = document.getElementById('signal-box');
+  if(!box) return;
+  if(_editing){ box.innerHTML = ''; return; }   // 편집 중엔 방해되니 숨김
+  const on = document.getElementById('signal-on');
+  if(on && !on.checked){ box.innerHTML = ''; return; }
+
+  const sigs = detectSignals();
+  const isNxt = (_market === 'NX');
+  const basis = isNxt ? 'NXT 괴리율' : '등락률';
+
+  if(!sigs.length){
+    box.innerHTML = '<div class="signal-head">🚨 특이 시그널</div>' +
+      '<div class="signal-empty">지금은 눈에 띄는 움직임 없음 (' + basis + ' 기준)</div>';
+    return;
+  }
+
+  const labels = {surge:'동반 급등', plunge:'동반 급락', solo:'단독 급변',
+                  volume:'거래량 폭증', split:'테마 내 분열'};
+
+  box.innerHTML = '<div class="signal-head">🚨 특이 시그널 · ' + basis + ' 기준 · ' + sigs.length + '건</div>' +
+    '<div class="signal-list">' +
+    sigs.map(s => {
+      const where = s.stockName
+        ? esc(s.stockName) + ' <span style="font-size:10.5px;color:#a8b0bd">' + esc(s.sectorName) + ' › ' + esc(s.groupName) + '</span>'
+        : esc(s.sectorName) + ' › ' + esc(s.groupName);
+      return '<div class="signal-card ' + s.type + '" onclick="gotoSignal(\'' + s.sectorId + '\',\'' + s.groupId + '\')">' +
+        '<span class="signal-icon">' + s.icon + '</span>' +
+        '<span class="signal-text">' +
+          '<span class="signal-where">' + where + '</span>' +
+          ' <span style="font-size:10.5px;color:#7a8099">· ' + labels[s.type] + '</span>' +
+          '<br><span class="signal-detail">' + esc(s.detail) + '</span>' +
+        '</span>' +
+        '<span class="signal-val ' + s.valCls + '">' + esc(s.val) + '</span>' +
+        '</div>';
+    }).join('') + '</div>';
+}
+
+// 시그널 클릭 → 해당 섹터/그룹으로 이동
+function gotoSignal(sectorId, groupId){
+  if(_view === 'rank'){
+    _openSectors[sectorId] = true;
+    _openGroups[groupId] = true;
+    renderRank();
+    setTimeout(() => {
+      const el = document.querySelector('[data-group-id="' + groupId + '"]');
+      if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+    }, 60);
+    return;
+  }
+  _data.currentSectorId = sectorId;
+  render();
+  setTimeout(() => {
+    const el = document.querySelector('[data-group-id="' + groupId + '"]');
+    if(el){
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+      el.style.transition = 'box-shadow .3s';
+      el.style.boxShadow = '0 0 0 3px rgba(26,29,35,0.25)';
+      setTimeout(() => { el.style.boxShadow = ''; }, 1400);
+    }
+  }, 60);
+}
+
+// ── 🚨 시그널 끝 ─────────────────────────
+
+// ── 📥 엑셀 일괄 추가 ─────────────────────
+let _bulkRows = [];   // [{code, name, dup}]
+
+function openBulk(){
+  document.getElementById('bulk-overlay').classList.add('open');
+  fillBulkSelects();
+  document.getElementById('bulk-input').value = '';
+  _bulkRows = [];
+  renderBulkPreview();
+  setTimeout(() => document.getElementById('bulk-input').focus(), 80);
+}
+
+function closeBulk(){
+  document.getElementById('bulk-overlay').classList.remove('open');
+}
+
+function fillBulkSelects(){
+  const ss = document.getElementById('bulk-sector');
+  ss.innerHTML = _data.sectors.map(s =>
+    '<option value="' + s.id + '"' + (s.id === _data.currentSectorId ? ' selected' : '') + '>' +
+    esc(s.name) + '</option>').join('');
+  onBulkSectorChange();
+}
+
+function onBulkSectorChange(){
+  const sid = document.getElementById('bulk-sector').value;
+  const s = _data.sectors.find(x => x.id === sid);
+  const gs = document.getElementById('bulk-group');
+  if(!s || !s.groups.length){
+    gs.innerHTML = '<option value="">(그룹 없음 — + 새 그룹)</option>';
+  } else {
+    gs.innerHTML = s.groups.map(g =>
+      '<option value="' + g.id + '">' + esc(g.name) + '</option>').join('');
+  }
+  parseBulk();
+}
+
+function bulkNewSector(){
+  const v = prompt('새 섹터 이름 (이모지 포함 가능)', '새 섹터');
+  if(v === null) return;
+  const name = v.trim().slice(0, 30);
+  if(!name) return;
+  const s = {id: genId(), name: name, groups: []};
+  _data.sectors.push(s);
+  scheduleSave();
+  fillBulkSelects();
+  document.getElementById('bulk-sector').value = s.id;
+  onBulkSectorChange();
+}
+
+function bulkNewGroup(){
+  const sid = document.getElementById('bulk-sector').value;
+  const s = _data.sectors.find(x => x.id === sid);
+  if(!s){ alert('먼저 섹터를 선택하세요'); return; }
+  const v = prompt('새 그룹 이름', '새 그룹');
+  if(v === null) return;
+  const name = v.trim().slice(0, 30);
+  if(!name) return;
+  const g = {id: genId(), name: name, stocks: []};
+  s.groups.push(g);
+  scheduleSave();
+  onBulkSectorChange();
+  document.getElementById('bulk-group').value = g.id;
+  parseBulk();
+}
+
+// 붙여넣은 텍스트에서 (종목명, 6자리코드) 추출
+function parseBulk(){
+  const text = document.getElementById('bulk-input').value || '';
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  const seen = new Set();
+
+  // 대상 그룹의 기존 종목 (중복 판정용)
+  const sid = document.getElementById('bulk-sector').value;
+  const gid = document.getElementById('bulk-group').value;
+  const s = _data.sectors.find(x => x.id === sid);
+  const g = s && s.groups.find(x => x.id === gid);
+  const existing = new Set((g && g.stocks || []).map(x => x.code));
+
+  for(const raw of lines){
+    const line = raw.trim();
+    if(!line) continue;
+    // 탭 우선, 없으면 2칸 이상 공백 / 쉼표로 분리
+    let cells = line.includes('\t') ? line.split('\t')
+              : (line.includes(',') ? line.split(',') : line.split(/\s{2,}/));
+    cells = cells.map(c => c.trim()).filter(c => c !== '');
+    if(!cells.length) continue;
+
+    // 6자리 숫자 = 종목코드 (앞의 A 접두어 허용)
+    let code = null, codeIdx = -1;
+    for(let i = 0; i < cells.length; i++){
+      const m = cells[i].match(/^[A-Za-z]?(\d{6})$/);
+      if(m){ code = m[1]; codeIdx = i; break; }
+    }
+    if(!code) continue;              // 코드 없는 줄은 헤더 등으로 보고 무시
+    if(seen.has(code)) continue;
+    seen.add(code);
+
+    // 종목명 = 코드가 아닌 셀 중 가장 짧고 앞쪽인 것 (설명 컬럼 배제)
+    let name = '';
+    let best = 999;
+    for(let i = 0; i < cells.length; i++){
+      if(i === codeIdx) continue;
+      const c = cells[i];
+      if(!c || /^\d+$/.test(c)) continue;
+      if(c.length > 25) continue;                 // 긴 설명 제외
+      if(i < best && c.length <= 25){ name = c; best = i; }
+    }
+    if(!name) name = code;
+    rows.push({code, name, dup: existing.has(code)});
+  }
+  _bulkRows = rows;
+  renderBulkPreview();
+}
+
+function renderBulkPreview(){
+  const el = document.getElementById('bulk-preview');
+  const cnt = document.getElementById('bulk-count');
+  const dupN = _bulkRows.filter(r => r.dup).length;
+  cnt.textContent = '인식된 종목 ' + _bulkRows.length + '개' +
+    (dupN ? ' (이미 있는 종목 ' + dupN + '개)' : '');
+  if(!_bulkRows.length){
+    el.innerHTML = '<div class="empty">엑셀에서 복사한 내용을 붙여넣으면 여기에 미리보기가 나옵니다</div>';
+    return;
+  }
+  el.innerHTML = '<table><thead><tr><th>종목명</th><th>종목코드</th><th></th></tr></thead><tbody>' +
+    _bulkRows.map(r =>
+      '<tr class="' + (r.dup ? 'dup' : '') + '">' +
+      '<td>' + esc(r.name) + '</td>' +
+      '<td>' + esc(r.code) + '</td>' +
+      '<td>' + (r.dup ? '이미 있음' : '') + '</td>' +
+      '</tr>').join('') +
+    '</tbody></table>';
+}
+
+function applyBulk(){
+  if(!_bulkRows.length){ alert('추가할 종목이 없습니다'); return; }
+  const sid = document.getElementById('bulk-sector').value;
+  const gid = document.getElementById('bulk-group').value;
+  const s = _data.sectors.find(x => x.id === sid);
+  if(!s){ alert('섹터를 선택하세요'); return; }
+  const g = s.groups.find(x => x.id === gid);
+  if(!g){ alert('그룹을 선택하거나 + 새 그룹으로 만들어주세요'); return; }
+
+  const skipDup = document.getElementById('bulk-skip-dup').checked;
+  const existing = new Set(g.stocks.map(x => x.code));
+  let added = 0, skipped = 0;
+  for(const r of _bulkRows){
+    if(existing.has(r.code)){
+      if(skipDup){ skipped++; continue; }
+      skipped++; continue;   // 같은 그룹 내 중복은 항상 건너뜀
+    }
+    g.stocks.push({code: r.code, name: r.name});
+    existing.add(r.code);
+    added++;
+  }
+
+  _data.currentSectorId = s.id;
+  closeBulk();
+  render();
+  scheduleSave();
+  showSaved('✅ ' + added + '종목 추가' + (skipped ? ' · ' + skipped + '개 건너뜀' : ''));
+  // 새로 추가된 종목 시세 조회
+  const codes = _bulkRows.map(r => r.code);
+  if(codes.length) refreshQuotes(codes, {force:true});
+}
+
+// ESC로 닫기
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape'){
+    const ov = document.getElementById('bulk-overlay');
+    if(ov && ov.classList.contains('open')) closeBulk();
+  }
+});
+
+// ── 📥 일괄 추가 끝 ───────────────────────
+
 function initControls(){
   document.querySelectorAll('.seg[data-mkt]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market);
