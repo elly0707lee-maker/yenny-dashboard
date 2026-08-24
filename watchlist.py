@@ -909,7 +909,7 @@ function renderRankStocks(group){
   return '<div class="rank-stocks" onclick="event.stopPropagation()">' +
     '<table class="stock-table"><thead><tr>' +
     '<th>종목명</th>' +
-    (isNxt ? '<th class="num">KRX 종가</th>' : '') +
+    (isNxt ? '<th class="num">KRX 마감가</th>' : '') +
     '<th class="num">' + (isNxt ? 'NXT 현재가' : '현재가') + '</th>' +
     (isNxt ? '<th class="num">괴리</th><th class="num">괴리율</th>' : '<th class="num">등락</th><th class="num">등락률</th>') +
     '<th class="num">거래량</th><th></th>' +
@@ -1160,7 +1160,7 @@ function renderBody(){
       '<span>' + esc(sector.name) + ' 전체 (' + all.length + '종목)</span></div>' +
       '<table class="stock-table"><thead><tr>' +
       '<th>종목명</th><th>그룹</th>' +
-      (isNxtF ? '<th class="num">KRX 종가</th>' : '') +
+      (isNxtF ? '<th class="num">KRX 마감가</th>' : '') +
       '<th class="num">' + (isNxtF ? 'NXT 현재가' : '현재가') + '</th>' +
       (isNxtF ? '<th class="num">괴리</th><th class="num">괴리율</th>' : '<th class="num">등락</th><th class="num">등락률</th>') +
       '<th class="num">거래량</th><th></th>' +
@@ -1213,7 +1213,7 @@ function renderGroup(sectorId, group){
     rows = '<table class="stock-table">' +
       '<thead><tr>' +
       '<th>종목명</th>' +
-      (isNxt ? '<th class="num">KRX 종가</th>' : '') +
+      (isNxt ? '<th class="num">KRX 마감가</th>' : '') +
       '<th class="num">' + (isNxt ? 'NXT 현재가' : '현재가') + '</th>' +
       (isNxt ? '<th class="num">괴리</th><th class="num">괴리율</th>' : '<th class="num">등락</th><th class="num">등락률</th>') +
       '<th class="num">거래량</th>' +
@@ -2585,60 +2585,66 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
             out[code] = q
         return out
 
-    # KRX 종가는 네이버 일괄(빠름), NXT만 KIS
-    need_krx = [c for c in codes if c not in _krx_close_cache["prices"]]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        f_nx = ex.submit(fetch_stock_quotes, ask_nxt, kis_get_fn, "NX",
-                         token, app_key, app_secret) if ask_nxt else None
-        f_krx = ex.submit(fetch_quotes_naver_bulk, need_krx) if need_krx else None
-        nx = f_nx.result() if f_nx else {}
-        krx_new = f_krx.result() if f_krx else {}
+    # ⚡ KIS가 주는 기준가(stck_sdpr)가 곧 직전 KRX 정규장 종가.
+    #    프리마켓이면 어제 종가, 애프터마켓이면 오늘 종가 → 네이버 KRX 조회 불필요.
+    nx = fetch_stock_quotes(ask_nxt, kis_get_fn, "NX", token, app_key, app_secret) if ask_nxt else {}
 
-    # 이번에 NXT 체결이 없던 종목 기록 (다음 갱신부터 스킵)
     for c in ask_nxt:
         if not nx.get(c, {}).get("price"):
             _no_nxt_cache["codes"].add(c)
 
-    if after_close:
-        for c, k in krx_new.items():
-            _krx_close_cache["prices"][c] = {
-                "price": k.get("price", 0), "chg_pct": k.get("chg_pct"),
-                "api_name": k.get("api_name", ""),
-            }
-    krx = dict(_krx_close_cache["prices"])
-    krx.update(krx_new)
+    # NXT 체결이 없는 종목은 KRX 종가를 보여줘야 하므로 네이버로 보충
+    no_nxt_codes = [c for c in codes if not nx.get(c, {}).get("price")]
+    krx_fill = {}
+    if no_nxt_codes:
+        cached = {c: _krx_close_cache["prices"][c]
+                  for c in no_nxt_codes if c in _krx_close_cache["prices"]}
+        need = [c for c in no_nxt_codes if c not in cached]
+        if need:
+            fetched = fetch_quotes_naver_bulk(need)
+            if after_close:
+                for c, k in fetched.items():
+                    _krx_close_cache["prices"][c] = {
+                        "price": k.get("price", 0), "chg_pct": k.get("chg_pct"),
+                        "api_name": k.get("api_name", ""),
+                    }
+            cached.update(fetched)
+        krx_fill = cached
 
     out = {}
-    for code in set(list(nx.keys()) + list(krx.keys())):
-        q = dict(nx.get(code, {}))
-        k = krx.get(code, {})
-        krx_close = k.get("price", 0)
-        nxt_price = q.get("price", 0)
-
-        # NXT 체결이 없으면 KRX 종가를 그대로 표시
-        if not nxt_price and krx_close:
-            q = {
-                "price": krx_close,
-                "chg": 0,
-                "chg_pct": k.get("chg_pct", 0),
-                "volume": 0,
-                "api_name": k.get("api_name", ""),
-                "no_nxt": True,
-            }
-            nxt_price = krx_close
-
+    # NXT 체결이 있는 종목 — 기준가로 괴리 계산
+    for code, q in nx.items():
+        if not q.get("price"):
+            continue
+        q = dict(q)
+        krx_close = q.get("prev_close", 0)      # = 직전 KRX 정규장 종가
         q["market"] = "NX"
         q["krx_close"] = krx_close
-        q["krx_chg_pct"] = k.get("chg_pct")
-        if krx_close and nxt_price and not q.get("no_nxt"):
-            gap = nxt_price - krx_close
+        if krx_close:
+            gap = q["price"] - krx_close
             q["gap"] = gap
             q["gap_pct"] = round(gap / krx_close * 100, 2)
         else:
-            q["gap"] = 0 if q.get("no_nxt") else None
-            q["gap_pct"] = 0.0 if q.get("no_nxt") else None
-        if q.get("price"):
-            out[code] = q
+            q["gap"] = q.get("chg")
+            q["gap_pct"] = q.get("chg_pct")
+        out[code] = q
+
+    # NXT 체결이 없는 종목 — KRX 종가 그대로, 괴리 0
+    for code, k in krx_fill.items():
+        if code in out or not k.get("price"):
+            continue
+        out[code] = {
+            "price": k["price"],
+            "chg": 0,
+            "chg_pct": k.get("chg_pct", 0),
+            "volume": 0,
+            "market": "NX",
+            "api_name": k.get("api_name", ""),
+            "krx_close": k["price"],
+            "gap": 0,
+            "gap_pct": 0.0,
+            "no_nxt": True,
+        }
 
     return out
 
