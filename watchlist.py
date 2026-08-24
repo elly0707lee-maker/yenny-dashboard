@@ -90,6 +90,52 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* 🆕 섹터 등락률 랭킹 뷰 */
+.rank-list{display:flex;flex-direction:column;gap:6px}
+.rank-row{
+  background:#fff;border:1px solid #e5e7eb;border-radius:10px;
+  padding:12px 16px;cursor:pointer;transition:all .12s;
+  display:flex;align-items:center;gap:12px;
+}
+.rank-row:hover{border-color:#1a1d23;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+.rank-row.open{border-color:#1a1d23}
+.rank-caret{
+  font-size:11px;color:#a8b0bd;width:12px;
+  transition:transform .15s;flex:0 0 auto;
+}
+.rank-row.open .rank-caret{transform:rotate(90deg);color:#1a1d23}
+.rank-name{font-size:15px;font-weight:700;flex:0 0 auto}
+.rank-count{font-size:11px;color:#a8b0bd;flex:0 0 auto}
+.rank-bar-wrap{
+  flex:1;height:8px;background:#f1f3f5;border-radius:4px;
+  position:relative;overflow:hidden;min-width:50px;
+}
+.rank-bar{position:absolute;top:0;bottom:0;border-radius:4px;transition:width .3s}
+.rank-bar.up{background:linear-gradient(90deg,#ff7675,#d63031)}
+.rank-bar.down{background:linear-gradient(90deg,#74b9ff,#0984e3)}
+.rank-pct{
+  font-size:16px;font-weight:700;min-width:82px;text-align:right;
+  font-variant-numeric:tabular-nums;flex:0 0 auto;
+}
+.rank-children{
+  margin:2px 0 10px 26px;display:flex;flex-direction:column;gap:5px;
+  border-left:2px solid #e5e7eb;padding-left:14px;
+}
+.rank-sub{
+  background:#fafbfc;border:1px solid #eceff1;border-radius:8px;
+  padding:9px 14px;cursor:pointer;transition:all .12s;
+  display:flex;align-items:center;gap:10px;
+}
+.rank-sub:hover{background:#f1f3f5;border-color:#c5ccd6}
+.rank-sub.open{background:#f1f3f5;border-color:#1a1d23}
+.rank-sub .rank-name{font-size:13px;font-weight:600}
+.rank-sub .rank-pct{font-size:14px;min-width:70px}
+.rank-stocks{margin:2px 0 8px 22px;padding-left:12px;border-left:2px dashed #e5e7eb}
+.rank-stocks .stock-table{margin:4px 0}
+.rank-stocks .stock-table th{font-size:10px;padding:5px 8px}
+.rank-stocks .stock-row td{padding:6px 8px;font-size:12px}
+.rank-empty{font-size:12px;color:#a8b0bd;padding:8px 14px;font-style:italic}
+
 /* 🆕 드래그 핸들 */
 .drag-dots,.group-drag{
   cursor:grab;font-size:12px;letter-spacing:-2px;
@@ -272,6 +318,11 @@ body.edit-mode .add-group-btn{display:inline-block}
   </div>
   <!-- 보기 -->
   <div class="ctrl-group">
+    <span class="ctrl-label">보기</span>
+    <button class="seg" data-view="list" onclick="setView('list')">📋 리스트</button>
+    <button class="seg" data-view="rank" onclick="setView('rank')">📊 등락률</button>
+  </div>
+  <div class="ctrl-group" id="flat-wrap">
     <label class="chk"><input type="checkbox" id="flat-view" onchange="toggleFlat()"/> 그룹 무시하고 전체 정렬</label>
   </div>
   <div class="ctrl-group" style="margin-left:auto">
@@ -310,7 +361,10 @@ let _editing = false;
 let _autoRefreshTimer = null;
 let _market = 'UN';           // 🆕 UN(통합) | J(KRX) | NX(NXT)
 let _sort = 'manual';         // 🆕 manual | chg_desc | chg_asc | vol_desc
-let _flatView = false;        // 🆕 그룹 무시하고 전체 정렬
+let _flatView = false;
+let _view = 'list';            // 🆕 list | rank
+let _openSectors = {};         // 🆕 랭킹 뷰에서 펼친 섹터
+let _openGroups = {};          // 🆕 펼친 그룹
 
 function genId(){ return 'x' + Math.random().toString(36).slice(2, 10); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -363,6 +417,168 @@ function setSort(s){
 function toggleFlat(){
   _flatView = document.getElementById('flat-view').checked;
   renderBody();
+}
+
+// ── 🆕 뷰 전환 ────────────────────────────
+function setView(v){
+  _view = v;
+  document.querySelectorAll('.seg[data-view]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-view') === v);
+  });
+  // 랭킹 뷰에선 섹터 탭 / flat 체크박스 숨김
+  const tabs = document.getElementById('sector-tabs');
+  const flatWrap = document.getElementById('flat-wrap');
+  if(tabs) tabs.style.display = (v === 'rank') ? 'none' : '';
+  if(flatWrap) flatWrap.style.display = (v === 'rank') ? 'none' : '';
+  render();
+  // 랭킹 뷰는 전체 섹터 시세가 필요
+  if(v === 'rank'){
+    const missing = allCodesEverywhere().filter(c => !_quotes[c]);
+    if(missing.length) refreshQuotes(missing);
+  }
+}
+
+// 지금 기준이 되는 퍼센트 키 (NXT면 괴리율)
+function pctKey(){ return (_market === 'NX') ? 'gap_pct' : 'chg_pct'; }
+
+// 종목 배열의 평균 등락(또는 괴리)률
+function avgPct(stocks){
+  const k = pctKey();
+  const vals = (stocks || [])
+    .map(s => (_quotes[s.code] || {})[k])
+    .filter(v => v !== undefined && v !== null);
+  if(!vals.length) return null;
+  return vals.reduce((a,b) => a+b, 0) / vals.length;
+}
+
+// 섹터 단위 집계
+function sectorStats(sector){
+  const all = [];
+  for(const g of (sector.groups || [])){
+    for(const st of (g.stocks || [])) all.push(st);
+  }
+  return {avg: avgPct(all), count: all.length};
+}
+
+// ── 🆕 랭킹 뷰 렌더 ────────────────────────
+function renderRank(){
+  const body = document.getElementById('watchlist-body');
+  const isNxt = (_market === 'NX');
+
+  const rows = _data.sectors.map(s => {
+    const st = sectorStats(s);
+    return {sector: s, avg: st.avg, count: st.count};
+  }).filter(r => r.count > 0);
+
+  if(!rows.length){
+    body.innerHTML = '<span class="content-empty">종목이 등록된 섹터가 없음</span>';
+    return;
+  }
+
+  // 등락률 큰 순 (값 없는 건 뒤로)
+  rows.sort((a,b) => (b.avg ?? -999) - (a.avg ?? -999));
+
+  // 막대 스케일 — 절대값 최대치 기준
+  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.avg ?? 0)));
+
+  let html = '<div class="rank-list">';
+  for(const r of rows){
+    const s = r.sector;
+    const open = !!_openSectors[s.id];
+    const pct = r.avg;
+    const cls = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+    const width = pct === null ? 0 : Math.min(100, Math.abs(pct) / maxAbs * 100);
+    const pctText = pct === null ? '—' : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
+
+    html += '<div class="rank-row ' + (open?'open':'') + '" onclick="toggleSectorOpen(\'' + s.id + '\')">' +
+      '<span class="rank-caret">▶</span>' +
+      '<span class="rank-name">' + esc(s.name) + '</span>' +
+      '<span class="rank-count">' + r.count + '종목</span>' +
+      '<span class="rank-bar-wrap"><span class="rank-bar ' + cls + '" style="width:' + width + '%;' +
+        (pct < 0 ? 'right:0' : 'left:0') + '"></span></span>' +
+      '<span class="rank-pct ' + cls + '">' + pctText + '</span>' +
+      '</div>';
+
+    if(open){
+      html += renderRankGroups(s, maxAbs);
+    }
+  }
+  html += '</div>';
+
+  // 헤더 안내
+  const hint = isNxt
+    ? '<div style="font-size:11px;color:#7a8099;margin-bottom:10px">📊 NXT 괴리율 기준 (KRX 종가 대비) · 섹터 클릭 → 그룹 → 종목</div>'
+    : '<div style="font-size:11px;color:#7a8099;margin-bottom:10px">📊 평균 등락률 기준 · 섹터 클릭 → 그룹 → 종목</div>';
+  body.innerHTML = hint + html;
+}
+
+function renderRankGroups(sector, maxAbs){
+  const groups = (sector.groups || []).map(g => ({
+    group: g,
+    avg: avgPct(g.stocks),
+    count: (g.stocks || []).length,
+  })).filter(x => x.count > 0);
+
+  if(!groups.length){
+    return '<div class="rank-children"><div class="rank-empty">등록된 종목 없음</div></div>';
+  }
+  groups.sort((a,b) => (b.avg ?? -999) - (a.avg ?? -999));
+
+  let html = '<div class="rank-children">';
+  for(const gr of groups){
+    const g = gr.group;
+    const open = !!_openGroups[g.id];
+    const pct = gr.avg;
+    const cls = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+    const width = pct === null ? 0 : Math.min(100, Math.abs(pct) / maxAbs * 100);
+    const pctText = pct === null ? '—' : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
+
+    html += '<div class="rank-sub ' + (open?'open':'') + '" onclick="event.stopPropagation();toggleGroupOpen(\'' + g.id + '\')">' +
+      '<span class="rank-caret">▶</span>' +
+      '<span class="rank-name">' + esc(g.name) + '</span>' +
+      '<span class="rank-count">' + gr.count + '</span>' +
+      '<span class="rank-bar-wrap"><span class="rank-bar ' + cls + '" style="width:' + width + '%;' +
+        (pct < 0 ? 'right:0' : 'left:0') + '"></span></span>' +
+      '<span class="rank-pct ' + cls + '">' + pctText + '</span>' +
+      '</div>';
+
+    if(open){
+      html += renderRankStocks(g);
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderRankStocks(group){
+  const isNxt = (_market === 'NX');
+  const sorted = sortStocks(group.stocks || []).slice();
+  // 랭킹 뷰에선 항상 등락률(괴리율) 큰 순
+  const k = pctKey();
+  sorted.sort((a,b) => ((_quotes[b.code]||{})[k] ?? -999) - ((_quotes[a.code]||{})[k] ?? -999));
+
+  if(!sorted.length) return '<div class="rank-empty">종목 없음</div>';
+
+  return '<div class="rank-stocks" onclick="event.stopPropagation()">' +
+    '<table class="stock-table"><thead><tr>' +
+    '<th>종목명</th>' +
+    (isNxt ? '<th class="num">KRX 종가</th>' : '') +
+    '<th class="num">' + (isNxt ? 'NXT 현재가' : '현재가') + '</th>' +
+    (isNxt ? '<th class="num">괴리</th><th class="num">괴리율</th>' : '<th class="num">등락</th><th class="num">등락률</th>') +
+    '<th class="num">거래량</th><th></th>' +
+    '</tr></thead><tbody>' +
+    sorted.map(st => renderStockRow(group.id, st)).join('') +
+    '</tbody></table></div>';
+}
+
+function toggleSectorOpen(id){
+  _openSectors[id] = !_openSectors[id];
+  renderRank();
+}
+
+function toggleGroupOpen(id){
+  _openGroups[id] = !_openGroups[id];
+  renderRank();
 }
 
 // 정렬 적용
@@ -454,6 +670,14 @@ function initEmpty(){
 
 // ── 렌더 ────────────────────────────────
 function render(){
+  if(_view === 'rank'){
+    const tabs = document.getElementById('sector-tabs');
+    if(tabs) tabs.style.display = 'none';
+    renderRank();
+    return;
+  }
+  const tabs = document.getElementById('sector-tabs');
+  if(tabs) tabs.style.display = '';
   renderTabs();
   renderBody();
 }
@@ -527,6 +751,7 @@ function initSortableGroups(){
 }
 
 function renderBody(){
+  if(_view === 'rank'){ renderRank(); return; }
   const body = document.getElementById('watchlist-body');
   const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
   if(!sector){
@@ -800,8 +1025,13 @@ function acSearch(groupId, q){
   listEl.innerHTML = '<div class="ac-loading">검색 중...</div>';
   listEl.classList.add('open');
   st.timer = setTimeout(async () => {
+    // 8초 넘으면 강제 중단 (무한 '검색 중' 방지)
+    const ctrl = new AbortController();
+    const killer = setTimeout(() => ctrl.abort(), 8000);
     try {
-      const res = await fetch('/api/watchlist/search?q=' + encodeURIComponent(q));
+      const res = await fetch('/api/watchlist/search?q=' + encodeURIComponent(q),
+                              {signal: ctrl.signal});
+      clearTimeout(killer);
       const raw = await res.text();
       if(!res.ok){
         listEl.innerHTML = '<div class="ac-empty">⚠️ 서버 오류 HTTP ' + res.status +
@@ -821,12 +1051,13 @@ function acSearch(groupId, q){
       st.sel = -1;
       if(!items.length){
         const ms = data.master_size || 0;
-        const err = data.diag || data.master_error || data.error || '';
+        const loading = data.master_loading;
+        const err = data.diag || data.error || '';
         listEl.innerHTML = '<div class="ac-empty">검색 결과 없음' +
-          (data.src ? ' (' + esc(data.src) + ')' : '') +
-          (ms ? ' · 마스터 ' + ms + '종목' : ' · 마스터 미로드') +
-          (err ? '<br><span style="font-size:10px;color:#d63031">' + esc(String(err).slice(0,150)) + '</span>' : '') +
-          '<br><span style="font-size:11px">🔢 코드입력 버튼으로 직접 추가</span></div>';
+          (loading ? '<br><span style="font-size:11px;color:#0984e3">📥 종목 목록 준비 중 (30초쯤 뒤 다시 시도해보세요)</span>'
+                   : (ms ? '<br><span style="font-size:11px">' + ms + '종목 중 일치 없음 · 오타 확인</span>' : '')) +
+          (err ? '<br><span style="font-size:10px;color:#a8b0bd">' + esc(String(err).slice(0,150)) + '</span>' : '') +
+          '<br><span style="font-size:11px">🔢 코드입력 칸으로 직접 추가 가능</span></div>';
         return;
       }
       listEl.innerHTML = items.map((it, i) =>
@@ -837,9 +1068,12 @@ function acSearch(groupId, q){
         '</div>'
       ).join('');
     } catch(e){
-      listEl.innerHTML = '<div class="ac-empty">⚠️ 요청 실패' +
-        '<br><span style="font-size:10px;color:#d63031">' + esc(String(e.message || e).slice(0,180)) + '</span>' +
-        '<br><span style="font-size:11px">🔢 코드입력 버튼 사용</span></div>';
+      clearTimeout(killer);
+      const isAbort = (e.name === 'AbortError');
+      listEl.innerHTML = '<div class="ac-empty">' +
+        (isAbort ? '⏱️ 응답이 너무 느림 (8초 초과)' : '⚠️ 요청 실패') +
+        (isAbort ? '' : '<br><span style="font-size:10px;color:#d63031">' + esc(String(e.message || e).slice(0,180)) + '</span>') +
+        '<br><span style="font-size:11px">🔢 코드입력 칸에 종목코드로 추가하세요</span></div>';
     }
   }, 300);
 }
@@ -972,7 +1206,9 @@ function toggleEdit(){
   document.body.classList.toggle('edit-mode', _editing);
   document.getElementById('edit-btn').textContent = _editing ? '✓ 편집 완료' : '⚙️ 편집';
   document.getElementById('edit-btn').classList.toggle('btn-primary', _editing);
-  render();
+  // 편집은 리스트 뷰에서만 가능
+  if(_editing && _view === 'rank') setView('list');
+  else render();
 }
 
 // ── KIS 시세 조회 ──────────────────────────
@@ -1073,6 +1309,9 @@ function initControls(){
   document.querySelectorAll('.seg[data-sort]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-sort') === _sort);
   });
+  document.querySelectorAll('.seg[data-view]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-view') === _view);
+  });
   updateMarketHint();
   setInterval(updateMarketHint, 60000);
 }
@@ -1081,16 +1320,8 @@ initControls();
 loadData();
 startAutoRefresh();
 
-// 종목 마스터 미리 예열 (첫 검색 빠르게)
-fetch('/api/watchlist/master-status')
-  .then(r => r.json())
-  .then(d => {
-    if(!d.loaded){
-      // 백그라운드로 로드 트리거 (응답 안 기다림)
-      fetch('/api/watchlist/search?q=삼성');
-    }
-  })
-  .catch(() => {});
+// 종목 마스터 백그라운드 예열 (응답 안 기다림)
+fetch('/api/watchlist/master-warmup', {method:'POST'}).catch(() => {});
 </script>
 </body>
 </html>
