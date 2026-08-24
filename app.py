@@ -462,13 +462,76 @@ def watchlist_page():
     return Response(html, mimetype="text/html")
 
 
-_stock_master = {"loaded": 0.0, "items": []}   # [{code, name, market}]
+def _naver_search_page(q: str) -> list:
+    """
+    네이버 금융 검색 결과 페이지 크롤 (일반 HTML — 가장 잘 뚫림).
+    https://finance.naver.com/search/searchList.naver?query=...
+    """
+    out = []
+    try:
+        import urllib.parse as _up
+        # 네이버 금융 검색은 EUC-KR 쿼리
+        q_euc = _up.quote(q.encode("euc-kr"))
+        url = f"https://finance.naver.com/search/searchList.naver?query={q_euc}"
+        r = requests.get(url, headers={
+            "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/120.0.0.0 Safari/537.36"),
+            "Referer": "https://finance.naver.com/",
+        }, timeout=8)
+        r.encoding = "euc-kr"
+        html = r.text
+        # <a href="/item/main.naver?code=000660" ...>SK하이닉스</a>
+        for m in re.finditer(
+                r'href="[^"]*?/item/main\.naver\?code=(\d{6})"[^>]*>(.*?)</a>',
+                html, re.S):
+            code = m.group(1)
+            name = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+            name = re.sub(r"\s+", " ", name)
+            if name and not name.isdigit():
+                out.append({"code": code, "name": name, "market": ""})
+        # 검색 결과가 1건이면 바로 종목 페이지로 리다이렉트되는 경우
+        if not out:
+            m = re.search(r'code=(\d{6})', html)
+            t = re.search(r'<title>(.*?)</title>', html, re.S)
+            if m and t:
+                nm = t.group(1).split(":")[0].strip()
+                if nm and not nm.isdigit():
+                    out.append({"code": m.group(1), "name": nm, "market": ""})
+    except Exception as e:
+        print(f"[naver search page] 실패: {e}")
+    return out
+
+
+def _kis_search_stock(q: str) -> list:
+    """KIS 종목검색 API (상품기본조회 / 종목검색)"""
+    out = []
+    try:
+        # KIS 국내주식 종목검색
+        r = kis_get(
+            "/uapi/domestic-stock/v1/quotations/search-stock-info",
+            "CTPF1002R",
+            {"PRDT_TYPE_CD": "300", "PDNO": q}
+        )
+        o = r.get("output", {}) if isinstance(r, dict) else {}
+        if o:
+            code = (o.get("pdno") or "").strip()
+            name = (o.get("prdt_abrv_name") or o.get("prdt_name") or "").strip()
+            if re.fullmatch(r"\d{6}", code) and name:
+                out.append({"code": code, "name": name, "market": ""})
+    except Exception as e:
+        print(f"[kis search] {e}")
+    return out
+
+
+_stock_master = {"loaded": 0.0, "items": [], "error": ""}
 
 
 def _load_stock_master():
     """
-    종목 마스터 로드 (KRX 상장 전종목).
-    공공데이터/네이버 등 여러 소스 시도 → 메모리 캐시 (12시간).
+    종목 마스터 로드 (KRX 상장 전종목) → 메모리 캐시 12시간.
+    소스 1: KRX 공식 상장종목 목록 (가장 안정적)
+    소스 2: 네이버 시가총액 페이지 크롤
     """
     import time as _t
     if _stock_master["items"] and (_t.time() - _stock_master["loaded"]) < 43200:
@@ -477,37 +540,60 @@ def _load_stock_master():
     items = []
     UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    errors = []
 
-    # 1) 네이버 금융 시가총액 페이지 크롤 (코스피 + 코스닥 전종목)
+    # ── 소스 1: KRX 상장법인목록 (Excel/HTML) ──
     try:
-        from bs4 import BeautifulSoup
-        for sosok, mkt_name in [(0, "KOSPI"), (1, "KOSDAQ")]:
-            for page in range(1, 35):     # 한 페이지 50종목 × 34 ≈ 1700
-                url = (f"https://finance.naver.com/sise/sise_market_sum.naver"
-                       f"?sosok={sosok}&page={page}")
-                r = requests.get(url, headers={"User-Agent": UA}, timeout=8)
-                r.encoding = "euc-kr"
-                soup = BeautifulSoup(r.text, "html.parser")
-                links = soup.select("a[href*='/item/main.naver?code=']")
-                if not links:
-                    break
-                found = 0
-                for a in links:
-                    href = a.get("href", "")
-                    m = re.search(r"code=(\d{6})", href)
-                    if not m:
-                        continue
-                    code = m.group(1)
-                    name = a.get_text(strip=True)
-                    if name and code:
-                        items.append({"code": code, "name": name, "market": mkt_name})
-                        found += 1
-                if found == 0:
-                    break
+        for mkt_code, mkt_name in [("stockMkt", "KOSPI"), ("kosdaqMkt", "KOSDAQ")]:
+            url = ("https://kind.krx.co.kr/corpgeneral/corpList.do"
+                   "?method=download&searchType=13&marketType=" + mkt_code)
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
+            r.encoding = "euc-kr"
+            html = r.text
+            # HTML 테이블 파싱 — <td>회사명</td><td>종목코드</td>
+            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S | re.I)
+            for row in rows:
+                tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S | re.I)
+                if len(tds) < 2:
+                    continue
+                name = re.sub(r"<[^>]+>", "", tds[0]).strip()
+                code_raw = re.sub(r"<[^>]+>", "", tds[1]).strip()
+                code = re.sub(r"\D", "", code_raw).zfill(6)[-6:]
+                if name and re.fullmatch(r"\d{6}", code):
+                    items.append({"code": code, "name": name, "market": mkt_name})
+            print(f"[stock master] KRX {mkt_name}: 누적 {len(items)}")
     except Exception as e:
-        print(f"[stock master] 네이버 크롤 실패: {e}")
+        errors.append(f"KRX:{e}")
+        print(f"[stock master] KRX 실패: {e}")
 
-    # 중복 제거
+    # ── 소스 2: 네이버 시가총액 (KRX 실패 시) ──
+    if len(items) < 100:
+        try:
+            from bs4 import BeautifulSoup
+            for sosok, mkt_name in [(0, "KOSPI"), (1, "KOSDAQ")]:
+                for page in range(1, 35):
+                    url = (f"https://finance.naver.com/sise/sise_market_sum.naver"
+                           f"?sosok={sosok}&page={page}")
+                    r = requests.get(url, headers={"User-Agent": UA}, timeout=8)
+                    r.encoding = "euc-kr"
+                    soup = BeautifulSoup(r.text, "html.parser")
+                    links = soup.select("a[href*='code=']")
+                    found = 0
+                    for a in links:
+                        m = re.search(r"code=(\d{6})", a.get("href", ""))
+                        if not m:
+                            continue
+                        name = a.get_text(strip=True)
+                        if name and len(name) > 0:
+                            items.append({"code": m.group(1), "name": name, "market": mkt_name})
+                            found += 1
+                    if found == 0:
+                        break
+                print(f"[stock master] 네이버 {mkt_name}: 누적 {len(items)}")
+        except Exception as e:
+            errors.append(f"naver:{e}")
+            print(f"[stock master] 네이버 실패: {e}")
+
     seen, uniq = set(), []
     for it in items:
         if it["code"] in seen:
@@ -515,45 +601,64 @@ def _load_stock_master():
         seen.add(it["code"])
         uniq.append(it)
 
+    _stock_master["error"] = "; ".join(errors)[:200]
     if uniq:
         _stock_master["items"] = uniq
         _stock_master["loaded"] = _t.time()
-        print(f"[stock master] {len(uniq)}종목 로드됨")
+        print(f"[stock master] ✅ {len(uniq)}종목 로드 완료")
+    else:
+        print(f"[stock master] ❌ 로드 실패: {_stock_master['error']}")
     return _stock_master["items"]
 
 
 @app.route("/api/watchlist/search")
 @requires_auth
 def api_watchlist_search():
-    """종목명 검색 — 로컬 마스터 우선, 네이버 자동완성 폴백."""
+    """종목명 검색 — 로컬 마스터 → KIS → 네이버 순."""
     q = (request.args.get("q") or "").strip()
     if not q:
         return jsonify({"ok": True, "items": []})
 
-    # 6자리 코드면 그대로
+    # 6자리 코드면 바로
     if re.fullmatch(r"\d{6}", q):
         master = _load_stock_master()
         hit = next((m for m in master if m["code"] == q), None)
+        if not hit:
+            kis_hit = _kis_search_stock(q)
+            hit = kis_hit[0] if kis_hit else None
         return jsonify({"ok": True, "items": [hit] if hit else
-                        [{"code": q, "name": q, "market": ""}]})
+                        [{"code": q, "name": q, "market": ""}],
+                        "src": "code"})
 
-    results = []
-    # ── 1순위: 로컬 마스터 부분 매칭 ──
+    results, src = [], ""
+
+    # ── 1순위: 네이버 검색 페이지 (즉시 응답, 마스터 불필요) ──
     try:
-        master = _load_stock_master()
-        ql = q.lower().replace(" ", "")
-        starts, contains = [], []
-        for m in master:
-            nl = m["name"].lower().replace(" ", "")
-            if nl.startswith(ql):
-                starts.append(m)
-            elif ql in nl:
-                contains.append(m)
-        results = starts + contains
+        results = _naver_search_page(q)
+        if results:
+            src = "naver_page"
     except Exception as e:
-        print(f"[watchlist search] master 검색 실패: {e}")
+        print(f"[watchlist search] 네이버 페이지 실패: {e}")
 
-    # ── 2순위: 네이버 자동완성 (마스터가 비었을 때만) ──
+    # ── 2순위: 로컬 마스터 ──
+    if not results:
+        try:
+            master = _load_stock_master()
+            ql = q.lower().replace(" ", "").replace("-", "")
+            starts, contains = [], []
+            for m in master:
+                nl = m["name"].lower().replace(" ", "").replace("-", "")
+                if nl.startswith(ql):
+                    starts.append(m)
+                elif ql in nl:
+                    contains.append(m)
+            results = starts + contains
+            if results:
+                src = "master"
+        except Exception as e:
+            print(f"[watchlist search] master 실패: {e}")
+
+    # ── 3순위: 네이버 자동완성 API ──
     if not results:
         try:
             r = requests.get(
@@ -590,7 +695,6 @@ def api_watchlist_search():
                             mk = str(flat[2]).strip() if len(flat) > 2 and flat[2] else ""
                             found.append({"code": c, "name": n, "market": mk})
                             return
-                        # 순서가 반대인 경우 (이름, 코드)
                         if re.fullmatch(r"\d{6}", n) and c and not c.isdigit():
                             found.append({"code": n, "name": c, "market": ""})
                             return
@@ -602,8 +706,10 @@ def api_watchlist_search():
 
             walk(data)
             results = found
+            if results:
+                src = "naver"
         except Exception as e:
-            print(f"[watchlist search] 네이버 폴백 실패: {e}")
+            print(f"[watchlist search] 네이버 실패: {e}")
 
     seen, uniq = set(), []
     for it in results:
@@ -611,11 +717,65 @@ def api_watchlist_search():
             continue
         seen.add(it["code"])
         uniq.append(it)
-    return jsonify({"ok": True, "items": uniq[:12],
-                    "master_size": len(_stock_master["items"])})
+    return jsonify({"ok": True, "items": uniq[:12], "src": src,
+                    "master_size": len(_stock_master["items"]),
+                    "master_error": _stock_master.get("error", "")})
 
 
 _wl_cache = {"key": "", "at": 0.0, "quotes": {}}
+
+
+@app.route("/api/watchlist/search-debug")
+@requires_auth
+def api_watchlist_search_debug():
+    """검색 소스별 진단 — 어느 경로가 살아있는지 확인."""
+    q = (request.args.get("q") or "삼성전자").strip()
+    out = {"query": q}
+
+    # 1. 네이버 검색 페이지
+    try:
+        r = _naver_search_page(q)
+        out["naver_page"] = {"ok": True, "count": len(r), "sample": r[:3]}
+    except Exception as e:
+        out["naver_page"] = {"ok": False, "error": str(e)[:200]}
+
+    # 2. KRX 상장목록 (연결만 테스트)
+    try:
+        rr = requests.get(
+            "https://kind.krx.co.kr/corpgeneral/corpList.do"
+            "?method=download&searchType=13&marketType=stockMkt",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        out["krx"] = {"ok": True, "status": rr.status_code,
+                      "bytes": len(rr.content),
+                      "head": rr.text[:150] if rr.text else ""}
+    except Exception as e:
+        out["krx"] = {"ok": False, "error": str(e)[:200]}
+
+    # 3. 네이버 시가총액 페이지
+    try:
+        rr = requests.get(
+            "https://finance.naver.com/sise/sise_market_sum.naver?sosok=0&page=1",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        codes = len(re.findall(r"code=(\d{6})", rr.text))
+        out["naver_sise"] = {"ok": True, "status": rr.status_code, "codes_found": codes}
+    except Exception as e:
+        out["naver_sise"] = {"ok": False, "error": str(e)[:200]}
+
+    # 4. 네이버 자동완성
+    try:
+        rr = requests.get("https://ac.finance.naver.com/ac",
+                          params={"q": q, "st": 111, "frm": "stock",
+                                  "r_format": "json", "r_enc": "utf-8",
+                                  "q_enc": "utf-8"},
+                          headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+        out["naver_ac"] = {"ok": True, "status": rr.status_code,
+                           "body": rr.text[:300]}
+    except Exception as e:
+        out["naver_ac"] = {"ok": False, "error": str(e)[:200]}
+
+    out["master_count"] = len(_stock_master["items"])
+    out["master_error"] = _stock_master.get("error", "")
+    return jsonify(out)
 
 
 @app.route("/api/watchlist/master-status")
@@ -624,9 +784,11 @@ def api_watchlist_master_status():
     """종목 마스터 로드 상태 확인 (진단용)."""
     import time as _t
     return jsonify({
+        "version": "2026-08-24-v3",
         "loaded": bool(_stock_master["items"]),
         "count": len(_stock_master["items"]),
         "age_sec": round(_t.time() - _stock_master["loaded"], 1) if _stock_master["loaded"] else None,
+        "error": _stock_master.get("error", ""),
         "sample": _stock_master["items"][:5],
     })
 
