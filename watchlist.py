@@ -628,7 +628,7 @@ function renderGroup(sectorId, group){
                'onblur="setTimeout(()=>acClose(\'' + group.id + '\'), 200)"/>' +
         '<div class="ac-list" id="ac-list-' + group.id + '"></div>' +
       '</div>' +
-      '<button class="btn" onclick="acManualToggle(\'' + group.id + '\')" title="종목코드로 직접 입력">#</button>' +
+      '<button class="btn" onclick="acManualToggle(\'' + group.id + '\')" title="종목코드로 직접 입력">🔢 코드입력</button>' +
     '</div>' +
     '<div class="add-stock manual" id="manual-' + group.id + '" style="display:none;">' +
       '<input type="text" placeholder="종목코드 6자리" id="add-code-' + group.id + '" maxlength="6"/>' +
@@ -808,9 +808,11 @@ function acSearch(groupId, q){
       st.sel = -1;
       if(!items.length){
         const ms = data.master_size || 0;
+        const err = data.master_error || '';
         if(ms === 0){
-          listEl.innerHTML = '<div class="ac-empty">📥 종목 목록 준비 중 (첫 검색은 20~30초)<br>' +
-            '<span style="font-size:11px">잠시 후 다시 입력하거나 # 버튼으로 코드 직접 입력</span></div>';
+          listEl.innerHTML = '<div class="ac-empty">📥 종목 목록 로드 실패' +
+            (err ? '<br><span style="font-size:10px;color:#d63031">' + esc(err.slice(0,120)) + '</span>' : '') +
+            '<br><span style="font-size:11px"># 버튼으로 종목코드 직접 입력하세요</span></div>';
         } else {
           listEl.innerHTML = '<div class="ac-empty">검색 결과 없음 (' + ms + '종목 중) · # 버튼으로 코드 직접 입력</div>';
         }
