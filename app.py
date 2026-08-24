@@ -463,68 +463,116 @@ def watchlist_page():
     return Response(html, mimetype="text/html")
 
 
+def _naver_basic_name(code: str) -> str:
+    """
+    종목코드 → 종목명. kstock_search가 쓰는 것과 같은 엔드포인트라 확실히 동작.
+    """
+    try:
+        r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/basic",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        d = r.json()
+        for k in ("stockName", "itemName", "name", "stockNameEng"):
+            v = d.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _naver_mobile_search(q: str) -> list:
     """
-    네이버 모바일 금융 검색 API — 대시보드가 이미 쓰는 경로라 Railway에서 확실히 동작.
+    종목명 검색 — 알려진 엔드포인트를 순서대로 시도.
+    하나라도 결과를 주면 즉시 반환.
     """
     out = []
-    urls = [
+    import urllib.parse as _up
+
+    candidates = [
+        # ⭐ 네이버 모바일 front-api — kstock 시세가 쓰는 도메인과 동일 (열려 있음)
+        ("https://m.stock.naver.com/front-api/search/autoComplete",
+         {"query": q, "target": "stock,index,marketindicator"}, "front_ac"),
+        ("https://m.stock.naver.com/front-api/search/autoComplete",
+         {"query": q, "target": "stock"}, "front_ac2"),
+        # 통합 검색
+        ("https://m.stock.naver.com/front-api/search/all",
+         {"query": q}, "front_all"),
+        # 구 엔드포인트
         ("https://m.stock.naver.com/api/search/stock",
-         {"query": q, "target": "stock", "pageSize": 15, "page": 1}),
-        ("https://m.stock.naver.com/api/search/searchAll",
-         {"query": q}),
+         {"query": q, "target": "stock", "pageSize": 15, "page": 1}, "naver_m"),
+        ("https://m.stock.naver.com/api/json/search/searchListJson.nhn",
+         {"keyword": q}, "naver_m3"),
+        # 다음 금융 (별도 도메인)
+        ("https://finance.daum.net/api/search/quotes",
+         {"q": q, "size": 15}, "daum"),
     ]
-    headers = {
-        "User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
-                       "Mobile/15E148 Safari/604.1"),
-        "Referer": "https://m.stock.naver.com/",
-        "Accept": "application/json",
-    }
-    for url, params in urls:
+
+    def walk(node, depth=0):
+        if depth > 8 or len(out) >= 15:
+            return
+        if isinstance(node, dict):
+            code = None
+            for ck in ("itemCode", "code", "reutersCode", "stockCode", "symbolCode", "cd"):
+                v = node.get(ck)
+                if isinstance(v, str):
+                    vv = v.strip()
+                    # A005930 형태도 허용
+                    if re.fullmatch(r"[A-Z]?\d{6}", vv):
+                        code = vv[-6:]
+                        break
+            name = None
+            for nk in ("stockName", "name", "itemName", "korName", "nm", "kor_name"):
+                v = node.get(nk)
+                if isinstance(v, str) and v.strip() and not v.strip().isdigit():
+                    name = v.strip()
+                    break
+            if code and name:
+                mk = ""
+                for mkk in ("stockExchangeType", "market", "marketName", "exchange"):
+                    v = node.get(mkk)
+                    if isinstance(v, str) and v.strip():
+                        mk = v.strip()[:10]
+                        break
+                    if isinstance(v, dict):
+                        nv = v.get("name") or v.get("code")
+                        if isinstance(nv, str):
+                            mk = nv.strip()[:10]
+                            break
+                out.append({"code": code, "name": name, "market": mk})
+                return
+            for v in node.values():
+                walk(v, depth + 1)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, depth + 1)
+
+    for url, params, tag in candidates:
         try:
+            headers = {
+                "User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                               "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                               "Mobile/15E148 Safari/604.1"),
+                "Accept": "application/json, text/plain, */*",
+            }
+            if "daum" in url:
+                headers["Referer"] = "https://finance.daum.net/"
+            else:
+                headers["Referer"] = "https://m.stock.naver.com/"
+
             r = requests.get(url, params=params, headers=headers, timeout=(2, 4))
             if r.status_code != 200:
                 continue
-            data = r.json()
-
-            def walk(node, depth=0):
-                if depth > 8 or len(out) >= 15:
-                    return
-                if isinstance(node, dict):
-                    # 종목코드 후보 키
-                    code = None
-                    for ck in ("itemCode", "code", "reutersCode", "stockCode", "cd"):
-                        v = node.get(ck)
-                        if isinstance(v, str) and re.fullmatch(r"\d{6}", v.strip()):
-                            code = v.strip()
-                            break
-                    name = None
-                    for nk in ("stockName", "name", "itemName", "nm", "korName", "stockNameEng"):
-                        v = node.get(nk)
-                        if isinstance(v, str) and v.strip() and not v.strip().isdigit():
-                            name = v.strip()
-                            break
-                    if code and name:
-                        mk = ""
-                        for mk_key in ("stockExchangeType", "market", "marketName", "nationCode"):
-                            v = node.get(mk_key)
-                            if isinstance(v, str) and v.strip():
-                                mk = v.strip()[:10]
-                                break
-                        out.append({"code": code, "name": name, "market": mk})
-                        return
-                    for v in node.values():
-                        walk(v, depth + 1)
-                elif isinstance(node, list):
-                    for v in node:
-                        walk(v, depth + 1)
-
+            try:
+                data = r.json()
+            except Exception:
+                continue
+            out = []
             walk(data)
             if out:
-                break
+                print(f"[stock search] {tag} 성공: {len(out)}건")
+                return out
         except Exception as e:
-            print(f"[naver mobile search] {url}: {e}")
+            print(f"[stock search] {tag} 실패: {e}")
     return out
 
 
@@ -618,57 +666,54 @@ def _load_stock_master():
           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     errors = []
 
-    # ── 소스 1: KRX 상장법인목록 (Excel/HTML) ──
+    # ── 소스 1: 네이버 시가총액 페이지 (전종목) ──
     try:
-        for mkt_code, mkt_name in [("stockMkt", "KOSPI"), ("kosdaqMkt", "KOSDAQ")]:
-            url = ("https://kind.krx.co.kr/corpgeneral/corpList.do"
-                   "?method=download&searchType=13&marketType=" + mkt_code)
-            r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
-            r.encoding = "euc-kr"
-            html = r.text
-            # HTML 테이블 파싱 — <td>회사명</td><td>종목코드</td>
-            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S | re.I)
-            for row in rows:
-                tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S | re.I)
-                if len(tds) < 2:
-                    continue
-                name = re.sub(r"<[^>]+>", "", tds[0]).strip()
-                code_raw = re.sub(r"<[^>]+>", "", tds[1]).strip()
-                code = re.sub(r"\D", "", code_raw).zfill(6)[-6:]
-                if name and re.fullmatch(r"\d{6}", code):
-                    items.append({"code": code, "name": name, "market": mkt_name})
-            print(f"[stock master] KRX {mkt_name}: 누적 {len(items)}")
+        for sosok, mkt_name in [(0, "KOSPI"), (1, "KOSDAQ")]:
+            for page in range(1, 35):
+                url = (f"https://finance.naver.com/sise/sise_market_sum.naver"
+                       f"?sosok={sosok}&page={page}")
+                r = requests.get(url, headers={"User-Agent": UA}, timeout=8)
+                r.encoding = "euc-kr"
+                html = r.text
+                found = 0
+                for m in re.finditer(
+                        r'<a[^>]+href="[^"]*code=(\d{6})"[^>]*>(.*?)</a>', html, re.S):
+                    code = m.group(1)
+                    name = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                    name = re.sub(r"\s+", " ", name)
+                    if name and not name.isdigit() and len(name) <= 30:
+                        items.append({"code": code, "name": name, "market": mkt_name})
+                        found += 1
+                if found == 0:
+                    break
+            print(f"[stock master] 네이버 {mkt_name}: 누적 {len(items)}")
     except Exception as e:
-        errors.append(f"KRX:{e}")
-        print(f"[stock master] KRX 실패: {e}")
+        errors.append(f"naver:{e}")
+        print(f"[stock master] 네이버 실패: {e}")
 
-    # ── 소스 2: 네이버 시가총액 (KRX 실패 시) ──
-    if len(items) < 100:
+    # ── 소스 2: KRX 상장법인목록 (네이버 실패 시) ──
+    if len(items) < MASTER_MIN:
         try:
-            from bs4 import BeautifulSoup
-            for sosok, mkt_name in [(0, "KOSPI"), (1, "KOSDAQ")]:
-                for page in range(1, 35):
-                    url = (f"https://finance.naver.com/sise/sise_market_sum.naver"
-                           f"?sosok={sosok}&page={page}")
-                    r = requests.get(url, headers={"User-Agent": UA}, timeout=8)
-                    r.encoding = "euc-kr"
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    links = soup.select("a[href*='code=']")
-                    found = 0
-                    for a in links:
-                        m = re.search(r"code=(\d{6})", a.get("href", ""))
-                        if not m:
-                            continue
-                        name = a.get_text(strip=True)
-                        if name and len(name) > 0:
-                            items.append({"code": m.group(1), "name": name, "market": mkt_name})
-                            found += 1
-                    if found == 0:
-                        break
-                print(f"[stock master] 네이버 {mkt_name}: 누적 {len(items)}")
+            for mkt_code, mkt_name in [("stockMkt", "KOSPI"), ("kosdaqMkt", "KOSDAQ")]:
+                url = ("https://kind.krx.co.kr/corpgeneral/corpList.do"
+                       "?method=download&searchType=13&marketType=" + mkt_code)
+                r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
+                r.encoding = "euc-kr"
+                html = r.text
+                rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S | re.I)
+                for row in rows:
+                    tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S | re.I)
+                    if len(tds) < 2:
+                        continue
+                    name = re.sub(r"<[^>]+>", "", tds[0]).strip()
+                    code_raw = re.sub(r"<[^>]+>", "", tds[1]).strip()
+                    code = re.sub(r"\D", "", code_raw).zfill(6)[-6:]
+                    if name and re.fullmatch(r"\d{6}", code):
+                        items.append({"code": code, "name": name, "market": mkt_name})
+                print(f"[stock master] KRX {mkt_name}: 누적 {len(items)}")
         except Exception as e:
-            errors.append(f"naver:{e}")
-            print(f"[stock master] 네이버 실패: {e}")
+            errors.append(f"KRX:{e}")
+            print(f"[stock master] KRX 실패: {e}")
 
     seen, uniq = set(), []
     for it in items:
@@ -721,15 +766,17 @@ def api_watchlist_search():
         if not q:
             return jsonify({"ok": True, "items": []})
 
-        # 6자리 코드면 바로
+        # 6자리 코드면 바로 (basic API로 이름 확인 — 확실히 동작하는 경로)
         if re.fullmatch(r"\d{6}", q):
-            name = q
+            name = ""
             try:
                 hit = next((m for m in _stock_master["items"] if m["code"] == q), None)
                 if hit:
                     name = hit["name"]
             except Exception:
                 pass
+            if not name:
+                name = _naver_basic_name(q) or q
             return jsonify({"ok": True, "src": "code",
                             "items": [{"code": q, "name": name, "market": ""}]})
 
@@ -805,23 +852,34 @@ def api_watchlist_search_debug():
     q = (request.args.get("q") or "삼성전자").strip()
     out = {"query": q}
 
-    # 0. 네이버 모바일 API
+    # 0. 통합 검색 함수
     try:
         r = _naver_mobile_search(q)
-        out["naver_mobile"] = {"ok": True, "count": len(r), "sample": r[:3]}
+        out["search_fn"] = {"count": len(r), "sample": r[:3]}
     except Exception as e:
-        out["naver_mobile"] = {"ok": False, "error": str(e)[:200]}
+        out["search_fn"] = {"error": str(e)[:200]}
 
-    # 0-1. 원본 응답도 확인
-    try:
-        rr = requests.get("https://m.stock.naver.com/api/search/stock",
-                          params={"query": q, "target": "stock", "pageSize": 5, "page": 1},
-                          headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
-                                   "Referer": "https://m.stock.naver.com/"},
-                          timeout=6)
-        out["naver_mobile_raw"] = {"status": rr.status_code, "body": rr.text[:400]}
-    except Exception as e:
-        out["naver_mobile_raw"] = {"error": str(e)[:200]}
+    # 0-1. 각 엔드포인트 원문
+    eps = [
+        ("front_ac", "https://m.stock.naver.com/front-api/search/autoComplete",
+         {"query": q, "target": "stock,index,marketindicator"}),
+        ("front_all", "https://m.stock.naver.com/front-api/search/all", {"query": q}),
+        ("naver_m", "https://m.stock.naver.com/api/search/stock",
+         {"query": q, "target": "stock", "pageSize": 5, "page": 1}),
+        ("basic_005930", "https://m.stock.naver.com/api/stock/005930/basic", {}),
+        ("daum", "https://finance.daum.net/api/search/quotes", {"q": q, "size": 5}),
+    ]
+    raws = {}
+    for tag, url, params in eps:
+        try:
+            h = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                 "Accept": "application/json, text/plain, */*",
+                 "Referer": "https://finance.daum.net/" if "daum" in url else "https://m.stock.naver.com/"}
+            rr = requests.get(url, params=params, headers=h, timeout=6)
+            raws[tag] = {"status": rr.status_code, "body": rr.text[:350]}
+        except Exception as e:
+            raws[tag] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+    out["endpoints"] = raws
 
     # 1. 네이버 검색 페이지
     try:
@@ -858,8 +916,14 @@ def api_watchlist_search_debug():
         rr = requests.get(
             "https://finance.naver.com/sise/sise_market_sum.naver?sosok=0&page=1",
             headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        codes = len(re.findall(r"code=(\d{6})", rr.text))
-        out["naver_sise"] = {"ok": True, "status": rr.status_code, "codes_found": codes}
+        rr.encoding = "euc-kr"
+        pairs = re.findall(r'<a[^>]+href="[^"]*code=(\d{6})"[^>]*>(.*?)</a>', rr.text, re.S)
+        clean = []
+        for c, n in pairs[:5]:
+            nm = re.sub(r"<[^>]+>", "", n).strip()
+            clean.append({"code": c, "name": nm})
+        out["naver_sise"] = {"ok": True, "status": rr.status_code,
+                             "pairs_found": len(pairs), "sample": clean}
     except Exception as e:
         out["naver_sise"] = {"ok": False, "error": str(e)[:200]}
 
