@@ -463,7 +463,7 @@ body.edit-mode .add-group-btn{display:inline-block}
     <a href="/" class="btn">← 대시보드</a>
     <button class="btn" onclick="toggleEdit()" id="edit-btn">⚙️ 편집</button>
     <button class="btn" onclick="openBulk()">📥 일괄 추가</button>
-    <button class="btn btn-primary" onclick="refreshQuotes(allCodesEverywhere(), {force:true})" id="refresh-btn">🔄 시세 갱신</button>
+    <button class="btn btn-primary" onclick="refreshStaged({force:true})" id="refresh-btn">🔄 시세 갱신</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
   </div>
 </div>
@@ -503,6 +503,9 @@ body.edit-mode .add-group-btn{display:inline-block}
   </div>
   <div class="ctrl-group">
     <label class="chk"><input type="checkbox" id="signal-on" checked onchange="renderSignals()"/> 🚨 시그널</label>
+  </div>
+  <div class="ctrl-group nxt-only-wrap" id="nxtonly-wrap" style="display:none">
+    <label class="chk"><input type="checkbox" id="nxt-only" onchange="toggleNxtOnly()"/> 🌙 시간외 거래만</label>
   </div>
   <div class="ctrl-group" style="margin-left:auto">
     <input type="text" id="find-input" class="find-box" placeholder="🔎 내 종목 찾기"
@@ -684,7 +687,8 @@ function setMarket(mkt){
   _quotes = {};
   renderBody();
   renderSignals();
-  refreshQuotes(allCodesEverywhere(), {force:true});
+  updateNxtOnlyVisible();
+  refreshStaged({force:true});
 }
 
 function setSort(s){
@@ -733,6 +737,33 @@ function gapMode(){
   return false;
 }
 
+let _nxtOnly = false;   // 🌙 NXT 체결 있는 종목만 보기
+
+function toggleNxtOnly(){
+  _nxtOnly = document.getElementById('nxt-only').checked;
+  render();
+}
+
+// 화면에 보여줄 종목만 걸러냄
+function visibleStocks(stocks){
+  if(!_nxtOnly || _market !== 'NX') return stocks || [];
+  return (stocks || []).filter(s => {
+    const q = _quotes[s.code];
+    return q && !q.no_nxt && q.volume > 0;
+  });
+}
+
+// NXT 모드일 때만 필터 노출
+function updateNxtOnlyVisible(){
+  const w = document.getElementById('nxtonly-wrap');
+  if(w) w.style.display = (_market === 'NX') ? '' : 'none';
+  if(_market !== 'NX' && _nxtOnly){
+    _nxtOnly = false;
+    const cb = document.getElementById('nxt-only');
+    if(cb) cb.checked = false;
+  }
+}
+
 // 지금 기준이 되는 퍼센트 키 (NXT 괴리 모드면 괴리율)
 function pctKey(){ return gapMode() ? 'gap_pct' : 'chg_pct'; }
 
@@ -750,7 +781,7 @@ function avgPct(stocks){
 function sectorStats(sector){
   const all = [];
   for(const g of (sector.groups || [])){
-    for(const st of (g.stocks || [])) all.push(st);
+    for(const st of visibleStocks(g.stocks)) all.push(st);
   }
   return {avg: avgPct(all), count: all.length};
 }
@@ -808,11 +839,10 @@ function renderRank(){
 }
 
 function renderRankGroups(sector, maxAbs){
-  const groups = (sector.groups || []).map(g => ({
-    group: g,
-    avg: avgPct(g.stocks),
-    count: (g.stocks || []).length,
-  })).filter(x => x.count > 0);
+  const groups = (sector.groups || []).map(g => {
+    const vs = visibleStocks(g.stocks);
+    return {group: g, avg: avgPct(vs), count: vs.length};
+  }).filter(x => x.count > 0);
 
   if(!groups.length){
     return '<div class="rank-children"><div class="rank-empty">등록된 종목 없음</div></div>';
@@ -847,7 +877,7 @@ function renderRankGroups(sector, maxAbs){
 
 function renderRankStocks(group){
   const isNxt = gapMode();
-  const sorted = sortStocks(group.stocks || []).slice();
+  const sorted = sortStocks(visibleStocks(group.stocks)).slice();
   // 랭킹 뷰에선 항상 등락률(괴리율) 큰 순
   const k = pctKey();
   sorted.sort((a,b) => ((_quotes[b.code]||{})[k] ?? -999) - ((_quotes[a.code]||{})[k] ?? -999));
@@ -929,22 +959,8 @@ async function loadData(){
       _data.currentSectorId = _data.sectors[0].id;
     }
     render();
-    // ⚡ 현재 섹터부터 먼저 (화면에 바로 보이는 것 우선)
-    const cur = _data.sectors.find(s => s.id === _data.currentSectorId);
-    const first = [];
-    if(cur){
-      for(const g of (cur.groups || [])){
-        for(const st of (g.stocks || [])) first.push(st.code);
-      }
-    }
-    if(first.length){
-      await refreshQuotes(first);
-      // 나머지 섹터는 뒤이어 백그라운드로
-      const rest = allCodesEverywhere().filter(c => !_quotes[c]);
-      if(rest.length) setTimeout(() => refreshQuotes(rest), 200);
-    } else {
-      refreshQuotes(allCodesEverywhere());
-    }
+    updateNxtOnlyVisible();
+    refreshStaged();
   } catch(e){ console.error(e); initEmpty(); }
 }
 
@@ -1107,7 +1123,7 @@ function renderBody(){
   if(_flatView){
     const all = [];
     for(const g of sector.groups){
-      for(const st of (g.stocks || [])){
+      for(const st of visibleStocks(g.stocks)){
         all.push(Object.assign({}, st, {_group: g.name, _groupId: g.id}));
       }
     }
@@ -1154,7 +1170,7 @@ function renderBody(){
 
 function renderGroup(sectorId, group){
   let rows = '';
-  const stocks = group.stocks || [];
+  const stocks = visibleStocks(group.stocks);
   const isNxt = gapMode();
   if(stocks.length){
     const sorted = sortStocks(stocks);
@@ -1683,20 +1699,41 @@ function isUserTyping(){
   return false;
 }
 
+// 현재 섹터 종목 코드
+function currentSectorCodes(){
+  const s = _data.sectors.find(x => x.id === _data.currentSectorId);
+  const out = [];
+  if(s){
+    for(const g of (s.groups || [])){
+      for(const st of (g.stocks || [])) out.push(st.code);
+    }
+  }
+  return out;
+}
+
+// 보고 있는 섹터를 먼저 갱신하고, 나머지는 뒤이어
+async function refreshStaged(opts){
+  const cur = currentSectorCodes();
+  if(!cur.length){ return refreshQuotes(allCodesEverywhere(), opts); }
+  await refreshQuotes(cur, opts);
+  const rest = allCodesEverywhere().filter(c => cur.indexOf(c) < 0);
+  if(rest.length) setTimeout(() => refreshQuotes(rest, opts), 150);
+}
+
 function startAutoRefresh(){
   if(_autoRefreshTimer) clearInterval(_autoRefreshTimer);
   _autoRefreshTimer = setInterval(() => {
     if(document.hidden) return;
-    if(_editing) return;          // 편집 모드에선 자동 갱신 안 함
-    if(isUserTyping()) return;    // 타이핑 중이면 건너뜀
-    refreshQuotes(allCodesEverywhere());
+    if(_editing) return;
+    if(isUserTyping()) return;
+    refreshStaged();
   }, 30000);
 }
 
 document.addEventListener('visibilitychange', () => {
   if(document.hidden) return;
   if(_editing || isUserTyping()) return;
-  refreshQuotes(allCodesEverywhere());
+  refreshStaged();
 });
 
 // 초기 컨트롤 상태 세팅
@@ -2171,6 +2208,7 @@ function initControls(){
   document.querySelectorAll('.seg[data-cols]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-cols') === String(_cols));
   });
+  updateNxtOnlyVisible();
   updateMarketHint();
   setInterval(updateMarketHint, 60000);
 }
@@ -2390,22 +2428,25 @@ def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN",
 
 
 _krx_close_cache = {"date": "", "prices": {}}    # {code: {price, chg_pct}}
+_no_nxt_cache = {"date": "", "codes": set()}     # 오늘 NXT 체결이 없던 종목
 
 
 def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
-                          token: str = "", app_key: str = "", app_secret: str = "") -> dict:
+                          token: str = "", app_key: str = "", app_secret: str = "",
+                          nxt_only: bool = False) -> dict:
     """
     시장별 최적 경로로 시세 조회.
 
-    KRX/통합 → 네이버 일괄 API (한 요청에 40종목, 압도적으로 빠름)
+    KRX/통합 → 네이버 일괄 API (한 요청에 40종목)
     NXT      → KIS 개별 조회 + KRX 종가는 네이버 일괄
 
-    NXT 괴리율 = (NXT 현재가 - KRX 종가) / KRX 종가 * 100
+    ⚡ 한 번 조회해서 NXT 체결이 없던 종목은 그날 내내 KIS 조회를 건너뛴다.
+       (요청 수가 회를 거듭할수록 줄어듦)
     """
     import concurrent.futures
     from datetime import datetime as _dt
 
-    # ⚡ KRX·통합은 네이버 일괄 조회 (종목 많아도 1~2초)
+    # ⚡ KRX·통합은 네이버 일괄 조회
     if market != "NX":
         q = fetch_quotes_naver_bulk(codes)
         if q:
@@ -2427,10 +2468,23 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
     if _krx_close_cache["date"] != today:
         _krx_close_cache["date"] = today
         _krx_close_cache["prices"] = {}
+    if _no_nxt_cache["date"] != today:
+        _no_nxt_cache["date"] = today
+        _no_nxt_cache["codes"] = set()
+
+    codes = [str(c).strip() for c in codes if str(c).strip()]
+    # 오늘 NXT 체결이 없던 종목은 KIS 조회에서 제외
+    ask_nxt = [c for c in codes if c not in _no_nxt_cache["codes"]]
+    skipped = len(codes) - len(ask_nxt)
+    if skipped:
+        print(f"[watchlist] NXT 미거래 {skipped}종목 스킵")
 
     # 정규장 중에는 괴리율이 무의미 → NXT만
     if intraday:
-        nx = fetch_stock_quotes(codes, kis_get_fn, "NX", token, app_key, app_secret)
+        nx = fetch_stock_quotes(ask_nxt, kis_get_fn, "NX", token, app_key, app_secret) if ask_nxt else {}
+        for c in ask_nxt:
+            if not nx.get(c, {}).get("price"):
+                _no_nxt_cache["codes"].add(c)
         out = {}
         for code, q in nx.items():
             q = dict(q)
@@ -2441,14 +2495,19 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
             out[code] = q
         return out
 
-    # ⚡ KRX 종가는 네이버 일괄(빠름), NXT만 KIS
-    need_krx = [c for c in codes if str(c).strip() not in _krx_close_cache["prices"]]
+    # KRX 종가는 네이버 일괄(빠름), NXT만 KIS
+    need_krx = [c for c in codes if c not in _krx_close_cache["prices"]]
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        f_nx = ex.submit(fetch_stock_quotes, codes, kis_get_fn, "NX",
-                         token, app_key, app_secret)
+        f_nx = ex.submit(fetch_stock_quotes, ask_nxt, kis_get_fn, "NX",
+                         token, app_key, app_secret) if ask_nxt else None
         f_krx = ex.submit(fetch_quotes_naver_bulk, need_krx) if need_krx else None
-        nx = f_nx.result()
+        nx = f_nx.result() if f_nx else {}
         krx_new = f_krx.result() if f_krx else {}
+
+    # 이번에 NXT 체결이 없던 종목 기록 (다음 갱신부터 스킵)
+    for c in ask_nxt:
+        if not nx.get(c, {}).get("price"):
+            _no_nxt_cache["codes"].add(c)
 
     if after_close:
         for c, k in krx_new.items():
@@ -2481,13 +2540,13 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
         q["market"] = "NX"
         q["krx_close"] = krx_close
         q["krx_chg_pct"] = k.get("chg_pct")
-        if krx_close and nxt_price:
+        if krx_close and nxt_price and not q.get("no_nxt"):
             gap = nxt_price - krx_close
             q["gap"] = gap
             q["gap_pct"] = round(gap / krx_close * 100, 2)
         else:
-            q["gap"] = None
-            q["gap_pct"] = None
+            q["gap"] = 0 if q.get("no_nxt") else None
+            q["gap_pct"] = 0.0 if q.get("no_nxt") else None
         if q.get("price"):
             out[code] = q
 
