@@ -463,6 +463,71 @@ def watchlist_page():
     return Response(html, mimetype="text/html")
 
 
+def _naver_mobile_search(q: str) -> list:
+    """
+    네이버 모바일 금융 검색 API — 대시보드가 이미 쓰는 경로라 Railway에서 확실히 동작.
+    """
+    out = []
+    urls = [
+        ("https://m.stock.naver.com/api/search/stock",
+         {"query": q, "target": "stock", "pageSize": 15, "page": 1}),
+        ("https://m.stock.naver.com/api/search/searchAll",
+         {"query": q}),
+    ]
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                       "Mobile/15E148 Safari/604.1"),
+        "Referer": "https://m.stock.naver.com/",
+        "Accept": "application/json",
+    }
+    for url, params in urls:
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=(2, 4))
+            if r.status_code != 200:
+                continue
+            data = r.json()
+
+            def walk(node, depth=0):
+                if depth > 8 or len(out) >= 15:
+                    return
+                if isinstance(node, dict):
+                    # 종목코드 후보 키
+                    code = None
+                    for ck in ("itemCode", "code", "reutersCode", "stockCode", "cd"):
+                        v = node.get(ck)
+                        if isinstance(v, str) and re.fullmatch(r"\d{6}", v.strip()):
+                            code = v.strip()
+                            break
+                    name = None
+                    for nk in ("stockName", "name", "itemName", "nm", "korName", "stockNameEng"):
+                        v = node.get(nk)
+                        if isinstance(v, str) and v.strip() and not v.strip().isdigit():
+                            name = v.strip()
+                            break
+                    if code and name:
+                        mk = ""
+                        for mk_key in ("stockExchangeType", "market", "marketName", "nationCode"):
+                            v = node.get(mk_key)
+                            if isinstance(v, str) and v.strip():
+                                mk = v.strip()[:10]
+                                break
+                        out.append({"code": code, "name": name, "market": mk})
+                        return
+                    for v in node.values():
+                        walk(v, depth + 1)
+                elif isinstance(node, list):
+                    for v in node:
+                        walk(v, depth + 1)
+
+            walk(data)
+            if out:
+                break
+        except Exception as e:
+            print(f"[naver mobile search] {url}: {e}")
+    return out
+
+
 def _naver_search_page(q: str) -> list:
     """
     네이버 금융 검색 결과 페이지 크롤 (일반 HTML — 가장 잘 뚫림).
@@ -479,18 +544,26 @@ def _naver_search_page(q: str) -> list:
                            "AppleWebKit/537.36 (KHTML, like Gecko) "
                            "Chrome/120.0.0.0 Safari/537.36"),
             "Referer": "https://finance.naver.com/",
-        }, timeout=8)
+        }, timeout=(2, 4))
         r.encoding = "euc-kr"
         html = r.text
-        # <a href="/item/main.naver?code=000660" ...>SK하이닉스</a>
+        # <a href="/item/main.naver?code=000660" ...>SK하이닉스</a>  (.nhn 형태도 대응)
         for m in re.finditer(
-                r'href="[^"]*?/item/main\.naver\?code=(\d{6})"[^>]*>(.*?)</a>',
+                r'href="[^"]*?/item/main\.(?:naver|nhn)\?code=(\d{6})"[^>]*>(.*?)</a>',
                 html, re.S):
             code = m.group(1)
             name = re.sub(r"<[^>]+>", "", m.group(2)).strip()
             name = re.sub(r"\s+", " ", name)
             if name and not name.isdigit():
                 out.append({"code": code, "name": name, "market": ""})
+        # 폴백: code=XXXXXX 가 있는 모든 a 태그
+        if not out:
+            for m in re.finditer(r'<a[^>]+code=(\d{6})[^>]*>(.*?)</a>', html, re.S):
+                code = m.group(1)
+                name = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                name = re.sub(r"\s+", " ", name)
+                if name and not name.isdigit() and len(name) <= 30:
+                    out.append({"code": code, "name": name, "market": ""})
         # 검색 결과가 1건이면 바로 종목 페이지로 리다이렉트되는 경우
         if not out:
             m = re.search(r'code=(\d{6})', html)
@@ -528,14 +601,16 @@ def _kis_search_stock(q: str) -> list:
 _stock_master = {"loaded": 0.0, "items": [], "error": ""}
 
 
+MASTER_MIN = 500      # 이 미만이면 로드 실패로 간주
+
+
 def _load_stock_master():
     """
     종목 마스터 로드 (KRX 상장 전종목) → 메모리 캐시 12시간.
-    소스 1: KRX 공식 상장종목 목록 (가장 안정적)
-    소스 2: 네이버 시가총액 페이지 크롤
+    MASTER_MIN 미만이면 실패로 보고 캐시하지 않음.
     """
     import time as _t
-    if _stock_master["items"] and (_t.time() - _stock_master["loaded"]) < 43200:
+    if len(_stock_master["items"]) >= MASTER_MIN and (_t.time() - _stock_master["loaded"]) < 43200:
         return _stock_master["items"]
 
     items = []
@@ -603,19 +678,43 @@ def _load_stock_master():
         uniq.append(it)
 
     _stock_master["error"] = "; ".join(errors)[:200]
-    if uniq:
+    if len(uniq) >= MASTER_MIN:
         _stock_master["items"] = uniq
         _stock_master["loaded"] = _t.time()
         print(f"[stock master] ✅ {len(uniq)}종목 로드 완료")
     else:
-        print(f"[stock master] ❌ 로드 실패: {_stock_master['error']}")
+        # 너무 적으면 실패로 간주 — 캐시하지 않고 다음에 재시도
+        _stock_master["items"] = []
+        _stock_master["loaded"] = 0.0
+        _stock_master["error"] = f"{len(uniq)}종목만 수집됨(최소 {MASTER_MIN}) · " + _stock_master["error"]
+        print(f"[stock master] ❌ {len(uniq)}종목뿐 — 실패 처리: {_stock_master['error']}")
     return _stock_master["items"]
+
+
+_master_loading = {"running": False}
+
+
+def _load_master_background():
+    """마스터를 백그라운드 스레드로 로드 (검색 요청을 막지 않음)."""
+    import threading
+    if _master_loading["running"] or _stock_master["items"]:
+        return
+    _master_loading["running"] = True
+
+    def _run():
+        try:
+            _load_stock_master()
+        finally:
+            _master_loading["running"] = False
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
 
 
 @app.route("/api/watchlist/search")
 @requires_auth
 def api_watchlist_search():
-    """종목명 검색 — 절대 500을 내지 않고, 실패 원인을 응답에 담아 반환."""
+    """종목명 검색 — 즉시 응답 보장. 마스터 로드는 절대 기다리지 않음."""
     diag = []
     try:
         q = (request.args.get("q") or "").strip()
@@ -636,23 +735,22 @@ def api_watchlist_search():
 
         results, src = [], ""
 
-        # ── 1순위: 네이버 검색 페이지 ──
+        # ── 1순위: 네이버 모바일 API (Railway에서 검증된 경로) ──
         try:
-            results = _naver_search_page(q)
+            results = _naver_mobile_search(q)
             if results:
-                src = "naver_page"
+                src = "mobile"
             else:
-                diag.append("naver_page:0건")
+                diag.append("mobile:0건")
         except Exception as e:
-            diag.append(f"naver_page:{type(e).__name__}:{str(e)[:60]}")
+            diag.append(f"mobile:{type(e).__name__}:{str(e)[:40]}")
 
-        # ── 2순위: 로컬 마스터 ──
-        if not results:
+        # ── 2순위: 이미 로드된 마스터 (메모리) ──
+        if not results and _stock_master["items"]:
             try:
-                master = _load_stock_master()
                 ql = q.lower().replace(" ", "").replace("-", "")
                 starts, contains = [], []
-                for m in master:
+                for m in _stock_master["items"]:
                     nl = m["name"].lower().replace(" ", "").replace("-", "")
                     if nl.startswith(ql):
                         starts.append(m)
@@ -662,64 +760,23 @@ def api_watchlist_search():
                 if results:
                     src = "master"
                 else:
-                    diag.append(f"master:{len(master)}종목중 0건")
+                    diag.append(f"master({len(_stock_master['items'])}):0건")
             except Exception as e:
-                diag.append(f"master:{type(e).__name__}:{str(e)[:60]}")
+                diag.append(f"master:{type(e).__name__}")
+        elif not results:
+            diag.append("master:미로드")
+            _load_master_background()
 
-        # ── 3순위: 네이버 자동완성 API ──
+        # ── 3순위: 네이버 검색 페이지 ──
         if not results:
             try:
-                r = requests.get(
-                    "https://ac.finance.naver.com/ac",
-                    params={"q": q, "st": 111, "frm": "stock",
-                            "r_format": "json", "r_enc": "utf-8",
-                            "q_enc": "utf-8", "r_unicode": 0, "t_koreng": 1},
-                    headers={
-                        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                                       "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                       "Chrome/120.0.0.0 Safari/537.36"),
-                        "Referer": "https://finance.naver.com/",
-                    },
-                    timeout=5,
-                )
-                data = r.json()
-                found = []
-
-                def walk(node, depth=0):
-                    if depth > 7:
-                        return
-                    if isinstance(node, list):
-                        flat = []
-                        for el in node:
-                            if isinstance(el, list) and len(el) == 1 and isinstance(el[0], str):
-                                flat.append(el[0])
-                            elif isinstance(el, str):
-                                flat.append(el)
-                            else:
-                                flat.append(None)
-                        if len(flat) >= 2 and flat[0] and flat[1]:
-                            c, n = str(flat[0]).strip(), str(flat[1]).strip()
-                            if re.fullmatch(r"\d{6}", c) and n and not n.isdigit():
-                                mk = str(flat[2]).strip() if len(flat) > 2 and flat[2] else ""
-                                found.append({"code": c, "name": n, "market": mk})
-                                return
-                            if re.fullmatch(r"\d{6}", n) and c and not c.isdigit():
-                                found.append({"code": n, "name": c, "market": ""})
-                                return
-                        for el in node:
-                            walk(el, depth + 1)
-                    elif isinstance(node, dict):
-                        for v in node.values():
-                            walk(v, depth + 1)
-
-                walk(data)
-                results = found
+                results = _naver_search_page(q)
                 if results:
-                    src = "naver_ac"
+                    src = "naver_page"
                 else:
-                    diag.append("naver_ac:0건")
+                    diag.append("naver_page:0건")
             except Exception as e:
-                diag.append(f"naver_ac:{type(e).__name__}:{str(e)[:60]}")
+                diag.append(f"naver_page:{type(e).__name__}:{str(e)[:40]}")
 
         seen, uniq = set(), []
         for it in results:
@@ -729,6 +786,7 @@ def api_watchlist_search():
             uniq.append(it)
         return jsonify({"ok": True, "items": uniq[:12], "src": src,
                         "master_size": len(_stock_master["items"]),
+                        "master_loading": _master_loading["running"],
                         "diag": " | ".join(diag)[:300]})
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -747,6 +805,24 @@ def api_watchlist_search_debug():
     q = (request.args.get("q") or "삼성전자").strip()
     out = {"query": q}
 
+    # 0. 네이버 모바일 API
+    try:
+        r = _naver_mobile_search(q)
+        out["naver_mobile"] = {"ok": True, "count": len(r), "sample": r[:3]}
+    except Exception as e:
+        out["naver_mobile"] = {"ok": False, "error": str(e)[:200]}
+
+    # 0-1. 원본 응답도 확인
+    try:
+        rr = requests.get("https://m.stock.naver.com/api/search/stock",
+                          params={"query": q, "target": "stock", "pageSize": 5, "page": 1},
+                          headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                                   "Referer": "https://m.stock.naver.com/"},
+                          timeout=6)
+        out["naver_mobile_raw"] = {"status": rr.status_code, "body": rr.text[:400]}
+    except Exception as e:
+        out["naver_mobile_raw"] = {"error": str(e)[:200]}
+
     # 1. 네이버 검색 페이지
     try:
         r = _naver_search_page(q)
@@ -754,15 +830,26 @@ def api_watchlist_search_debug():
     except Exception as e:
         out["naver_page"] = {"ok": False, "error": str(e)[:200]}
 
-    # 2. KRX 상장목록 (연결만 테스트)
+    # 2. KRX 상장목록
     try:
         rr = requests.get(
             "https://kind.krx.co.kr/corpgeneral/corpList.do"
             "?method=download&searchType=13&marketType=stockMkt",
             headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        rr.encoding = "euc-kr"
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", rr.text, re.S | re.I)
+        parsed = 0
+        for row in rows:
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S | re.I)
+            if len(tds) >= 2:
+                nm = re.sub(r"<[^>]+>", "", tds[0]).strip()
+                cd = re.sub(r"\D", "", re.sub(r"<[^>]+>", "", tds[1])).zfill(6)[-6:]
+                if nm and re.fullmatch(r"\d{6}", cd):
+                    parsed += 1
         out["krx"] = {"ok": True, "status": rr.status_code,
                       "bytes": len(rr.content),
-                      "head": rr.text[:150] if rr.text else ""}
+                      "tr_rows": len(rows), "parsed": parsed,
+                      "head": rr.text[:250]}
     except Exception as e:
         out["krx"] = {"ok": False, "error": str(e)[:200]}
 
@@ -791,6 +878,16 @@ def api_watchlist_search_debug():
     out["master_count"] = len(_stock_master["items"])
     out["master_error"] = _stock_master.get("error", "")
     return jsonify(out)
+
+
+@app.route("/api/watchlist/master-warmup", methods=["POST"])
+@requires_auth
+def api_watchlist_master_warmup():
+    """마스터 로드를 백그라운드로 시작하고 즉시 응답."""
+    _load_master_background()
+    return jsonify({"ok": True,
+                    "loading": _master_loading["running"],
+                    "count": len(_stock_master["items"])})
 
 
 @app.route("/api/watchlist/master-status")
