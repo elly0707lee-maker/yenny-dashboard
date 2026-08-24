@@ -131,6 +131,15 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* 📦 큰 그룹 접기 */
+.big-collapsed{
+  padding:14px;text-align:center;cursor:pointer;
+  background:#f8f9fa;border:1px dashed #c5ccd6;border-radius:8px;
+  font-size:12px;color:#636e72;font-weight:600;margin:6px 0;
+  transition:all .12s;
+}
+.big-collapsed:hover{background:#eceff1;border-color:#1a1d23;color:#1a1d23}
+
 /* 🔎 내 종목 찾기 */
 .find-box{
   padding:5px 10px;border:1px solid #e5e7eb;border-radius:16px;
@@ -711,7 +720,6 @@ function setView(v){
   document.querySelectorAll('.seg[data-view]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-view') === v);
   });
-  // 랭킹 뷰에선 섹터 탭 / flat 체크박스 숨김
   const tabs = document.getElementById('sector-tabs');
   const flatWrap = document.getElementById('flat-wrap');
   const colsWrap = document.getElementById('cols-wrap');
@@ -719,10 +727,19 @@ function setView(v){
   if(flatWrap) flatWrap.style.display = (v === 'rank') ? 'none' : '';
   if(colsWrap) colsWrap.style.display = (v === 'rank') ? 'none' : '';
   render();
-  // 랭킹 뷰는 전체 섹터 시세가 필요
   if(v === 'rank'){
-    const missing = allCodesEverywhere().filter(c => !_quotes[c]);
-    if(missing.length) refreshQuotes(missing);
+    const all = allCodesEverywhere();
+    const missing = all.filter(c => !_quotes[c]);
+    if(!missing.length) return;
+    // 창고형 대비 — 미조회 종목이 많으면 확인 후 진행
+    if(missing.length > 400){
+      if(!confirm('아직 시세를 안 받은 종목이 ' + missing.length + '개입니다.\n' +
+                  '전부 조회하면 시간이 오래 걸릴 수 있어요. 진행할까요?\n' +
+                  '(취소하면 이미 받아둔 섹터만 순위에 표시됩니다)')){
+        return;
+      }
+    }
+    refreshQuotes(missing);
   }
 }
 
@@ -1168,11 +1185,25 @@ function renderBody(){
   initSortableGroups();
 }
 
+const BIG_GROUP = 60;       // 이보다 크면 기본 접힘 (렌더 부하 방지)
+let _expandedBig = {};      // 사용자가 펼친 큰 그룹
+
+function toggleBigGroup(id){
+  _expandedBig[id] = !_expandedBig[id];
+  renderBody();
+}
+
 function renderGroup(sectorId, group){
   let rows = '';
   const stocks = visibleStocks(group.stocks);
   const isNxt = gapMode();
-  if(stocks.length){
+  const tooBig = stocks.length > BIG_GROUP && !_expandedBig[group.id];
+
+  if(tooBig){
+    rows = '<div class="big-collapsed" onclick="toggleBigGroup(\'' + group.id + '\')">' +
+      '📦 ' + stocks.length + '종목 — 클릭해서 펼치기' +
+      '</div>';
+  } else if(stocks.length){
     const sorted = sortStocks(stocks);
     rows = '<table class="stock-table">' +
       '<thead><tr>' +
@@ -1184,7 +1215,10 @@ function renderGroup(sectorId, group){
       '<th></th>' +
       '</tr></thead><tbody>' +
       sorted.map(st => renderStockRow(group.id, st)).join('') +
-      '</tbody></table>';
+      '</tbody></table>' +
+      (stocks.length > BIG_GROUP
+        ? '<div class="big-collapsed" onclick="toggleBigGroup(\'' + group.id + '\')">▲ 접기</div>'
+        : '');
   } else {
     rows = '<div class="content-empty" style="padding:20px">종목 없음</div>';
   }
@@ -1711,13 +1745,24 @@ function currentSectorCodes(){
   return out;
 }
 
-// 보고 있는 섹터를 먼저 갱신하고, 나머지는 뒤이어
+// ⚡ 창고형 운용 — 보고 있는 섹터만 조회한다.
+//    등록 종목이 수천 개여도 실제 요청은 현재 섹터 크기만큼만 발생.
+//    (랭킹 뷰나 시그널처럼 전체가 필요할 때만 예외적으로 전부 조회)
 async function refreshStaged(opts){
+  opts = opts || {};
+  // 랭킹 뷰는 섹터 비교가 목적이라 전체가 필요
+  if(_view === 'rank'){
+    const all = allCodesEverywhere();
+    if(all.length > 400 && !opts.force){
+      // 너무 많으면 아직 시세 없는 것만 채움
+      const missing = all.filter(c => !_quotes[c]);
+      return refreshQuotes(missing.length ? missing : all, opts);
+    }
+    return refreshQuotes(all, opts);
+  }
   const cur = currentSectorCodes();
-  if(!cur.length){ return refreshQuotes(allCodesEverywhere(), opts); }
-  await refreshQuotes(cur, opts);
-  const rest = allCodesEverywhere().filter(c => cur.indexOf(c) < 0);
-  if(rest.length) setTimeout(() => refreshQuotes(rest, opts), 150);
+  if(!cur.length) return;
+  return refreshQuotes(cur, opts);
 }
 
 function startAutoRefresh(){
