@@ -462,80 +462,183 @@ def watchlist_page():
     return Response(html, mimetype="text/html")
 
 
+_stock_master = {"loaded": 0.0, "items": []}   # [{code, name, market}]
+
+
+def _load_stock_master():
+    """
+    종목 마스터 로드 (KRX 상장 전종목).
+    공공데이터/네이버 등 여러 소스 시도 → 메모리 캐시 (12시간).
+    """
+    import time as _t
+    if _stock_master["items"] and (_t.time() - _stock_master["loaded"]) < 43200:
+        return _stock_master["items"]
+
+    items = []
+    UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+    # 1) 네이버 금융 시가총액 페이지 크롤 (코스피 + 코스닥 전종목)
+    try:
+        from bs4 import BeautifulSoup
+        for sosok, mkt_name in [(0, "KOSPI"), (1, "KOSDAQ")]:
+            for page in range(1, 35):     # 한 페이지 50종목 × 34 ≈ 1700
+                url = (f"https://finance.naver.com/sise/sise_market_sum.naver"
+                       f"?sosok={sosok}&page={page}")
+                r = requests.get(url, headers={"User-Agent": UA}, timeout=8)
+                r.encoding = "euc-kr"
+                soup = BeautifulSoup(r.text, "html.parser")
+                links = soup.select("a[href*='/item/main.naver?code=']")
+                if not links:
+                    break
+                found = 0
+                for a in links:
+                    href = a.get("href", "")
+                    m = re.search(r"code=(\d{6})", href)
+                    if not m:
+                        continue
+                    code = m.group(1)
+                    name = a.get_text(strip=True)
+                    if name and code:
+                        items.append({"code": code, "name": name, "market": mkt_name})
+                        found += 1
+                if found == 0:
+                    break
+    except Exception as e:
+        print(f"[stock master] 네이버 크롤 실패: {e}")
+
+    # 중복 제거
+    seen, uniq = set(), []
+    for it in items:
+        if it["code"] in seen:
+            continue
+        seen.add(it["code"])
+        uniq.append(it)
+
+    if uniq:
+        _stock_master["items"] = uniq
+        _stock_master["loaded"] = _t.time()
+        print(f"[stock master] {len(uniq)}종목 로드됨")
+    return _stock_master["items"]
+
+
 @app.route("/api/watchlist/search")
 @requires_auth
 def api_watchlist_search():
-    """종목명 검색 — 네이버 금융 자동완성 API."""
+    """종목명 검색 — 로컬 마스터 우선, 네이버 자동완성 폴백."""
     q = (request.args.get("q") or "").strip()
-    if not q or len(q) < 1:
+    if not q:
         return jsonify({"ok": True, "items": []})
-    try:
-        r = requests.get(
-            "https://ac.finance.naver.com/ac",
-            params={
-                "q": q,
-                "q_enc": "euc-kr",
-                "st": 111,
-                "frm": "stock",
-                "r_format": "json",
-                "r_enc": "utf-8",
-                "r_unicode": 0,
-                "t_koreng": 1,
-                "r_lt": 111,
-            },
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://finance.naver.com/",
-            },
-            timeout=6,
-        )
-        data = r.json()
-        items = []
-        # 네이버 응답 구조가 버전마다 다를 수 있어 재귀적으로 (6자리코드, 종목명) 쌍 탐색
-        def walk(node, depth=0):
-            if depth > 6:
-                return
-            if isinstance(node, list):
-                # [[코드],[이름],...] 형태 감지
-                flat = []
-                for el in node:
-                    if isinstance(el, list) and len(el) == 1 and isinstance(el[0], str):
-                        flat.append(el[0])
-                    elif isinstance(el, str):
-                        flat.append(el)
-                    else:
-                        flat.append(None)
-                # 첫 요소가 6자리 숫자 + 두번째가 문자열이면 종목
-                if len(flat) >= 2 and flat[0] and flat[1]:
-                    c, n = str(flat[0]).strip(), str(flat[1]).strip()
-                    if len(c) == 6 and c.isdigit() and n and not n.isdigit():
-                        mk = ""
-                        if len(flat) > 2 and flat[2]:
-                            mk = str(flat[2]).strip()
-                        items.append({"code": c, "name": n, "market": mk})
-                        return
-                for el in node:
-                    walk(el, depth + 1)
-            elif isinstance(node, dict):
-                for v in node.values():
-                    walk(v, depth + 1)
 
-        walk(data)
-        # 중복 제거
-        seen = set()
-        uniq = []
-        for it in items:
-            if it["code"] in seen:
-                continue
-            seen.add(it["code"])
-            uniq.append(it)
-        return jsonify({"ok": True, "items": uniq[:10]})
+    # 6자리 코드면 그대로
+    if re.fullmatch(r"\d{6}", q):
+        master = _load_stock_master()
+        hit = next((m for m in master if m["code"] == q), None)
+        return jsonify({"ok": True, "items": [hit] if hit else
+                        [{"code": q, "name": q, "market": ""}]})
+
+    results = []
+    # ── 1순위: 로컬 마스터 부분 매칭 ──
+    try:
+        master = _load_stock_master()
+        ql = q.lower().replace(" ", "")
+        starts, contains = [], []
+        for m in master:
+            nl = m["name"].lower().replace(" ", "")
+            if nl.startswith(ql):
+                starts.append(m)
+            elif ql in nl:
+                contains.append(m)
+        results = starts + contains
     except Exception as e:
-        print(f"[watchlist search] {e}")
-        return jsonify({"ok": True, "items": [], "error": str(e)[:80]})
+        print(f"[watchlist search] master 검색 실패: {e}")
+
+    # ── 2순위: 네이버 자동완성 (마스터가 비었을 때만) ──
+    if not results:
+        try:
+            r = requests.get(
+                "https://ac.finance.naver.com/ac",
+                params={"q": q, "st": 111, "frm": "stock",
+                        "r_format": "json", "r_enc": "utf-8",
+                        "q_enc": "utf-8", "r_unicode": 0, "t_koreng": 1},
+                headers={
+                    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/120.0.0.0 Safari/537.36"),
+                    "Referer": "https://finance.naver.com/",
+                },
+                timeout=5,
+            )
+            data = r.json()
+            found = []
+
+            def walk(node, depth=0):
+                if depth > 7:
+                    return
+                if isinstance(node, list):
+                    flat = []
+                    for el in node:
+                        if isinstance(el, list) and len(el) == 1 and isinstance(el[0], str):
+                            flat.append(el[0])
+                        elif isinstance(el, str):
+                            flat.append(el)
+                        else:
+                            flat.append(None)
+                    if len(flat) >= 2 and flat[0] and flat[1]:
+                        c, n = str(flat[0]).strip(), str(flat[1]).strip()
+                        if re.fullmatch(r"\d{6}", c) and n and not n.isdigit():
+                            mk = str(flat[2]).strip() if len(flat) > 2 and flat[2] else ""
+                            found.append({"code": c, "name": n, "market": mk})
+                            return
+                        # 순서가 반대인 경우 (이름, 코드)
+                        if re.fullmatch(r"\d{6}", n) and c and not c.isdigit():
+                            found.append({"code": n, "name": c, "market": ""})
+                            return
+                    for el in node:
+                        walk(el, depth + 1)
+                elif isinstance(node, dict):
+                    for v in node.values():
+                        walk(v, depth + 1)
+
+            walk(data)
+            results = found
+        except Exception as e:
+            print(f"[watchlist search] 네이버 폴백 실패: {e}")
+
+    seen, uniq = set(), []
+    for it in results:
+        if it["code"] in seen:
+            continue
+        seen.add(it["code"])
+        uniq.append(it)
+    return jsonify({"ok": True, "items": uniq[:12],
+                    "master_size": len(_stock_master["items"])})
 
 
 _wl_cache = {"key": "", "at": 0.0, "quotes": {}}
+
+
+@app.route("/api/watchlist/master-status")
+@requires_auth
+def api_watchlist_master_status():
+    """종목 마스터 로드 상태 확인 (진단용)."""
+    import time as _t
+    return jsonify({
+        "loaded": bool(_stock_master["items"]),
+        "count": len(_stock_master["items"]),
+        "age_sec": round(_t.time() - _stock_master["loaded"], 1) if _stock_master["loaded"] else None,
+        "sample": _stock_master["items"][:5],
+    })
+
+
+@app.route("/api/watchlist/master-reload", methods=["POST"])
+@requires_auth
+def api_watchlist_master_reload():
+    """종목 마스터 강제 재로드."""
+    _stock_master["loaded"] = 0.0
+    _stock_master["items"] = []
+    items = _load_stock_master()
+    return jsonify({"ok": True, "count": len(items), "sample": items[:5]})
 
 
 @app.route("/api/watchlist/quotes", methods=["POST"])
