@@ -614,112 +614,126 @@ def _load_stock_master():
 @app.route("/api/watchlist/search")
 @requires_auth
 def api_watchlist_search():
-    """종목명 검색 — 로컬 마스터 → KIS → 네이버 순."""
-    q = (request.args.get("q") or "").strip()
-    if not q:
-        return jsonify({"ok": True, "items": []})
-
-    # 6자리 코드면 바로
-    if re.fullmatch(r"\d{6}", q):
-        master = _load_stock_master()
-        hit = next((m for m in master if m["code"] == q), None)
-        if not hit:
-            kis_hit = _kis_search_stock(q)
-            hit = kis_hit[0] if kis_hit else None
-        return jsonify({"ok": True, "items": [hit] if hit else
-                        [{"code": q, "name": q, "market": ""}],
-                        "src": "code"})
-
-    results, src = [], ""
-
-    # ── 1순위: 네이버 검색 페이지 (즉시 응답, 마스터 불필요) ──
+    """종목명 검색 — 절대 500을 내지 않고, 실패 원인을 응답에 담아 반환."""
+    diag = []
     try:
-        results = _naver_search_page(q)
-        if results:
-            src = "naver_page"
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"ok": True, "items": []})
+
+        # 6자리 코드면 바로
+        if re.fullmatch(r"\d{6}", q):
+            name = q
+            try:
+                hit = next((m for m in _stock_master["items"] if m["code"] == q), None)
+                if hit:
+                    name = hit["name"]
+            except Exception:
+                pass
+            return jsonify({"ok": True, "src": "code",
+                            "items": [{"code": q, "name": name, "market": ""}]})
+
+        results, src = [], ""
+
+        # ── 1순위: 네이버 검색 페이지 ──
+        try:
+            results = _naver_search_page(q)
+            if results:
+                src = "naver_page"
+            else:
+                diag.append("naver_page:0건")
+        except Exception as e:
+            diag.append(f"naver_page:{type(e).__name__}:{str(e)[:60]}")
+
+        # ── 2순위: 로컬 마스터 ──
+        if not results:
+            try:
+                master = _load_stock_master()
+                ql = q.lower().replace(" ", "").replace("-", "")
+                starts, contains = [], []
+                for m in master:
+                    nl = m["name"].lower().replace(" ", "").replace("-", "")
+                    if nl.startswith(ql):
+                        starts.append(m)
+                    elif ql in nl:
+                        contains.append(m)
+                results = starts + contains
+                if results:
+                    src = "master"
+                else:
+                    diag.append(f"master:{len(master)}종목중 0건")
+            except Exception as e:
+                diag.append(f"master:{type(e).__name__}:{str(e)[:60]}")
+
+        # ── 3순위: 네이버 자동완성 API ──
+        if not results:
+            try:
+                r = requests.get(
+                    "https://ac.finance.naver.com/ac",
+                    params={"q": q, "st": 111, "frm": "stock",
+                            "r_format": "json", "r_enc": "utf-8",
+                            "q_enc": "utf-8", "r_unicode": 0, "t_koreng": 1},
+                    headers={
+                        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                       "Chrome/120.0.0.0 Safari/537.36"),
+                        "Referer": "https://finance.naver.com/",
+                    },
+                    timeout=5,
+                )
+                data = r.json()
+                found = []
+
+                def walk(node, depth=0):
+                    if depth > 7:
+                        return
+                    if isinstance(node, list):
+                        flat = []
+                        for el in node:
+                            if isinstance(el, list) and len(el) == 1 and isinstance(el[0], str):
+                                flat.append(el[0])
+                            elif isinstance(el, str):
+                                flat.append(el)
+                            else:
+                                flat.append(None)
+                        if len(flat) >= 2 and flat[0] and flat[1]:
+                            c, n = str(flat[0]).strip(), str(flat[1]).strip()
+                            if re.fullmatch(r"\d{6}", c) and n and not n.isdigit():
+                                mk = str(flat[2]).strip() if len(flat) > 2 and flat[2] else ""
+                                found.append({"code": c, "name": n, "market": mk})
+                                return
+                            if re.fullmatch(r"\d{6}", n) and c and not c.isdigit():
+                                found.append({"code": n, "name": c, "market": ""})
+                                return
+                        for el in node:
+                            walk(el, depth + 1)
+                    elif isinstance(node, dict):
+                        for v in node.values():
+                            walk(v, depth + 1)
+
+                walk(data)
+                results = found
+                if results:
+                    src = "naver_ac"
+                else:
+                    diag.append("naver_ac:0건")
+            except Exception as e:
+                diag.append(f"naver_ac:{type(e).__name__}:{str(e)[:60]}")
+
+        seen, uniq = set(), []
+        for it in results:
+            if it["code"] in seen:
+                continue
+            seen.add(it["code"])
+            uniq.append(it)
+        return jsonify({"ok": True, "items": uniq[:12], "src": src,
+                        "master_size": len(_stock_master["items"]),
+                        "diag": " | ".join(diag)[:300]})
     except Exception as e:
-        print(f"[watchlist search] 네이버 페이지 실패: {e}")
-
-    # ── 2순위: 로컬 마스터 ──
-    if not results:
-        try:
-            master = _load_stock_master()
-            ql = q.lower().replace(" ", "").replace("-", "")
-            starts, contains = [], []
-            for m in master:
-                nl = m["name"].lower().replace(" ", "").replace("-", "")
-                if nl.startswith(ql):
-                    starts.append(m)
-                elif ql in nl:
-                    contains.append(m)
-            results = starts + contains
-            if results:
-                src = "master"
-        except Exception as e:
-            print(f"[watchlist search] master 실패: {e}")
-
-    # ── 3순위: 네이버 자동완성 API ──
-    if not results:
-        try:
-            r = requests.get(
-                "https://ac.finance.naver.com/ac",
-                params={"q": q, "st": 111, "frm": "stock",
-                        "r_format": "json", "r_enc": "utf-8",
-                        "q_enc": "utf-8", "r_unicode": 0, "t_koreng": 1},
-                headers={
-                    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                   "Chrome/120.0.0.0 Safari/537.36"),
-                    "Referer": "https://finance.naver.com/",
-                },
-                timeout=5,
-            )
-            data = r.json()
-            found = []
-
-            def walk(node, depth=0):
-                if depth > 7:
-                    return
-                if isinstance(node, list):
-                    flat = []
-                    for el in node:
-                        if isinstance(el, list) and len(el) == 1 and isinstance(el[0], str):
-                            flat.append(el[0])
-                        elif isinstance(el, str):
-                            flat.append(el)
-                        else:
-                            flat.append(None)
-                    if len(flat) >= 2 and flat[0] and flat[1]:
-                        c, n = str(flat[0]).strip(), str(flat[1]).strip()
-                        if re.fullmatch(r"\d{6}", c) and n and not n.isdigit():
-                            mk = str(flat[2]).strip() if len(flat) > 2 and flat[2] else ""
-                            found.append({"code": c, "name": n, "market": mk})
-                            return
-                        if re.fullmatch(r"\d{6}", n) and c and not c.isdigit():
-                            found.append({"code": n, "name": c, "market": ""})
-                            return
-                    for el in node:
-                        walk(el, depth + 1)
-                elif isinstance(node, dict):
-                    for v in node.values():
-                        walk(v, depth + 1)
-
-            walk(data)
-            results = found
-            if results:
-                src = "naver"
-        except Exception as e:
-            print(f"[watchlist search] 네이버 실패: {e}")
-
-    seen, uniq = set(), []
-    for it in results:
-        if it["code"] in seen:
-            continue
-        seen.add(it["code"])
-        uniq.append(it)
-    return jsonify({"ok": True, "items": uniq[:12], "src": src,
-                    "master_size": len(_stock_master["items"]),
-                    "master_error": _stock_master.get("error", "")})
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "items": [],
+                        "error": f"{type(e).__name__}: {str(e)[:150]}",
+                        "diag": " | ".join(diag)[:300]}), 200
 
 
 _wl_cache = {"key": "", "at": 0.0, "quotes": {}}
