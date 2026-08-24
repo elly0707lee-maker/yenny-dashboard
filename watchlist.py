@@ -71,18 +71,59 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .wrap{max-width:1600px;margin:0 auto;padding:16px 24px}
 .updated{font-size:11px;color:#7a8099;margin-bottom:10px}
 
+/* 🆕 그룹 다단 배치 */
+#watchlist-body.cols-2,
+#watchlist-body.cols-3{
+  display:grid;gap:14px;align-items:start;
+}
+#watchlist-body.cols-2{grid-template-columns:repeat(2, minmax(0,1fr))}
+#watchlist-body.cols-3{grid-template-columns:repeat(3, minmax(0,1fr))}
+#watchlist-body.cols-2 .group,
+#watchlist-body.cols-3 .group{
+  margin-bottom:0;background:#fff;border:1px solid #e5e7eb;
+  border-radius:10px;padding:12px 14px;
+}
+#watchlist-body.cols-2 .group-header,
+#watchlist-body.cols-3 .group-header{
+  border-bottom:1.5px solid #1a1d23;padding-bottom:6px;margin-bottom:4px;
+}
+/* 다단일 때 테이블 압축 */
+#watchlist-body.cols-2 .stock-table th,
+#watchlist-body.cols-3 .stock-table th{font-size:10px;padding:5px 6px}
+#watchlist-body.cols-2 .stock-row td,
+#watchlist-body.cols-3 .stock-row td{padding:6px;font-size:12px}
+#watchlist-body.cols-3 .stock-name{font-size:12px}
+#watchlist-body.cols-3 .stock-code{display:none}
+#watchlist-body.cols-3 .mkt-badge{display:none}
+/* 다단에선 add-stock 세로 배치 */
+#watchlist-body.cols-2 .add-stock,
+#watchlist-body.cols-3 .add-stock{flex-wrap:wrap;gap:4px}
+#watchlist-body.cols-2 .add-stock input,
+#watchlist-body.cols-3 .add-stock input{min-width:0;font-size:11px}
+
+@media (max-width:1100px){
+  #watchlist-body.cols-3{grid-template-columns:repeat(2, minmax(0,1fr))}
+}
+@media (max-width:760px){
+  #watchlist-body.cols-2,
+  #watchlist-body.cols-3{grid-template-columns:1fr}
+}
+
+/* 🆕 랭킹 뷰 폭 제한 */
+.rank-wrap{max-width:920px}
+
 /* 🆕 컨트롤 바 */
 .controlbar{
   background:#fff;border-bottom:1px solid #e5e7eb;
-  padding:10px 24px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;
+  padding:8px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;
   position:sticky;top:57px;z-index:90;
 }
-.ctrl-group{display:flex;gap:4px;align-items:center}
-.ctrl-label{font-size:11px;color:#7a8099;font-weight:600;margin-right:4px}
+.ctrl-group{display:flex;gap:3px;align-items:center}
+.ctrl-label{font-size:10.5px;color:#7a8099;font-weight:600;margin-right:3px}
 .seg{
-  padding:5px 11px;border:1px solid #e5e7eb;border-radius:6px;
-  background:#fff;color:#1a1d23;font-size:11.5px;font-weight:500;
-  cursor:pointer;font-family:inherit;transition:all .12s;
+  padding:4px 9px;border:1px solid #e5e7eb;border-radius:6px;
+  background:#fff;color:#1a1d23;font-size:11px;font-weight:500;
+  cursor:pointer;font-family:inherit;transition:all .12s;white-space:nowrap;
 }
 .seg:hover{background:#f1f3f5;border-color:#1a1d23}
 .seg.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
@@ -170,8 +211,15 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .sector-tab:hover{background:#f1f3f5;border-color:#1a1d23}
 .sector-tab.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
-.sector-tab-name{outline:none;min-width:20px}
-.sector-tab-name:focus{background:rgba(255,255,255,0.2);padding:0 4px;border-radius:3px}
+.sector-tab-name{min-width:20px}
+.tab-icon-btn{
+  background:transparent;border:0;cursor:pointer;padding:1px 3px;
+  font-size:11px;line-height:1;opacity:0.75;font-family:inherit;
+  border-radius:4px;
+}
+.tab-icon-btn:hover{opacity:1;background:rgba(255,255,255,0.2)}
+.tab-icon-btn.dark{color:#7a8099;margin-left:4px}
+.tab-icon-btn.dark:hover{background:#eceff1}
 .sector-add{
   width:34px;height:34px;border-radius:20px;border:1px dashed #999;
   background:transparent;color:#666;font-size:16px;font-weight:700;
@@ -187,8 +235,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   font-size:14px;font-weight:700;color:#1a1d23;
 }
 .group-icon{font-size:16px}
-.group-name{outline:none;min-width:20px}
-.group-name:focus{background:#fff;border-radius:4px;padding:2px 6px;box-shadow:0 0 0 2px rgba(26,29,35,0.1)}
+.group-name{min-width:20px}
 .group-actions{margin-left:auto;display:flex;gap:4px}
 .group-actions .btn-mini{background:transparent;border:1px solid transparent;color:#7a8099}
 .group-actions .btn-mini:hover{background:#fff;border-color:#e5e7eb;color:#1a1d23}
@@ -281,9 +328,14 @@ body.edit-mode .add-stock,body.edit-mode .add-group-btn{display:flex}
 body.edit-mode .add-group-btn{display:inline-block}
 
 @media print{
-  .topbar,.sector-add,.row-actions,.add-stock,.add-group-btn,.save-indicator{display:none !important}
+  @page{size:A4 landscape;margin:8mm}
+  .topbar,.controlbar,.sector-add,.row-actions,.add-stock,.add-group-btn,.save-indicator{display:none !important}
   body{background:#fff}
   .sector-tab:not(.active){display:none}
+  .wrap{max-width:none;padding:0}
+  .group{page-break-inside:avoid;break-inside:avoid}
+  #watchlist-body.cols-2,#watchlist-body.cols-3{gap:8px}
+  *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
 }
 </style>
 </head>
@@ -321,6 +373,12 @@ body.edit-mode .add-group-btn{display:inline-block}
     <span class="ctrl-label">보기</span>
     <button class="seg" data-view="list" onclick="setView('list')">📋 리스트</button>
     <button class="seg" data-view="rank" onclick="setView('rank')">📊 등락률</button>
+  </div>
+  <div class="ctrl-group" id="cols-wrap">
+    <span class="ctrl-label">단</span>
+    <button class="seg" data-cols="1" onclick="setCols(1)">1단</button>
+    <button class="seg" data-cols="2" onclick="setCols(2)">2단</button>
+    <button class="seg" data-cols="3" onclick="setCols(3)">3단</button>
   </div>
   <div class="ctrl-group" id="flat-wrap">
     <label class="chk"><input type="checkbox" id="flat-view" onchange="toggleFlat()"/> 그룹 무시하고 전체 정렬</label>
@@ -365,6 +423,26 @@ let _flatView = false;
 let _view = 'list';            // 🆕 list | rank
 let _openSectors = {};         // 🆕 랭킹 뷰에서 펼친 섹터
 let _openGroups = {};          // 🆕 펼친 그룹
+let _cols = 2;                 // 🆕 그룹 다단 (1/2/3)
+
+function setCols(n){
+  _cols = n;
+  document.querySelectorAll('.seg[data-cols]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-cols') === String(n));
+  });
+  applyCols();
+  try { localStorage.setItem('wl_cols', String(n)); } catch(e){}
+}
+
+function applyCols(){
+  const body = document.getElementById('watchlist-body');
+  if(!body) return;
+  body.classList.remove('cols-2', 'cols-3');
+  // 랭킹 뷰나 flat 뷰는 다단 미적용
+  if(_view === 'rank' || _flatView) return;
+  if(_cols === 2) body.classList.add('cols-2');
+  if(_cols === 3) body.classList.add('cols-3');
+}
 
 function genId(){ return 'x' + Math.random().toString(36).slice(2, 10); }
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -417,6 +495,7 @@ function setSort(s){
 function toggleFlat(){
   _flatView = document.getElementById('flat-view').checked;
   renderBody();
+  applyCols();
 }
 
 // ── 🆕 뷰 전환 ────────────────────────────
@@ -428,8 +507,10 @@ function setView(v){
   // 랭킹 뷰에선 섹터 탭 / flat 체크박스 숨김
   const tabs = document.getElementById('sector-tabs');
   const flatWrap = document.getElementById('flat-wrap');
+  const colsWrap = document.getElementById('cols-wrap');
   if(tabs) tabs.style.display = (v === 'rank') ? 'none' : '';
   if(flatWrap) flatWrap.style.display = (v === 'rank') ? 'none' : '';
+  if(colsWrap) colsWrap.style.display = (v === 'rank') ? 'none' : '';
   render();
   // 랭킹 뷰는 전체 섹터 시세가 필요
   if(v === 'rank'){
@@ -505,11 +586,11 @@ function renderRank(){
   }
   html += '</div>';
 
-  // 헤더 안내
   const hint = isNxt
     ? '<div style="font-size:11px;color:#7a8099;margin-bottom:10px">📊 NXT 괴리율 기준 (KRX 종가 대비) · 섹터 클릭 → 그룹 → 종목</div>'
     : '<div style="font-size:11px;color:#7a8099;margin-bottom:10px">📊 평균 등락률 기준 · 섹터 클릭 → 그룹 → 종목</div>';
-  body.innerHTML = hint + html;
+  body.className = '';
+  body.innerHTML = '<div class="rank-wrap">' + hint + html + '</div>';
 }
 
 function renderRankGroups(sector, maxAbs){
@@ -691,8 +772,11 @@ function renderTabs(){
     const active = s.id === _data.currentSectorId;
     return '<button class="sector-tab ' + (active?'active':'') + '" data-sector-id="' + s.id + '" onclick="switchSector(\'' + s.id + '\')">' +
            (_editing ? '<span class="drag-dots" title="드래그로 순서 변경">⋮⋮</span>' : '') +
-           '<span class="sector-tab-name" contenteditable="' + (active && _editing ? 'true' : 'false') + '" onblur="renameSector(\'' + s.id + '\', this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">' + esc(s.name) + '</span>' +
-           (active && _editing ? ' <button class="btn-mini btn-danger" onclick="event.stopPropagation();deleteSector(\'' + s.id + '\')" style="background:transparent;border:0;color:#fff;padding:2px 4px;">✕</button>' : '') +
+           '<span class="sector-tab-name">' + esc(s.name) + '</span>' +
+           (active && _editing
+             ? ' <button class="tab-icon-btn" onclick="event.stopPropagation();renameSectorPrompt(\'' + s.id + '\')" title="이름 변경">✏️</button>' +
+               ' <button class="tab-icon-btn" onclick="event.stopPropagation();deleteSector(\'' + s.id + '\')" title="삭제">✕</button>'
+             : '') +
            '</button>';
   }).join('');
   if(_editing){
@@ -784,6 +868,7 @@ function renderBody(){
       '</tr></thead><tbody>' +
       sorted.map(st => renderStockRow(st._groupId, st, true)).join('') +
       '</tbody></table></div>';
+    applyCols();
     initSortableGroups();
     return;
   }
@@ -791,6 +876,7 @@ function renderBody(){
   if(!sector.groups.length){
     body.innerHTML = '<span class="content-empty">그룹이 없음. 편집 모드에서 그룹 추가.</span>' +
       (_editing ? '<div style="text-align:center"><button class="add-group-btn" onclick="addGroup()">+ 새 그룹</button></div>' : '');
+    applyCols();
     return;
   }
   let html = '';
@@ -801,6 +887,7 @@ function renderBody(){
     html += '<div style="text-align:center"><button class="add-group-btn" onclick="addGroup()">+ 새 그룹</button></div>';
   }
   body.innerHTML = html;
+  applyCols();
   initSortableGroups();
 }
 
@@ -839,7 +926,8 @@ function renderGroup(sectorId, group){
     '<div class="group-header">' +
       (_editing ? '<span class="group-drag" title="드래그로 순서 변경">⋮⋮</span>' : '') +
       '<span class="group-icon">📌</span>' +
-      '<span class="group-name" contenteditable="' + (_editing?'true':'false') + '" onblur="renameGroup(\'' + group.id + '\', this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">' + esc(group.name) + '</span>' +
+      '<span class="group-name">' + esc(group.name) + '</span>' +
+      (_editing ? '<button class="tab-icon-btn dark" onclick="renameGroupPrompt(\'' + group.id + '\')" title="이름 변경">✏️</button>' : '') +
       summary +
       (_editing ? '<span class="group-actions"><button class="btn btn-mini btn-danger" onclick="deleteGroup(\'' + group.id + '\')" title="그룹 삭제">🗑</button></span>' : '') +
     '</div>' +
@@ -849,6 +937,8 @@ function renderGroup(sectorId, group){
         '<input type="text" placeholder="종목명 입력 (예: 두산에너빌리티)" ' +
                'id="ac-input-' + group.id + '" autocomplete="off" ' +
                'oninput="acSearch(\'' + group.id + '\', this.value)" ' +
+               'oncompositionstart="_composing=true" ' +
+               'oncompositionend="_composing=false;acSearch(\'' + group.id + '\', this.value)" ' +
                'onkeydown="acKeydown(event, \'' + group.id + '\')" ' +
                'onblur="setTimeout(()=>acClose(\'' + group.id + '\'), 200)"/>' +
         '<div class="ac-list" id="ac-list-' + group.id + '"></div>' +
@@ -857,7 +947,7 @@ function renderGroup(sectorId, group){
     '</div>' +
     '<div class="add-stock manual" id="manual-' + group.id + '">' +
       '<input type="text" placeholder="종목코드 6자리" id="add-code-' + group.id + '" maxlength="6" style="max-width:160px"/>' +
-      '<input type="text" placeholder="종목명" id="add-name-' + group.id + '" onkeydown="if(event.key===\'Enter\')addStock(\'' + group.id + '\')"/>' +
+      '<input type="text" placeholder="종목명" id="add-name-' + group.id + '" onkeydown="if(event.key===\'Enter\' && !event.isComposing && event.keyCode!==229)addStock(\'' + group.id + '\')"/>' +
       '<button class="btn btn-primary" onclick="addStock(\'' + group.id + '\')">+ 추가</button>' +
     '</div>' +
     '</div>';
@@ -944,14 +1034,17 @@ function addSector(){
   scheduleSave();
 }
 
-function renameSector(id, el){
+function renameSectorPrompt(id){
   const s = _data.sectors.find(x => x.id === id);
-  const newName = (el.innerText || '').trim().slice(0, 30);
-  if(s && newName && newName !== s.name){
-    s.name = newName;
-    scheduleSave();
-  }
-  el.innerText = s ? s.name : '';
+  if(!s) return;
+  const v = prompt('섹터 이름 (이모지 포함 가능)', s.name);
+  if(v === null) return;
+  const name = v.trim().slice(0, 30);
+  if(!name || name === s.name) return;
+  s.name = name;
+  render();
+  scheduleSave();
+  showSaved('✅ 이름 변경됨');
 }
 
 function deleteSector(id){
@@ -976,16 +1069,19 @@ function addGroup(){
   scheduleSave();
 }
 
-function renameGroup(id, el){
+function renameGroupPrompt(id){
   const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
   if(!sector) return;
   const g = sector.groups.find(x => x.id === id);
-  const newName = (el.innerText || '').trim().slice(0, 30);
-  if(g && newName && newName !== g.name){
-    g.name = newName;
-    scheduleSave();
-  }
-  el.innerText = g ? g.name : '';
+  if(!g) return;
+  const v = prompt('그룹 이름', g.name);
+  if(v === null) return;
+  const name = v.trim().slice(0, 30);
+  if(!name || name === g.name) return;
+  g.name = name;
+  render();
+  scheduleSave();
+  showSaved('✅ 이름 변경됨');
 }
 
 function deleteGroup(id){
@@ -1003,8 +1099,10 @@ function deleteGroup(id){
 // ── 종목 관리 ─────────────────────────────
 // ── 🆕 종목명 자동완성 ────────────────────
 const _acState = {};   // { groupId: {timer, items, sel, q} }
+let _composing = false;   // 한글 IME 조합 중 여부
 
 function acSearch(groupId, q){
+  if(_composing) return;   // 조합 중엔 검색 안 함 (자모 단위 요청 방지)
   q = (q || '').trim();
   const st = _acState[groupId] = _acState[groupId] || {};
   if(st.timer) clearTimeout(st.timer);
@@ -1079,6 +1177,8 @@ function acSearch(groupId, q){
 }
 
 function acKeydown(e, groupId){
+  // IME 조합 중 Enter는 글자 확정용이므로 무시
+  if(_composing || e.isComposing || e.keyCode === 229) return;
   const st = _acState[groupId];
   const listEl = document.getElementById('ac-list-' + groupId);
   if(!st || !st.items || !st.items.length || !listEl || !listEl.classList.contains('open')){
@@ -1311,6 +1411,14 @@ function initControls(){
   });
   document.querySelectorAll('.seg[data-view]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-view') === _view);
+  });
+  // 저장된 단 수 복원
+  try {
+    const saved = parseInt(localStorage.getItem('wl_cols') || '2', 10);
+    if([1,2,3].includes(saved)) _cols = saved;
+  } catch(e){}
+  document.querySelectorAll('.seg[data-cols]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-cols') === String(_cols));
   });
   updateMarketHint();
   setInterval(updateMarketHint, 60000);
