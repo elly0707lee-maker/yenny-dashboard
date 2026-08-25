@@ -454,6 +454,91 @@ def api_telegram_pulse():
         return jsonify({"error": str(e)}), 500
 
 
+WATCHLIST_SHARE_TOKEN = os.environ.get("WATCHLIST_SHARE_TOKEN", "")
+
+
+def _share_ok(token: str) -> bool:
+    """공유 토큰 검증 (환경변수 미설정 시 공유 비활성)"""
+    if not WATCHLIST_SHARE_TOKEN:
+        return False
+    return token == WATCHLIST_SHARE_TOKEN
+
+
+@app.route("/w/<token>")
+def watchlist_share(token):
+    """관심종목 보기 전용 공유 페이지 — 대시보드 로그인 불필요."""
+    if not _share_ok(token):
+        return Response(
+            "<html><head><meta charset='utf-8'></head>"
+            "<body style='font-family:sans-serif;padding:60px;text-align:center;color:#666'>"
+            "<h2>🔒 유효하지 않은 링크</h2>"
+            "<p style='font-size:13px'>링크가 만료되었거나 잘못되었습니다.</p>"
+            "</body></html>",
+            status=403, mimetype="text/html")
+    html = get_watchlist_html()
+    # 보기 전용 플래그 + 공유 토큰 주입 (API_SECRET은 절대 노출 안 함)
+    inject = (f'<script>window._SHARE_TOKEN="{token}";'
+              f'window._READONLY=true;</script>')
+    html = html.replace('</head>', f'{inject}</head>', 1)
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/api/share/<token>/watchlist")
+def api_share_watchlist(token):
+    """공유 페이지용 — 관심종목 데이터 읽기 전용."""
+    if not _share_ok(token):
+        return jsonify({"error": "forbidden"}), 403
+    row = get_latest_post("watchlist")
+    if not row:
+        return jsonify({"content": "", "date": ""})
+    return jsonify({"content": row[0], "date": row[1]})
+
+
+@app.route("/api/share/<token>/quotes", methods=["POST"])
+def api_share_quotes(token):
+    """공유 페이지용 — 시세 조회 (읽기만)."""
+    if not _share_ok(token):
+        return jsonify({"error": "forbidden"}), 403
+    import time as _t
+    body = request.json or {}
+    codes = body.get("codes", [])
+    market = (body.get("market") or "UN").strip().upper()
+    if market not in ("J", "NX", "UN"):
+        market = "UN"
+    if not codes or not isinstance(codes, list):
+        return jsonify({"error": "codes list required"}), 400
+    # 공유 사용자는 최대 300종목까지만 (서버 보호)
+    codes = codes[:300]
+    cache_key = market + "|" + ",".join(sorted(str(c) for c in codes))
+    if _wl_cache["key"] == cache_key and (_t.time() - _wl_cache["at"]) < 10:
+        return jsonify({"ok": True, "quotes": _wl_cache["quotes"],
+                        "market": market, "cached": True})
+    try:
+        t0 = _t.time()
+        token_kis = get_kis_token()
+        quotes = fetch_quotes_with_gap(codes, kis_get, market,
+                                       token=token_kis,
+                                       app_key=KIS_APP_KEY,
+                                       app_secret=KIS_APP_SECRET)
+        _wl_cache["key"] = cache_key
+        _wl_cache["at"] = _t.time()
+        _wl_cache["quotes"] = quotes
+        return jsonify({"ok": True, "quotes": quotes, "market": market,
+                        "elapsed": round(_t.time() - t0, 2)})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/watchlist/share-link")
+@requires_auth
+def api_watchlist_share_link():
+    """본인용 — 공유 링크 경로 반환."""
+    if not WATCHLIST_SHARE_TOKEN:
+        return jsonify({"ok": False, "reason": "WATCHLIST_SHARE_TOKEN 미설정"})
+    return jsonify({"ok": True, "path": f"/w/{WATCHLIST_SHARE_TOKEN}"})
+
+
 @app.route("/watchlist")
 @requires_auth
 def watchlist_page():
