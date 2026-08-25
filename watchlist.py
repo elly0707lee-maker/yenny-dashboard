@@ -131,6 +131,26 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* 🔒 보기 전용 모드 — 편집 관련 UI 전부 숨김 */
+body.readonly #edit-btn,
+body.readonly #bulk-btn,
+body.readonly #share-btn,
+body.readonly .row-actions,
+body.readonly .add-stock,
+body.readonly .add-group-btn,
+body.readonly .sector-add,
+body.readonly .group-actions,
+body.readonly .tab-icon-btn,
+body.readonly .drag-dots,
+body.readonly .group-drag,
+body.readonly .topbar-actions a[href="/"]{display:none !important}
+body.readonly .share-badge{display:inline-flex}
+.share-badge{
+  display:none;align-items:center;gap:5px;
+  background:rgba(255,255,255,0.14);color:#fff;
+  padding:5px 12px;border-radius:16px;font-size:11.5px;font-weight:600;
+}
+
 /* 📦 큰 그룹 접기 */
 .big-collapsed{
   padding:14px;text-align:center;cursor:pointer;
@@ -484,9 +504,11 @@ body.edit-mode .add-group-btn{display:inline-block}
   <div class="topbar-title">📊 관심종목 시황</div>
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
+    <span class="share-badge">👀 보기 전용</span>
     <button class="btn" onclick="toggleEdit()" id="edit-btn">⚙️ 편집</button>
-    <button class="btn" onclick="openBulk()">📥 일괄 추가</button>
+    <button class="btn" onclick="openBulk()" id="bulk-btn">📥 일괄 추가</button>
     <button class="btn btn-primary" onclick="refreshStaged({force:true})" id="refresh-btn">🔄 시세 갱신</button>
+    <button class="btn" onclick="copyShareLink()" id="share-btn" title="보기 전용 링크 복사">🔗 공유</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
   </div>
 </div>
@@ -630,16 +652,33 @@ body.edit-mode .add-group-btn{display:inline-block}
 <script>
 (function(){
   const orig = window.fetch;
+  const RO = !!window._READONLY;
+  const TK = window._SHARE_TOKEN || '';
   window.fetch = function(url, opts){
     opts = opts || {};
     opts.headers = opts.headers || {};
     if(typeof url === 'string' && url.startsWith('/api')){
-      opts.headers['X-API-Secret'] = window._API_SECRET || '';
-      opts.credentials = 'include';
+      // 공유(보기 전용) 모드 — 토큰 기반 읽기 전용 엔드포인트로 우회
+      if(RO && TK){
+        if(url.startsWith('/api/post/watchlist')){
+          url = '/api/share/' + TK + '/watchlist';
+        } else if(url.startsWith('/api/watchlist/quotes')){
+          url = '/api/share/' + TK + '/quotes';
+        } else {
+          // 그 외 API는 차단
+          return Promise.resolve(new Response(
+            JSON.stringify({error: 'readonly'}), {status: 403}));
+        }
+      } else {
+        opts.headers['X-API-Secret'] = window._API_SECRET || '';
+        opts.credentials = 'include';
+      }
     }
     return orig(url, opts);
   };
 })();
+
+const _RO = !!window._READONLY;   // 보기 전용 모드
 
 let _data = {sectors: [], currentSectorId: null};
 let _quotes = {};
@@ -1037,11 +1076,13 @@ function sortStocks(stocks){
 
 // ── 저장 / 로드 ──────────────────────────
 function scheduleSave(){
+  if(_RO) return;              // 보기 전용 — 저장 안 함
   if(_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(saveNow, 800);
 }
 
 async function saveNow(){
+  if(_RO) return;              // 보기 전용 — 저장 안 함
   try {
     const body = JSON.stringify(_data);
     const res = await fetch('/api/post/watchlist', {
@@ -1091,6 +1132,12 @@ async function loadData(){
 }
 
 function initEmpty(){
+  if(_RO){
+    _data = {sectors: [], currentSectorId: null};
+    const body = document.getElementById('watchlist-body');
+    if(body) body.innerHTML = '<span class="content-empty">아직 등록된 관심종목이 없습니다</span>';
+    return;
+  }
   _data = {
     sectors: [
       {id: genId(), name: '⚛️ 원전', groups: [
@@ -2518,7 +2565,34 @@ document.addEventListener('keydown', (e) => {
 
 // ── 📥 일괄 추가 끝 ───────────────────────
 
+// 🔗 보기 전용 공유 링크 복사
+async function copyShareLink(){
+  try {
+    const res = await fetch('/api/watchlist/share-link');
+    const d = await res.json();
+    if(!d.ok){
+      alert('공유 링크가 아직 설정되지 않았습니다.\n\n' +
+            'Railway 환경변수에 WATCHLIST_SHARE_TOKEN 을 추가해주세요.\n' +
+            '(아무 긴 문자열이면 됩니다. 예: yenny-watch-9f3k2m)');
+      return;
+    }
+    const url = location.origin + d.path;
+    try {
+      await navigator.clipboard.writeText(url);
+      showSaved('🔗 공유 링크 복사됨 (보기 전용)');
+    } catch(e){
+      prompt('아래 링크를 복사해서 공유하세요 (보기 전용)', url);
+    }
+  } catch(e){
+    alert('오류: ' + (e.message || e));
+  }
+}
+
 function initControls(){
+  if(_RO){
+    document.body.classList.add('readonly');
+    document.title = '관심종목 시황 (보기 전용)';
+  }
   document.querySelectorAll('.seg[data-mkt]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market);
   });
