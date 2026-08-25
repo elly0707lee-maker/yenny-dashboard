@@ -1117,10 +1117,32 @@ function showSaved(msg){
 async function loadData(){
   try {
     const res = await fetch('/api/post/watchlist');
-    if(!res.ok){ initEmpty(); return; }
+    if(!res.ok){
+      if(_RO){
+        document.getElementById('watchlist-body').innerHTML =
+          '<span class="content-empty">⚠️ 데이터를 불러오지 못했습니다 (HTTP ' + res.status + ')</span>';
+        return;
+      }
+      initEmpty(); return;
+    }
     const data = await res.json();
-    if(!data || !data.content){ initEmpty(); return; }
-    try { _data = JSON.parse(data.content); } catch(e){ initEmpty(); return; }
+    if(!data || !data.content){
+      if(_RO){
+        document.getElementById('watchlist-body').innerHTML =
+          '<span class="content-empty">아직 등록된 관심종목이 없습니다</span>';
+        return;
+      }
+      initEmpty(); return;
+    }
+    try { _data = JSON.parse(data.content); }
+    catch(e){
+      if(_RO){
+        document.getElementById('watchlist-body').innerHTML =
+          '<span class="content-empty">⚠️ 데이터 형식 오류</span>';
+        return;
+      }
+      initEmpty(); return;
+    }
     if(!_data.sectors || !_data.sectors.length){ initEmpty(); return; }
     if(!_data.currentSectorId || !_data.sectors.find(s => s.id === _data.currentSectorId)){
       _data.currentSectorId = _data.sectors[0].id;
@@ -1128,7 +1150,15 @@ async function loadData(){
     render();
     updateNxtOnlyVisible();
     refreshStaged();
-  } catch(e){ console.error(e); initEmpty(); }
+  } catch(e){
+    console.error(e);
+    if(_RO){
+      document.getElementById('watchlist-body').innerHTML =
+        '<span class="content-empty">⚠️ 오류: ' + esc(String(e.message || e)) + '</span>';
+      return;
+    }
+    initEmpty();
+  }
 }
 
 function initEmpty(){
@@ -2622,8 +2652,10 @@ initControls();
 loadData();
 startAutoRefresh();
 
-// 종목 마스터 백그라운드 예열 (응답 안 기다림)
-fetch('/api/watchlist/master-warmup', {method:'POST'}).catch(() => {});
+// 종목 마스터 백그라운드 예열 (보기 전용에선 불필요)
+if(!_RO){
+  fetch('/api/watchlist/master-warmup', {method:'POST'}).catch(() => {});
+}
 </script>
 </body>
 </html>
