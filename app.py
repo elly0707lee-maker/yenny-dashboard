@@ -625,6 +625,34 @@ def api_share_stock_info(token):
                     "db_size": len(db)})
 
 
+@app.route("/api/watchlist/gap-debug")
+@requires_auth
+def api_watchlist_gap_debug():
+    """괴리율 계산 진단 — 종목 하나로 각 소스 값 확인."""
+    from watchlist import fetch_quotes_naver_bulk
+    code = (request.args.get("code") or "005930").strip()
+    session = (request.args.get("session") or "").strip().lower()
+    out = {"code": code, "session_param": session or "(auto)"}
+    try:
+        out["naver_bulk"] = fetch_quotes_naver_bulk([code])
+    except Exception as e:
+        out["naver_bulk"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+    try:
+        tk = get_kis_token()
+        out["kis_J"] = fetch_stock_quotes([code], kis_get, "J",
+                                          tk, KIS_APP_KEY, KIS_APP_SECRET)
+        out["kis_NX"] = fetch_stock_quotes([code], kis_get, "NX",
+                                           tk, KIS_APP_KEY, KIS_APP_SECRET)
+        out["result"] = fetch_quotes_with_gap([code], kis_get, "NX",
+                                              token=tk, app_key=KIS_APP_KEY,
+                                              app_secret=KIS_APP_SECRET,
+                                              session=session)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        out["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+    return jsonify(out)
+
+
 @app.route("/watchlist")
 @requires_auth
 def watchlist_page():
