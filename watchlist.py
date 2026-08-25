@@ -2897,16 +2897,18 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
         return fetch_stock_quotes(codes, kis_get_fn, market, token, app_key, app_secret)
 
     now = _dt.now()
-    today = now.strftime("%Y-%m-%d")
     mins = now.hour * 60 + now.minute
     intraday = (9 * 60) <= mins < (15 * 60 + 40)
-    after_close = mins >= 15 * 60 + 40
+    # 세션 구분 — 프리마켓은 '전일 종가', 애프터마켓은 '당일 종가'가 기준이라
+    # 같은 날이라도 캐시를 섞으면 안 된다.
+    session = "pre" if mins < 9 * 60 else "after"
+    today = now.strftime("%Y-%m-%d") + "-" + session
 
     if _krx_close_cache["date"] != today:
         _krx_close_cache["date"] = today
         _krx_close_cache["prices"] = {}
-    if _no_nxt_cache["date"] != today:
-        _no_nxt_cache["date"] = today
+    if _no_nxt_cache["date"] != now.strftime("%Y-%m-%d"):
+        _no_nxt_cache["date"] = now.strftime("%Y-%m-%d")
         _no_nxt_cache["codes"] = set()
 
     codes = [str(c).strip() for c in codes if str(c).strip()]
@@ -2932,53 +2934,59 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
             out[code] = q
         return out
 
-    # ⚡ KIS가 주는 기준가(stck_sdpr)가 곧 직전 KRX 정규장 종가.
-    #    프리마켓이면 어제 종가, 애프터마켓이면 오늘 종가 → 네이버 KRX 조회 불필요.
-    nx = fetch_stock_quotes(ask_nxt, kis_get_fn, "NX", token, app_key, app_secret) if ask_nxt else {}
+    # ⚡ 괴리율 기준은 '직전 KRX 정규장 마감가'.
+    #    프리마켓(장 시작 전) → 전일 종가
+    #    애프터마켓(장 마감 후) → 당일 종가
+    #    KIS 기준가(stck_sdpr)는 두 세션 모두 '전일 종가'라서 애프터에선 틀림.
+    #    → 네이버 일괄 조회로 실제 KRX 종가를 받아 기준으로 삼는다.
+    need_krx = [c for c in codes if c not in _krx_close_cache["prices"]]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        f_nx = ex.submit(fetch_stock_quotes, ask_nxt, kis_get_fn, "NX",
+                         token, app_key, app_secret) if ask_nxt else None
+        f_krx = ex.submit(fetch_quotes_naver_bulk, need_krx) if need_krx else None
+        nx = f_nx.result() if f_nx else {}
+        krx_new = f_krx.result() if f_krx else {}
 
     for c in ask_nxt:
         if not nx.get(c, {}).get("price"):
             _no_nxt_cache["codes"].add(c)
 
-    # NXT 체결이 없는 종목은 KRX 종가를 보여줘야 하므로 네이버로 보충
-    no_nxt_codes = [c for c in codes if not nx.get(c, {}).get("price")]
-    krx_fill = {}
-    if no_nxt_codes:
-        cached = {c: _krx_close_cache["prices"][c]
-                  for c in no_nxt_codes if c in _krx_close_cache["prices"]}
-        need = [c for c in no_nxt_codes if c not in cached]
-        if need:
-            fetched = fetch_quotes_naver_bulk(need)
-            if after_close:
-                for c, k in fetched.items():
-                    _krx_close_cache["prices"][c] = {
-                        "price": k.get("price", 0), "chg_pct": k.get("chg_pct"),
-                        "api_name": k.get("api_name", ""),
-                    }
-            cached.update(fetched)
-        krx_fill = cached
+    # 장중이 아니면 KRX 종가는 더 안 변하므로 캐시해도 안전
+    for c, k in krx_new.items():
+        if k.get("price"):
+            _krx_close_cache["prices"][c] = {
+                "price": k["price"], "chg_pct": k.get("chg_pct"),
+                "api_name": k.get("api_name", ""),
+            }
+    krx = dict(_krx_close_cache["prices"])
+    krx.update(krx_new)
 
     out = {}
-    # NXT 체결이 있는 종목 — 기준가로 괴리 계산
+    # NXT 체결이 있는 종목 — 실제 KRX 마감가 대비 괴리 계산
     for code, q in nx.items():
         if not q.get("price"):
             continue
         q = dict(q)
-        krx_close = q.get("prev_close", 0)      # = 직전 KRX 정규장 종가
+        k = krx.get(code, {})
+        # 네이버가 준 실제 KRX 종가 우선, 없으면 KIS 기준가로 폴백
+        krx_close = k.get("price") or q.get("prev_close", 0)
         q["market"] = "NX"
         q["krx_close"] = krx_close
+        q["krx_chg_pct"] = k.get("chg_pct")
         if krx_close:
             gap = q["price"] - krx_close
             q["gap"] = gap
             q["gap_pct"] = round(gap / krx_close * 100, 2)
         else:
-            q["gap"] = q.get("chg")
-            q["gap_pct"] = q.get("chg_pct")
+            q["gap"] = None
+            q["gap_pct"] = None
         out[code] = q
 
     # NXT 체결이 없는 종목 — KRX 종가 그대로, 괴리 0
-    for code, k in krx_fill.items():
+    for code, k in krx.items():
         if code in out or not k.get("price"):
+            continue
+        if code not in codes:
             continue
         out[code] = {
             "price": k["price"],
