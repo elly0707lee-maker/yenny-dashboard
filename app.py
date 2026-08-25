@@ -505,13 +505,14 @@ def api_share_quotes(token):
     body = request.json or {}
     codes = body.get("codes", [])
     market = (body.get("market") or "UN").strip().upper()
+    session = (body.get("session") or "").strip().lower()
     if market not in ("J", "NX", "UN"):
         market = "UN"
     if not codes or not isinstance(codes, list):
         return jsonify({"error": "codes list required"}), 400
     # 공유 사용자는 최대 300종목까지만 (서버 보호)
     codes = codes[:300]
-    cache_key = market + "|" + ",".join(sorted(str(c) for c in codes))
+    cache_key = market + "|" + session + "|" + ",".join(sorted(str(c) for c in codes))
     if _wl_cache["key"] == cache_key and (_t.time() - _wl_cache["at"]) < 10:
         return jsonify({"ok": True, "quotes": _wl_cache["quotes"],
                         "market": market, "cached": True})
@@ -521,7 +522,8 @@ def api_share_quotes(token):
         quotes = fetch_quotes_with_gap(codes, kis_get, market,
                                        token=token_kis,
                                        app_key=KIS_APP_KEY,
-                                       app_secret=KIS_APP_SECRET)
+                                       app_secret=KIS_APP_SECRET,
+                                       session=session)
         _wl_cache["key"] = cache_key
         _wl_cache["at"] = _t.time()
         _wl_cache["quotes"] = quotes
@@ -1156,6 +1158,7 @@ def api_watchlist_quotes():
     body = request.json or {}
     codes = body.get("codes", [])
     market = (body.get("market") or "UN").strip().upper()
+    session = (body.get("session") or "").strip().lower()
     force = bool(body.get("force"))
     if market not in ("J", "NX", "UN"):
         market = "UN"
@@ -1163,7 +1166,7 @@ def api_watchlist_quotes():
         return jsonify({"error": "codes list required"}), 400
 
     # 3초 캐시 — 여러 탭/중복 호출 방어
-    cache_key = market + "|" + ",".join(sorted(str(c) for c in codes))
+    cache_key = market + "|" + session + "|" + ",".join(sorted(str(c) for c in codes))
     if not force and _wl_cache["key"] == cache_key and (_t.time() - _wl_cache["at"]) < 3:
         return jsonify({"ok": True, "quotes": _wl_cache["quotes"],
                         "market": market, "cached": True})
@@ -1175,7 +1178,8 @@ def api_watchlist_quotes():
         quotes = fetch_quotes_with_gap(codes, kis_get, market,
                                     token=token,
                                     app_key=KIS_APP_KEY,
-                                    app_secret=KIS_APP_SECRET)
+                                    app_secret=KIS_APP_SECRET,
+                                    session=session)
         elapsed = round(_t.time() - t0, 2)
         _wl_cache["key"] = cache_key
         _wl_cache["at"] = _t.time()
