@@ -1150,6 +1150,11 @@ def api_save_post(pt):
     body = request.json or {}
     content = body.get("content", "")
     date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
+    if pt == "watchlist":
+        try:
+            print(f"[watchlist save] {len(content)}자 ({round(len(content)/1024,1)}KB)")
+        except Exception:
+            pass
     if not content:
         # mindmap/checkpoint/closing/onair/buzz/postit/tgpulse/watchlist는 빈 콘텐츠 저장 허용 (초기화용)
         if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse", "watchlist"):
