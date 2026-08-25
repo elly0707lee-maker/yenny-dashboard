@@ -131,6 +131,45 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* 📈 종목 상세 */
+.stock-name.clickable{cursor:pointer;border-bottom:1px dashed transparent}
+.stock-name.clickable:hover{color:#0984e3;border-bottom-color:#0984e3}
+.stock-quote{
+  display:flex;gap:18px;flex-wrap:wrap;
+  background:#f8f9fa;border-radius:8px;padding:12px 14px;margin-bottom:14px;
+}
+.sq-item{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.sq-item b{
+  display:block;font-size:10px;color:#7a8099;font-weight:600;
+  margin-bottom:2px;letter-spacing:.02em;
+}
+.stock-section{
+  font-size:11.5px;color:#7a8099;font-weight:700;
+  margin:14px 0 7px;padding-bottom:5px;border-bottom:1px solid #e5e7eb;
+}
+.stock-section:first-child{margin-top:0}
+.stock-places{display:flex;flex-direction:column;gap:5px}
+.stock-place{
+  display:flex;align-items:center;gap:10px;
+  background:#fff;border:1px solid #e5e7eb;border-radius:8px;
+  padding:9px 13px;cursor:pointer;transition:all .12s;
+}
+.stock-place:hover{border-color:#1a1d23;background:#f8f9fa}
+.sp-group{font-size:13px;font-weight:700}
+.sp-sector{font-size:11.5px;color:#7a8099}
+.sp-count{margin-left:auto;font-size:10.5px;color:#a8b0bd}
+.db-entry{
+  background:#fafbfc;border:1px solid #eceff1;border-radius:8px;
+  padding:10px 13px;margin-bottom:6px;
+}
+.db-theme{
+  display:inline-block;font-size:11px;font-weight:700;
+  background:#e8f4fd;color:#0277bd;padding:2px 9px;border-radius:10px;
+  margin-bottom:6px;
+}
+.db-desc{font-size:12.5px;line-height:1.6;color:#2d3436}
+.stock-empty{font-size:12px;color:#a8b0bd;font-style:italic;padding:10px 2px}
+
 /* 🔒 보기 전용 모드 — 편집 관련 UI 전부 숨김 */
 body.readonly #edit-btn,
 body.readonly #bulk-btn,
@@ -581,6 +620,20 @@ body.edit-mode .add-group-btn{display:inline-block}
 
 <div id="save-indicator" class="save-indicator">💾 저장됨</div>
 
+<!-- 📈 종목 상세 모달 -->
+<div id="stock-overlay" class="modal-overlay" onclick="if(event.target===this)closeStock()">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-head">
+      <span class="modal-title" id="stock-title">종목</span>
+      <button class="btn btn-mini" onclick="closeStock()">✕</button>
+    </div>
+    <div class="modal-body" id="stock-body"></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeStock()">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ↗ 그룹 이동 모달 -->
 <div id="move-overlay" class="modal-overlay" onclick="if(event.target===this)closeMove()">
   <div class="modal" style="max-width:440px">
@@ -664,6 +717,8 @@ body.edit-mode .add-group-btn{display:inline-block}
           url = '/api/share/' + TK + '/watchlist';
         } else if(url.startsWith('/api/watchlist/quotes')){
           url = '/api/share/' + TK + '/quotes';
+        } else if(url.startsWith('/api/watchlist/stock-info')){
+          url = url.replace('/api/watchlist/stock-info', '/api/share/' + TK + '/stock-info');
         } else {
           // 그 외 API는 차단
           return Promise.resolve(new Response(
@@ -1498,7 +1553,9 @@ function renderStockRow(groupId, st, showGroup){
     ? '<span class="hot">🔥</span>' : '';
 
   return '<tr class="stock-row" data-code="' + st.code + '">' +
-    '<td><span class="stock-name">' + esc(st.name) + '</span><span class="stock-code">' + esc(st.code) + '</span>' + mktBadge + hotBadge + '</td>' +
+    '<td><span class="stock-name clickable" onclick="openStock(\'' + st.code + '\',\'' +
+      esc(st.name).replace(/'/g, "\\'") + '\')">' + esc(st.name) + '</span>' +
+      '<span class="stock-code">' + esc(st.code) + '</span>' + mktBadge + hotBadge + '</td>' +
     groupCol +
     priceCols +
     '<td class="num">' + volume + '</td>' +
@@ -1968,6 +2025,91 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // 초기 컨트롤 상태 세팅
+// ── 📈 종목 상세 (워치리스트 위치 + K-Stock DB) ────
+async function openStock(code, name){
+  const ov = document.getElementById('stock-overlay');
+  const body = document.getElementById('stock-body');
+  document.getElementById('stock-title').textContent = name + '  ' + code;
+  ov.classList.add('open');
+
+  // 1) 워치리스트에서 이 종목이 속한 테마들
+  const places = [];
+  for(const s of _data.sectors){
+    for(const g of (s.groups || [])){
+      if((g.stocks || []).some(x => x.code === code)){
+        places.push({sectorId: s.id, groupId: g.id,
+                     sectorName: s.name, groupName: g.name,
+                     count: (g.stocks || []).length});
+      }
+    }
+  }
+
+  // 2) 현재 시세
+  const q = _quotes[code] || {};
+  const k = pctKey();
+  const v = q[k];
+  const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
+  const pct = (v === undefined || v === null) ? '—'
+            : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+  const isNxt = gapMode();
+
+  let html = '';
+  if(q.price){
+    html += '<div class="stock-quote">' +
+      (isNxt && q.krx_close
+        ? '<span class="sq-item"><b>KRX 마감</b>' + num(q.krx_close) + '</span>' +
+          '<span class="sq-item"><b>NXT</b>' + num(q.price) + '</span>' +
+          '<span class="sq-item ' + cls + '"><b>괴리율</b>' + pct + '</span>'
+        : '<span class="sq-item"><b>현재가</b>' + num(q.price) + '</span>' +
+          '<span class="sq-item ' + cls + '"><b>등락률</b>' + pct + '</span>') +
+      '<span class="sq-item"><b>거래량</b>' + num(q.volume || 0) + '</span>' +
+      '</div>';
+  }
+
+  // 워치리스트 위치
+  html += '<div class="stock-section">📁 내 워치리스트 테마 ' + places.length + '곳</div>';
+  if(!places.length){
+    html += '<div class="stock-empty">이 종목은 워치리스트에 없습니다</div>';
+  } else {
+    html += '<div class="stock-places">' + places.map(p =>
+      '<div class="stock-place" onclick="closeStock();gotoSignal(\'' + p.sectorId + '\',\'' + p.groupId + '\')">' +
+      '<span class="sp-group">' + esc(p.groupName) + '</span>' +
+      '<span class="sp-sector">' + esc(p.sectorName) + '</span>' +
+      '<span class="sp-count">' + p.count + '종목</span>' +
+      '</div>').join('') + '</div>';
+  }
+
+  // K-Stock DB — 로딩 표시 후 채움
+  html += '<div class="stock-section">📚 K-Stock DB</div>' +
+          '<div id="stock-db"><div class="stock-empty">불러오는 중...</div></div>';
+  body.innerHTML = html;
+
+  try {
+    const res = await fetch('/api/watchlist/stock-info?code=' + encodeURIComponent(code));
+    const d = await res.json();
+    const el = document.getElementById('stock-db');
+    if(!el) return;
+    const entries = d.entries || [];
+    if(!entries.length){
+      el.innerHTML = '<div class="stock-empty">DB에 등록된 정보가 없습니다' +
+        (d.db_size ? ' (' + d.db_size + '종목 중)' : '') + '</div>';
+      return;
+    }
+    el.innerHTML = entries.map(e =>
+      '<div class="db-entry">' +
+      (e.theme ? '<div class="db-theme">' + esc(e.theme) + '</div>' : '') +
+      (e.desc ? '<div class="db-desc">' + esc(e.desc) + '</div>' : '') +
+      '</div>').join('');
+  } catch(e){
+    const el = document.getElementById('stock-db');
+    if(el) el.innerHTML = '<div class="stock-empty">⚠️ ' + esc(String(e.message || e)) + '</div>';
+  }
+}
+
+function closeStock(){
+  document.getElementById('stock-overlay').classList.remove('open');
+}
+
 // ── ↗ 그룹을 다른 섹터로 이동 ────────────────
 let _moveGroupId = null;
 
@@ -2588,6 +2730,8 @@ document.addEventListener('keydown', (e) => {
     if(ov && ov.classList.contains('open')) closeBulk();
     const mv = document.getElementById('move-overlay');
     if(mv && mv.classList.contains('open')) closeMove();
+    const sv = document.getElementById('stock-overlay');
+    if(sv && sv.classList.contains('open')) closeStock();
     const fb = document.getElementById('find-result');
     if(fb) fb.classList.remove('open');
   }
