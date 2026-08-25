@@ -956,7 +956,11 @@ function visibleStocks(stocks){
   if(!_nxtOnly || _market !== 'NX') return stocks || [];
   return (stocks || []).filter(s => {
     const q = _quotes[s.code];
-    return q && !q.no_nxt && q.volume > 0;
+    if(!q || q.no_nxt) return false;
+    // 거래량이 있거나, KRX 종가와 값이 다르면 시간외 체결로 인정
+    if(q.volume > 0) return true;
+    const g = gapOf(q);
+    return g.pct !== null && g.pct !== 0;
   });
 }
 
@@ -3098,7 +3102,12 @@ def fetch_stock_quotes(codes: list, kis_get_fn, market: str = "UN",
 
 
 _krx_close_cache = {"date": "", "prices": {}}    # {code: {price, chg_pct}}
-_no_nxt_cache = {"date": "", "codes": set()}     # 오늘 NXT 체결이 없던 종목
+_no_nxt_cache = {"key": "", "at": 0.0, "codes": set()}   # 세션별 NXT 미거래 종목
+
+
+def _nxt_session_active(mins: int) -> bool:
+    """NXT 실제 거래 시간대인지 (프리 08:00~09:00 / 애프터 15:40~20:00)"""
+    return (8 * 60 <= mins < 9 * 60) or (15 * 60 + 40 <= mins < 20 * 60)
 
 
 def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
@@ -3141,13 +3150,21 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
     if _krx_close_cache["date"] != today:
         _krx_close_cache["date"] = today
         _krx_close_cache["prices"] = {}
-    if _no_nxt_cache["date"] != now.strftime("%Y-%m-%d"):
-        _no_nxt_cache["date"] = now.strftime("%Y-%m-%d")
+
+    # NXT 미거래 캐시 — 세션별로 분리하고 20분마다 만료.
+    # (세션 시작 전에 조회한 결과가 하루 종일 남아 거래 종목을 가리는 걸 방지)
+    import time as _tt
+    nn_key = today
+    session_live = _nxt_session_active(mins)
+    if _no_nxt_cache["key"] != nn_key or (_tt.time() - _no_nxt_cache["at"]) > 1200:
+        _no_nxt_cache["key"] = nn_key
+        _no_nxt_cache["at"] = _tt.time()
         _no_nxt_cache["codes"] = set()
 
     codes = [str(c).strip() for c in codes if str(c).strip()]
-    # 오늘 NXT 체결이 없던 종목은 KIS 조회에서 제외
-    ask_nxt = [c for c in codes if c not in _no_nxt_cache["codes"]]
+    # 세션이 살아있을 때만 스킵 목록을 활용 (그 외엔 전 종목 조회)
+    ask_nxt = ([c for c in codes if c not in _no_nxt_cache["codes"]]
+               if session_live else list(codes))
     skipped = len(codes) - len(ask_nxt)
     if skipped:
         print(f"[watchlist] NXT 미거래 {skipped}종목 스킵")
@@ -3155,9 +3172,10 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
     # 정규장 중에는 괴리율이 무의미 → NXT만
     if intraday:
         nx = fetch_stock_quotes(ask_nxt, kis_get_fn, "NX", token, app_key, app_secret) if ask_nxt else {}
-        for c in ask_nxt:
-            if not nx.get(c, {}).get("price"):
-                _no_nxt_cache["codes"].add(c)
+        if session_live:
+            for c in ask_nxt:
+                if not nx.get(c, {}).get("price"):
+                    _no_nxt_cache["codes"].add(c)
         out = {}
         for code, q in nx.items():
             q = dict(q)
@@ -3192,9 +3210,11 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
             if k.get("price"):
                 krx_new[c] = k
 
-    for c in ask_nxt:
-        if not nx.get(c, {}).get("price"):
-            _no_nxt_cache["codes"].add(c)
+    # 세션이 실제로 열려 있을 때만 '미거래'로 기록 (그 외엔 판단 근거가 없음)
+    if session_live:
+        for c in ask_nxt:
+            if not nx.get(c, {}).get("price"):
+                _no_nxt_cache["codes"].add(c)
 
     # 장중이 아니면 KRX 종가는 더 안 변하므로 캐시해도 안전
     for c, k in krx_new.items():
