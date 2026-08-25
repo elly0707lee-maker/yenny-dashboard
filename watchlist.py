@@ -806,6 +806,7 @@ function updateGapButtons(){
 function setMarket(mkt){
   if(_market === mkt) return;
   _market = mkt;
+  try { localStorage.setItem('wl_market', mkt); } catch(e){}
   document.querySelectorAll('.seg[data-mkt]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkt') === mkt);
   });
@@ -819,6 +820,7 @@ function setMarket(mkt){
 
 function setSort(s){
   _sort = s;
+  try { localStorage.setItem('wl_sort', s); } catch(e){}
   document.querySelectorAll('.seg[data-sort]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-sort') === s);
   });
@@ -834,6 +836,7 @@ function toggleFlat(){
 // ── 🆕 뷰 전환 ────────────────────────────
 function setView(v){
   _view = v;
+  try { localStorage.setItem('wl_view', v); } catch(e){}
   document.querySelectorAll('.seg[data-view]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-view') === v);
   });
@@ -2767,6 +2770,18 @@ function initControls(){
     document.body.classList.add('readonly');
     document.title = '관심종목 시황 (보기 전용)';
   }
+  // 저장된 선택 복원 (새로고침해도 유지)
+  try {
+    const mk = localStorage.getItem('wl_market');
+    if(['UN','J','NX'].includes(mk)) _market = mk;
+    const so = localStorage.getItem('wl_sort');
+    if(['manual','chg_desc','chg_asc','vol_desc','gap_desc','gap_asc'].includes(so)) _sort = so;
+    const vw = localStorage.getItem('wl_view');
+    if(['list','rank'].includes(vw)) _view = vw;
+    const saved = parseInt(localStorage.getItem('wl_cols') || '2', 10);
+    if([1,2,3].includes(saved)) _cols = saved;
+  } catch(e){}
+
   document.querySelectorAll('.seg[data-mkt]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market);
   });
@@ -2776,11 +2791,6 @@ function initControls(){
   document.querySelectorAll('.seg[data-view]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-view') === _view);
   });
-  // 저장된 단 수 복원
-  try {
-    const saved = parseInt(localStorage.getItem('wl_cols') || '2', 10);
-    if([1,2,3].includes(saved)) _cols = saved;
-  } catch(e){}
   document.querySelectorAll('.seg[data-cols]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-cols') === String(_cols));
   });
@@ -2788,6 +2798,16 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-scope') === _rankScope);
   });
   updateNxtOnlyVisible();
+  // 복원된 뷰에 맞춰 컨트롤 표시
+  const tabs = document.getElementById('sector-tabs');
+  const flatWrap = document.getElementById('flat-wrap');
+  const colsWrap = document.getElementById('cols-wrap');
+  const scopeWrap = document.getElementById('rank-scope-wrap');
+  const isRank = (_view === 'rank');
+  if(tabs) tabs.style.display = isRank ? 'none' : '';
+  if(flatWrap) flatWrap.style.display = isRank ? 'none' : '';
+  if(colsWrap) colsWrap.style.display = isRank ? 'none' : '';
+  if(scopeWrap) scopeWrap.style.display = isRank ? '' : 'none';
   updateMarketHint();
   setInterval(updateMarketHint, 60000);
 }
