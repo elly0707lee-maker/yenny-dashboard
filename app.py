@@ -541,6 +541,88 @@ def api_watchlist_share_link():
     return jsonify({"ok": True, "path": f"/w/{WATCHLIST_SHARE_TOKEN}"})
 
 
+_kstock_cache = {"loaded": 0.0, "by_code": {}}
+
+
+def _load_kstock_db():
+    """K-Stock 시트 → {종목코드: [{테마, 특징, 종목명}, ...]} (6시간 캐시)"""
+    import time as _t
+    if _kstock_cache["by_code"] and (_t.time() - _kstock_cache["loaded"]) < 21600:
+        return _kstock_cache["by_code"]
+
+    SHEET_ID = os.environ.get("KSTOCK_SHEET_ID") or os.environ.get("SHEET_ID", "")
+    if not SHEET_ID:
+        return {}
+    try:
+        import csv as _csv, io as _io2
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+        r = requests.get(url, timeout=20)
+        r.encoding = "utf-8"
+        rows = list(_csv.DictReader(_io2.StringIO(r.text)))
+
+        def col(row, *keys):
+            for k, v in row.items():
+                if not k:
+                    continue
+                kk = str(k).replace(" ", "")
+                for want in keys:
+                    if want in kk:
+                        return (v or "").strip()
+            return ""
+
+        by_code = {}
+        for row in rows:
+            code_raw = col(row, "종목코드", "코드")
+            m = re.search(r"(\d{6})", code_raw or "")
+            if not m:
+                continue
+            code = m.group(1)
+            entry = {
+                "name": col(row, "종목명"),
+                "theme": col(row, "테마"),
+                "desc": col(row, "특징", "설명"),
+            }
+            if not entry["theme"] and not entry["desc"]:
+                continue
+            by_code.setdefault(code, []).append(entry)
+
+        if by_code:
+            _kstock_cache["by_code"] = by_code
+            _kstock_cache["loaded"] = _t.time()
+            print(f"[kstock db] {len(by_code)}종목 로드")
+        return by_code
+    except Exception as e:
+        print(f"[kstock db] 로드 실패: {e}")
+        return _kstock_cache["by_code"]
+
+
+@app.route("/api/watchlist/stock-info")
+@requires_auth
+def api_watchlist_stock_info():
+    """종목코드 → K-Stock DB의 테마·설명"""
+    code = (request.args.get("code") or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        return jsonify({"ok": False, "error": "invalid code"}), 400
+    db = _load_kstock_db()
+    return jsonify({"ok": True, "code": code,
+                    "entries": db.get(code, []),
+                    "db_size": len(db)})
+
+
+@app.route("/api/share/<token>/stock-info")
+def api_share_stock_info(token):
+    """공유 페이지용 — 종목 정보 읽기 전용"""
+    if not _share_ok(token):
+        return jsonify({"error": "forbidden"}), 403
+    code = (request.args.get("code") or "").strip()
+    if not re.fullmatch(r"\d{6}", code):
+        return jsonify({"ok": False, "error": "invalid code"}), 400
+    db = _load_kstock_db()
+    return jsonify({"ok": True, "code": code,
+                    "entries": db.get(code, []),
+                    "db_size": len(db)})
+
+
 @app.route("/watchlist")
 @requires_auth
 def watchlist_page():
