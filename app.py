@@ -488,10 +488,12 @@ def api_share_watchlist(token):
     """공유 페이지용 — 관심종목 데이터 읽기 전용."""
     if not _share_ok(token):
         return jsonify({"error": "forbidden"}), 403
-    row = get_latest_post("watchlist")
-    if not row:
+    data = get_latest_post("watchlist")
+    if not data:
+        print("[share] watchlist 데이터 없음")
         return jsonify({"content": "", "date": ""})
-    return jsonify({"content": row[0], "date": row[1]})
+    print(f"[share] watchlist {len(data.get('content') or '')}자 전달")
+    return jsonify(data)
 
 
 @app.route("/api/share/<token>/quotes", methods=["POST"])
