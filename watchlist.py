@@ -591,7 +591,7 @@ body.edit-mode .add-group-btn{display:inline-block}
         </div>
         <div class="bulk-target-row">
           <span class="ctrl-label">그룹</span>
-          <select id="bulk-group"></select>
+          <select id="bulk-group" onchange="updateBulkButton();parseBulk()"></select>
           <button class="btn btn-mini" onclick="bulkNewGroup()">+ 새 그룹</button>
         </div>
       </div>
@@ -953,13 +953,27 @@ function scheduleSave(){
 
 async function saveNow(){
   try {
+    const body = JSON.stringify(_data);
     const res = await fetch('/api/post/watchlist', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: JSON.stringify(_data), date: new Date().toISOString().slice(0,10)})
+      body: JSON.stringify({content: body, date: new Date().toISOString().slice(0,10)})
     });
-    if(res.ok) showSaved();
-  } catch(e){ console.error(e); }
+    if(res.ok){
+      showSaved();
+    } else {
+      const txt = await res.text();
+      showSaved('⚠️ 저장 실패 HTTP ' + res.status);
+      console.error('save failed', res.status, txt.slice(0, 300));
+      alert('저장에 실패했습니다 (HTTP ' + res.status + ')\n' +
+            '데이터 크기: ' + Math.round(body.length / 1024) + 'KB\n\n' +
+            txt.slice(0, 200));
+    }
+  } catch(e){
+    showSaved('⚠️ 저장 오류');
+    console.error(e);
+    alert('저장 중 오류: ' + (e.message || e));
+  }
 }
 
 function showSaved(msg){
@@ -2100,6 +2114,7 @@ function gotoSignal(sectorId, groupId){
 
 // ── 📥 엑셀 일괄 추가 ─────────────────────
 let _bulkRows = [];   // [{code, name, dup}]
+let _bulkSkipped = 0; // 종목코드를 못 찾아 건너뛴 줄 수
 
 function openBulk(){
   document.getElementById('bulk-overlay').classList.add('open');
@@ -2132,7 +2147,21 @@ function onBulkSectorChange(){
     gs.innerHTML = s.groups.map(g =>
       '<option value="' + g.id + '">' + esc(g.name) + '</option>').join('');
   }
+  updateBulkButton();
   parseBulk();
+}
+
+// 어디로 들어갈지 버튼에 표시
+function updateBulkButton(){
+  const btn = document.getElementById('bulk-apply');
+  if(!btn) return;
+  const sid = document.getElementById('bulk-sector').value;
+  const gid = document.getElementById('bulk-group').value;
+  const s = _data.sectors.find(x => x.id === sid);
+  const g = s && s.groups.find(x => x.id === gid);
+  btn.textContent = (s && g)
+    ? '「' + s.name + ' › ' + g.name + '」에 추가'
+    : '추가하기';
 }
 
 function bulkNewSector(){
@@ -2165,52 +2194,63 @@ function bulkNewGroup(){
 }
 
 // 붙여넣은 텍스트에서 (종목명, 6자리코드) 추출
+// 엑셀 한 행은 반드시 종목코드를 포함하므로,
+// 코드가 나올 때까지 줄을 모아 하나의 레코드로 본다.
+// (셀 안 줄바꿈이나 따옴표가 꼬여도 안전)
 function parseBulk(){
   const text = document.getElementById('bulk-input').value || '';
   const lines = text.split(/\r?\n/);
   const rows = [];
   const seen = new Set();
 
-  // 대상 그룹의 기존 종목 (중복 판정용)
   const sid = document.getElementById('bulk-sector').value;
   const gid = document.getElementById('bulk-group').value;
   const s = _data.sectors.find(x => x.id === sid);
   const g = s && s.groups.find(x => x.id === gid);
   const existing = new Set((g && g.stocks || []).map(x => x.code));
 
-  for(const raw of lines){
-    const line = raw.trim();
-    if(!line) continue;
-    // 탭 우선, 없으면 2칸 이상 공백 / 쉼표로 분리
-    let cells = line.includes('\t') ? line.split('\t')
-              : (line.includes(',') ? line.split(',') : line.split(/\s{2,}/));
-    cells = cells.map(c => c.trim()).filter(c => c !== '');
-    if(!cells.length) continue;
+  const splitCells = (line) =>
+    (line.includes('\t') ? line.split('\t')
+      : (line.includes(',') ? line.split(',') : line.split(/\s{2,}/)))
+    .map(c => c.replace(/^"+|"+$/g, '').trim());
 
-    // 6자리 숫자 = 종목코드 (앞의 A 접두어 허용)
-    let code = null, codeIdx = -1;
-    for(let i = 0; i < cells.length; i++){
-      const m = cells[i].match(/^[A-Za-z]?(\d{6})$/);
-      if(m){ code = m[1]; codeIdx = i; break; }
+  let buf = [];          // 아직 코드를 못 만난 줄들
+  let skipped = 0;
+
+  for(const raw of lines){
+    if(!raw.trim() && !buf.length) continue;
+    buf.push(raw);
+
+    // 이번 줄에서 6자리 코드 찾기
+    const cells = splitCells(raw);
+    let code = null;
+    for(const c of cells){
+      const m = c.match(/^[A-Za-z]?(\d{6})$/);
+      if(m){ code = m[1]; break; }
     }
-    if(!code) continue;              // 코드 없는 줄은 헤더 등으로 보고 무시
+    if(!code) continue;   // 아직 레코드 끝이 아님 → 계속 누적
+
+    // 종목명 = 레코드 첫 줄의 첫 셀 (그게 코드면 두 번째 셀)
+    const head = splitCells(buf[0]).filter(c => c !== '');
+    let name = '';
+    for(const c of head){
+      if(/^[A-Za-z]?\d{6}$/.test(c)) continue;
+      if(!c) continue;
+      name = c.length > 25 ? c.slice(0, 25) : c;
+      break;
+    }
+    buf = [];
+
+    if(!name) name = code;
     if(seen.has(code)) continue;
     seen.add(code);
-
-    // 종목명 = 코드가 아닌 셀 중 가장 짧고 앞쪽인 것 (설명 컬럼 배제)
-    let name = '';
-    let best = 999;
-    for(let i = 0; i < cells.length; i++){
-      if(i === codeIdx) continue;
-      const c = cells[i];
-      if(!c || /^\d+$/.test(c)) continue;
-      if(c.length > 25) continue;                 // 긴 설명 제외
-      if(i < best && c.length <= 25){ name = c; best = i; }
-    }
-    if(!name) name = code;
     rows.push({code, name, dup: existing.has(code)});
   }
+  // 코드 없이 남은 줄
+  if(buf.length && buf.join('').trim()) skipped = 1;
+
   _bulkRows = rows;
+  _bulkSkipped = skipped;
   renderBulkPreview();
 }
 
@@ -2218,8 +2258,9 @@ function renderBulkPreview(){
   const el = document.getElementById('bulk-preview');
   const cnt = document.getElementById('bulk-count');
   const dupN = _bulkRows.filter(r => r.dup).length;
-  cnt.textContent = '인식된 종목 ' + _bulkRows.length + '개' +
-    (dupN ? ' (이미 있는 종목 ' + dupN + '개)' : '');
+  cnt.innerHTML = '인식된 종목 ' + _bulkRows.length + '개' +
+    (dupN ? ' (이미 있는 종목 ' + dupN + '개)' : '') +
+    (_bulkSkipped ? ' <span style="color:#e17055">· 코드 없는 줄 ' + _bulkSkipped + '개 건너뜀</span>' : '');
   if(!_bulkRows.length){
     el.innerHTML = '<div class="empty">엑셀에서 복사한 내용을 붙여넣으면 여기에 미리보기가 나옵니다</div>';
     return;
@@ -2243,25 +2284,40 @@ function applyBulk(){
   const g = s.groups.find(x => x.id === gid);
   if(!g){ alert('그룹을 선택하거나 + 새 그룹으로 만들어주세요'); return; }
 
-  const skipDup = document.getElementById('bulk-skip-dup').checked;
   const existing = new Set(g.stocks.map(x => x.code));
   let added = 0, skipped = 0;
   for(const r of _bulkRows){
-    if(existing.has(r.code)){
-      if(skipDup){ skipped++; continue; }
-      skipped++; continue;   // 같은 그룹 내 중복은 항상 건너뜀
-    }
+    if(existing.has(r.code)){ skipped++; continue; }
     g.stocks.push({code: r.code, name: r.name});
     existing.add(r.code);
     added++;
   }
 
+  if(added === 0){
+    alert('추가된 종목이 없습니다.\n' +
+          '「' + s.name + ' › ' + g.name + '」에 이미 ' + skipped + '개가 모두 있습니다.');
+    return;
+  }
+
   _data.currentSectorId = s.id;
+  _expandedBig[g.id] = true;      // 큰 그룹이면 펼쳐서 보이게
   closeBulk();
   render();
   scheduleSave();
-  showSaved('✅ ' + added + '종목 추가' + (skipped ? ' · ' + skipped + '개 건너뜀' : ''));
-  // 새로 추가된 종목 시세 조회
+
+  // 어디에 들어갔는지 분명히 알리고 그 위치로 이동
+  showSaved('✅ 「' + s.name + ' › ' + g.name + '」에 ' + added + '종목 추가' +
+            (skipped ? ' · ' + skipped + '개 중복 제외' : ''));
+  setTimeout(() => {
+    const el = document.querySelector('[data-group-id="' + g.id + '"]');
+    if(el){
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+      el.style.transition = 'box-shadow .3s';
+      el.style.boxShadow = '0 0 0 3px rgba(26,29,35,0.25)';
+      setTimeout(() => { el.style.boxShadow = ''; }, 1500);
+    }
+  }, 100);
+
   const codes = _bulkRows.map(r => r.code);
   if(codes.length) refreshQuotes(codes, {force:true});
 }
