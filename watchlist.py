@@ -918,10 +918,11 @@ function gapMode(){
   return (_market === 'NX') && isOffHourSession();
 }
 
-// 서버가 gap을 안 줘도 화면에서 직접 계산 (KRX 종가만 있으면 됨)
+// 괴리 계산 — 기준은 반드시 실제 KRX 마감가(krx_close).
+// prev_close(KIS 기준가)는 애프터마켓에서 전일 종가라 기준으로 쓰면 안 됨.
 function gapOf(q){
   if(!q) return {gap:null, pct:null, base:0};
-  const base = q.krx_close || q.prev_close || 0;
+  const base = q.krx_close || 0;
   if(q.gap_pct !== undefined && q.gap_pct !== null){
     return {gap: q.gap, pct: q.gap_pct, base: base};
   }
@@ -2398,8 +2399,8 @@ function detectSignals(){
       // ③ 그룹 내 분열 (최고 - 최저)
       const maxV = Math.max(...vals), minV = Math.min(...vals);
       if((maxV - minV) >= SIG.SPLIT_GAP && stocks.length >= 3){
-        const top = stocks.find(s => _quotes[s.code][k] === maxV);
-        const bot = stocks.find(s => _quotes[s.code][k] === minV);
+        const top = stocks.find(s => pctOf(s.code) === maxV);
+        const bot = stocks.find(s => pctOf(s.code) === minV);
         out.push(Object.assign({}, base, {
           type: 'split', icon: '↔️', score: (maxV - minV) / 2,
           detail: (top ? top.name : '') + ' ' + (maxV>0?'+':'') + maxV.toFixed(1) + '% ↔ ' +
@@ -3180,6 +3181,17 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
         nx = f_nx.result() if f_nx else {}
         krx_new = f_krx.result() if f_krx else {}
 
+    # ⚠️ 네이버가 못 준 종목은 KIS 정규장(J)으로 보충.
+    #    KIS 기준가(prev_close)는 애프터마켓에서도 '전일 종가'라 괴리 기준으로 쓰면 안 됨.
+    miss_krx = [c for c in need_krx if c not in krx_new]
+    if miss_krx:
+        print(f"[watchlist] 네이버 KRX 미수신 {len(miss_krx)}종목 → KIS(J) 보충")
+        krx_kis = fetch_stock_quotes(miss_krx, kis_get_fn, "J",
+                                     token, app_key, app_secret)
+        for c, k in krx_kis.items():
+            if k.get("price"):
+                krx_new[c] = k
+
     for c in ask_nxt:
         if not nx.get(c, {}).get("price"):
             _no_nxt_cache["codes"].add(c)
@@ -3201,11 +3213,13 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
             continue
         q = dict(q)
         k = krx.get(code, {})
-        # 네이버가 준 실제 KRX 종가 우선, 없으면 KIS 기준가로 폴백
-        krx_close = k.get("price") or q.get("prev_close", 0)
+        # ⚠️ 반드시 실제 KRX 종가만 기준으로 사용.
+        #    KIS 기준가(prev_close)는 애프터마켓에서 전일 종가라 폴백으로 쓰면 안 됨.
+        krx_close = k.get("price") or 0
         q["market"] = "NX"
         q["krx_close"] = krx_close
         q["krx_chg_pct"] = k.get("chg_pct")
+        q["session"] = sess
         if krx_close:
             gap = q["price"] - krx_close
             q["gap"] = gap
