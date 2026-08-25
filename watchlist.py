@@ -259,6 +259,10 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .bulk-preview td{padding:6px 10px;font-size:12px;border-bottom:1px solid #f1f3f5}
 .bulk-preview tr.dup{background:#fff8e1;color:#a06d00}
+.bulk-preview tr.missing{background:#fff5f5}
+.bulk-preview tr.missing td{font-weight:600}
+.bulk-mode{display:flex;gap:6px;margin:10px 0 4px}
+.bulk-mode .seg{padding:6px 14px;font-size:12px}
 .bulk-preview tr.dup td:last-child{font-size:10.5px}
 .bulk-preview .empty{padding:24px;text-align:center;color:#b2bec3;font-size:12px;font-style:italic}
 
@@ -276,6 +280,11 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   transition:transform .15s;flex:0 0 auto;
 }
 .rank-row.open .rank-caret{transform:rotate(90deg);color:#1a1d23}
+.rank-idx{
+  font-size:11px;font-weight:700;color:#a8b0bd;
+  min-width:20px;text-align:right;flex:0 0 auto;
+  font-variant-numeric:tabular-nums;
+}
 .rank-name{font-size:15px;font-weight:700;flex:0 0 auto}
 .rank-count{font-size:11px;color:#a8b0bd;flex:0 0 auto}
 .rank-bar-wrap{
@@ -506,6 +515,11 @@ body.edit-mode .add-group-btn{display:inline-block}
     <button class="seg" data-view="list" onclick="setView('list')">📋 리스트</button>
     <button class="seg" data-view="rank" onclick="setView('rank')">📊 등락률</button>
   </div>
+  <div class="ctrl-group" id="rank-scope-wrap" style="display:none">
+    <span class="ctrl-label">순위</span>
+    <button class="seg" data-scope="sector" onclick="setRankScope('sector')">섹터별</button>
+    <button class="seg" data-scope="group" onclick="setRankScope('group')">세부 테마별</button>
+  </div>
   <div class="ctrl-group" id="cols-wrap">
     <span class="ctrl-label">단</span>
     <button class="seg" data-cols="1" onclick="setCols(1)">1단</button>
@@ -576,14 +590,18 @@ body.edit-mode .add-group-btn{display:inline-block}
       <button class="btn btn-mini" onclick="closeBulk()">✕</button>
     </div>
     <div class="modal-body">
-      <div class="bulk-hint">
+      <div class="bulk-hint" id="bulk-hint-text">
         엑셀에서 <b>종목명·종목코드가 포함된 범위를 그대로 복사</b>해서 아래에 붙여넣으세요.
         열 순서·개수는 상관없고, 6자리 숫자를 종목코드로 자동 인식합니다.
       </div>
       <textarea id="bulk-input" placeholder="대명에너지&#9;태양광/풍력&#9;...&#9;389260&#10;태경비케이&#9;탄소포집&#9;...&#9;014580"
         oninput="parseBulk()" onpaste="setTimeout(parseBulk, 30)"></textarea>
 
-      <div class="bulk-target">
+      <div class="bulk-mode">
+        <button class="seg active" data-bmode="add" onclick="setBulkMode('add')">➕ 추가하기</button>
+        <button class="seg" data-bmode="check" onclick="setBulkMode('check')">🔍 빠진 것만 확인</button>
+      </div>
+      <div class="bulk-target" id="bulk-target-wrap">
         <div class="bulk-target-row">
           <span class="ctrl-label">섹터</span>
           <select id="bulk-sector" onchange="onBulkSectorChange()"></select>
@@ -728,9 +746,11 @@ function setView(v){
   const tabs = document.getElementById('sector-tabs');
   const flatWrap = document.getElementById('flat-wrap');
   const colsWrap = document.getElementById('cols-wrap');
+  const scopeWrap = document.getElementById('rank-scope-wrap');
   if(tabs) tabs.style.display = (v === 'rank') ? 'none' : '';
   if(flatWrap) flatWrap.style.display = (v === 'rank') ? 'none' : '';
   if(colsWrap) colsWrap.style.display = (v === 'rank') ? 'none' : '';
+  if(scopeWrap) scopeWrap.style.display = (v === 'rank') ? '' : 'none';
   render();
   if(v === 'rank'){
     const all = allCodesEverywhere();
@@ -809,7 +829,77 @@ function sectorStats(sector){
 }
 
 // ── 🆕 랭킹 뷰 렌더 ────────────────────────
+let _rankScope = 'sector';   // sector | group
+
+function setRankScope(sc){
+  _rankScope = sc;
+  document.querySelectorAll('.seg[data-scope]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-scope') === sc);
+  });
+  renderRank();
+}
+
+// 🆕 세부 테마(그룹) 전체 순위 — 섹터 구분 없이 한 줄로
+function renderRankGroupsAll(){
+  const body = document.getElementById('watchlist-body');
+  const isNxt = gapMode();
+
+  const rows = [];
+  for(const s of _data.sectors){
+    for(const g of (s.groups || [])){
+      const vs = visibleStocks(g.stocks);
+      if(!vs.length) continue;
+      const avg = avgPct(vs);
+      if(avg === null) continue;
+      rows.push({
+        sectorId: s.id, groupId: g.id,
+        sectorName: s.name, groupName: g.name,
+        count: vs.length, avg: avg,
+      });
+    }
+  }
+
+  if(!rows.length){
+    body.className = '';
+    body.innerHTML = '<span class="content-empty">시세를 받은 테마가 없음 · 섹터를 열어 시세를 먼저 받아주세요</span>';
+    return;
+  }
+
+  rows.sort((a,b) => b.avg - a.avg);
+  const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.avg)));
+
+  let html = '<div class="rank-list">';
+  rows.forEach((r, i) => {
+    const open = !!_openGroups[r.groupId];
+    const cls = r.avg > 0 ? 'up' : (r.avg < 0 ? 'down' : 'flat');
+    const width = Math.min(100, Math.abs(r.avg) / maxAbs * 100);
+    const pctText = (r.avg > 0 ? '+' : '') + r.avg.toFixed(2) + '%';
+    html += '<div class="rank-row ' + (open?'open':'') + '" onclick="toggleGroupOpen(\'' + r.groupId + '\')">' +
+      '<span class="rank-idx">' + (i+1) + '</span>' +
+      '<span class="rank-caret">▶</span>' +
+      '<span class="rank-name">' + esc(r.groupName) + '</span>' +
+      '<span class="rank-count">' + esc(r.sectorName) + ' · ' + r.count + '종목</span>' +
+      '<span class="rank-bar-wrap"><span class="rank-bar ' + cls + '" style="width:' + width + '%;' +
+        (r.avg < 0 ? 'right:0' : 'left:0') + '"></span></span>' +
+      '<span class="rank-pct ' + cls + '">' + pctText + '</span>' +
+      '</div>';
+    if(open){
+      const sector = _data.sectors.find(x => x.id === r.sectorId);
+      const g = sector && sector.groups.find(x => x.id === r.groupId);
+      if(g) html += renderRankStocks(g);
+    }
+  });
+  html += '</div>';
+
+  const basis = isNxt ? 'NXT 괴리율' : '평균 등락률';
+  const hint = '<div style="font-size:11px;color:#7a8099;margin-bottom:10px">' +
+    '📊 세부 테마 ' + rows.length + '개 · ' + basis + ' 순 · 클릭하면 종목이 펼쳐짐</div>';
+  body.className = '';
+  body.innerHTML = '<div class="rank-wrap">' + hint + html + '</div>';
+}
+
 function renderRank(){
+  if(_rankScope === 'group') return renderRankGroupsAll();
   const body = document.getElementById('watchlist-body');
   const isNxt = gapMode();
 
@@ -2115,9 +2205,52 @@ function gotoSignal(sectorId, groupId){
 // ── 📥 엑셀 일괄 추가 ─────────────────────
 let _bulkRows = [];   // [{code, name, dup}]
 let _bulkSkipped = 0; // 종목코드를 못 찾아 건너뛴 줄 수
+let _bulkMode = 'add';  // add | check
+
+function setBulkMode(m){
+  _bulkMode = m;
+  document.querySelectorAll('.seg[data-bmode]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-bmode') === m);
+  });
+  const tw = document.getElementById('bulk-target-wrap');
+  if(tw) tw.style.display = (m === 'check') ? 'none' : '';
+  const hint = document.getElementById('bulk-hint-text');
+  if(hint){
+    hint.innerHTML = (m === 'check')
+      ? '엑셀 원본을 붙여넣으면 <b>대시보드에 없는 종목</b>을 찾아줍니다. 추가는 하지 않아요.'
+      : '엑셀에서 <b>종목명·종목코드가 포함된 범위를 그대로 복사</b>해서 아래에 붙여넣으세요. 열 순서·개수는 상관없고, 6자리 숫자를 종목코드로 자동 인식합니다.';
+  }
+  parseBulk();
+  updateBulkButton();
+}
+
+// 대시보드 전체에 등록된 종목코드 (어느 섹터든)
+function allRegisteredCodes(){
+  const set = new Set();
+  for(const s of _data.sectors){
+    for(const g of (s.groups || [])){
+      for(const st of (g.stocks || [])) set.add(st.code);
+    }
+  }
+  return set;
+}
+
+// 종목코드가 어느 섹터/그룹에 있는지
+function whereIs(code){
+  const places = [];
+  for(const s of _data.sectors){
+    for(const g of (s.groups || [])){
+      if((g.stocks || []).some(x => x.code === code)){
+        places.push(s.name + ' › ' + g.name);
+      }
+    }
+  }
+  return places;
+}
 
 function openBulk(){
   document.getElementById('bulk-overlay').classList.add('open');
+  setBulkMode('add');
   fillBulkSelects();
   document.getElementById('bulk-input').value = '';
   _bulkRows = [];
@@ -2151,10 +2284,16 @@ function onBulkSectorChange(){
   parseBulk();
 }
 
-// 어디로 들어갈지 버튼에 표시
 function updateBulkButton(){
   const btn = document.getElementById('bulk-apply');
   if(!btn) return;
+  if(_bulkMode === 'check'){
+    const missN = _bulkRows.filter(r => !r.dup).length;
+    btn.textContent = missN ? '빠진 ' + missN + '개 복사' : '빠진 종목 없음';
+    btn.disabled = !missN;
+    return;
+  }
+  btn.disabled = false;
   const sid = document.getElementById('bulk-sector').value;
   const gid = document.getElementById('bulk-group').value;
   const s = _data.sectors.find(x => x.id === sid);
@@ -2207,7 +2346,10 @@ function parseBulk(){
   const gid = document.getElementById('bulk-group').value;
   const s = _data.sectors.find(x => x.id === sid);
   const g = s && s.groups.find(x => x.id === gid);
-  const existing = new Set((g && g.stocks || []).map(x => x.code));
+  // 추가 모드 → 대상 그룹 기준 / 확인 모드 → 대시보드 전체 기준
+  const existing = (_bulkMode === 'check')
+    ? allRegisteredCodes()
+    : new Set((g && g.stocks || []).map(x => x.code));
 
   const splitCells = (line) =>
     (line.includes('\t') ? line.split('\t')
@@ -2258,6 +2400,32 @@ function renderBulkPreview(){
   const el = document.getElementById('bulk-preview');
   const cnt = document.getElementById('bulk-count');
   const dupN = _bulkRows.filter(r => r.dup).length;
+  const missN = _bulkRows.length - dupN;
+
+  if(_bulkMode === 'check'){
+    cnt.innerHTML = '원본 ' + _bulkRows.length + '종목 중 ' +
+      '<span style="color:#d63031">빠진 것 ' + missN + '개</span>' +
+      ' · 등록됨 ' + dupN + '개' +
+      (_bulkSkipped ? ' <span style="color:#e17055">· 인식 못한 줄 있음</span>' : '');
+    if(!_bulkRows.length){
+      el.innerHTML = '<div class="empty">엑셀 원본을 붙여넣으면 빠진 종목을 찾아드립니다</div>';
+      return;
+    }
+    // 빠진 것 먼저, 그다음 등록된 것
+    const sorted = _bulkRows.slice().sort((a,b) => (a.dup?1:0) - (b.dup?1:0));
+    el.innerHTML = '<table><thead><tr><th>종목명</th><th>종목코드</th><th>상태</th></tr></thead><tbody>' +
+      sorted.map(r =>
+        '<tr class="' + (r.dup ? '' : 'missing') + '">' +
+        '<td>' + esc(r.name) + '</td>' +
+        '<td>' + esc(r.code) + '</td>' +
+        '<td>' + (r.dup
+          ? '<span style="color:#7a8099;font-size:10.5px">' + esc(whereIs(r.code).join(' · ')) + '</span>'
+          : '<span style="color:#d63031;font-weight:700">없음</span>') + '</td>' +
+        '</tr>').join('') +
+      '</tbody></table>';
+    return;
+  }
+
   cnt.innerHTML = '인식된 종목 ' + _bulkRows.length + '개' +
     (dupN ? ' (이미 있는 종목 ' + dupN + '개)' : '') +
     (_bulkSkipped ? ' <span style="color:#e17055">· 코드 없는 줄 ' + _bulkSkipped + '개 건너뜀</span>' : '');
@@ -2276,6 +2444,20 @@ function renderBulkPreview(){
 }
 
 function applyBulk(){
+  // 확인 모드 — 빠진 종목 목록을 클립보드로
+  if(_bulkMode === 'check'){
+    const miss = _bulkRows.filter(r => !r.dup);
+    if(!miss.length){ alert('빠진 종목이 없습니다 👍'); return; }
+    const text = miss.map(r => r.name + '\t' + r.code).join('\n');
+    try {
+      navigator.clipboard.writeText(text);
+      showSaved('📋 빠진 ' + miss.length + '종목 복사됨');
+    } catch(e){
+      prompt('아래 내용을 복사하세요 (' + miss.length + '종목)', text);
+    }
+    return;
+  }
+
   if(!_bulkRows.length){ alert('추가할 종목이 없습니다'); return; }
   const sid = document.getElementById('bulk-sector').value;
   const gid = document.getElementById('bulk-group').value;
@@ -2353,6 +2535,9 @@ function initControls(){
   } catch(e){}
   document.querySelectorAll('.seg[data-cols]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-cols') === String(_cols));
+  });
+  document.querySelectorAll('.seg[data-scope]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-scope') === _rankScope);
   });
   updateNxtOnlyVisible();
   updateMarketHint();
