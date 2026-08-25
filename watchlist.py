@@ -560,6 +560,12 @@ body.edit-mode .add-group-btn{display:inline-block}
     <button class="seg" data-mkt="J" onclick="setMarket('J')" title="한국거래소 정규장">KRX</button>
     <button class="seg" data-mkt="NX" onclick="setMarket('NX')" title="넥스트레이드 (프리·애프터)">NXT</button>
   </div>
+  <div class="ctrl-group" id="nxt-session-wrap" style="display:none">
+    <span class="ctrl-label">세션</span>
+    <button class="seg" data-sess="auto" onclick="setSession('auto')" title="시간대에 맞춰 자동">자동</button>
+    <button class="seg" data-sess="pre" onclick="setSession('pre')" title="전일 KRX 마감가 대비">🌅 프리</button>
+    <button class="seg" data-sess="after" onclick="setSession('after')" title="당일 KRX 마감가 대비">🌙 애프터</button>
+  </div>
   <!-- 정렬 -->
   <div class="ctrl-group">
     <span class="ctrl-label">정렬</span>
@@ -789,10 +795,13 @@ function updateMarketHint(){
   const el = document.getElementById('market-hint');
   if(!el) return;
   let extra = '';
-  if(_market === 'NX' && t >= 9*60 && t < 15*60+40){
-    extra = ' · 정규장 중엔 괴리율 대신 등락률 표시';
+  if(_market === 'NX'){
+    const es = effectiveSession();
+    const label = (es === 'pre') ? '🌅 프리마켓 (전일 마감가 대비)'
+                                 : '🌙 애프터마켓 (당일 마감가 대비)';
+    extra = ' · ' + label + (_session === 'auto' ? ' 자동' : ' 수동');
   }
-  el.textContent = '🕐 ' + phase + ' · 현재 ' + MKT_LABEL[_market] + ' 조회 중' + extra;
+  el.textContent = '🕐 ' + phase + ' · ' + MKT_LABEL[_market] + extra;
 }
 
 function updateGapButtons(){
@@ -815,6 +824,7 @@ function setMarket(mkt){
   renderBody();
   renderSignals();
   updateNxtOnlyVisible();
+  updateNxtSessionVisible();
   refreshStaged({force:true});
 }
 
@@ -867,13 +877,70 @@ function setView(v){
 
 // NXT 모드이면서 실제 괴리 데이터가 있을 때만 괴리 컬럼 표시
 // (정규장 중에는 괴리가 무의미해서 서버가 gap을 안 보냄)
+let _session = 'auto';   // auto | pre | after
+
+function setSession(s){
+  _session = s;
+  try { localStorage.setItem('wl_session', s); } catch(e){}
+  document.querySelectorAll('.seg[data-sess]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-sess') === s);
+  });
+  updateMarketHint();
+  _quotes = {};
+  renderBody();
+  renderSignals();
+  refreshStaged({force:true});
+}
+
+// 실제 적용될 세션 (auto면 시간으로 판단)
+function effectiveSession(){
+  if(_session !== 'auto') return _session;
+  const n = new Date();
+  const t = n.getHours() * 60 + n.getMinutes();
+  return (t < 9*60) ? 'pre' : 'after';
+}
+
+function updateNxtSessionVisible(){
+  const w = document.getElementById('nxt-session-wrap');
+  if(w) w.style.display = (_market === 'NX') ? '' : 'none';
+}
+
+// 지금이 시간외(프리/애프터) 세션인지 — 정규장 09:00~15:40만 제외
+function isOffHourSession(){
+  if(_session !== 'auto') return true;   // 수동 지정이면 항상 괴리 모드
+  const n = new Date();
+  const t = n.getHours() * 60 + n.getMinutes();
+  return !(t >= 9*60 && t < 15*60+40);
+}
+
+// NXT 모드 + 정규장 아님 → 괴리 모드
 function gapMode(){
-  if(_market !== 'NX') return false;
-  for(const c in _quotes){
-    const q = _quotes[c];
-    if(q && q.gap_pct !== undefined && q.gap_pct !== null) return true;
+  return (_market === 'NX') && isOffHourSession();
+}
+
+// 서버가 gap을 안 줘도 화면에서 직접 계산 (KRX 종가만 있으면 됨)
+function gapOf(q){
+  if(!q) return {gap:null, pct:null, base:0};
+  const base = q.krx_close || q.prev_close || 0;
+  if(q.gap_pct !== undefined && q.gap_pct !== null){
+    return {gap: q.gap, pct: q.gap_pct, base: base};
   }
-  return false;
+  if(base && q.price){
+    const g = q.price - base;
+    return {gap: g, pct: Math.round(g / base * 10000) / 100, base: base};
+  }
+  return {gap:null, pct:null, base:base};
+}
+
+// 정렬·평균용 — 괴리 모드면 계산된 괴리율
+function pctOf(code){
+  const q = _quotes[code];
+  if(!q) return undefined;
+  if(gapMode()){
+    const g = gapOf(q);
+    return (g.pct === null) ? undefined : g.pct;
+  }
+  return q.chg_pct;
 }
 
 let _nxtOnly = false;   // 🌙 NXT 체결 있는 종목만 보기
@@ -908,9 +975,8 @@ function pctKey(){ return gapMode() ? 'gap_pct' : 'chg_pct'; }
 
 // 종목 배열의 평균 등락(또는 괴리)률
 function avgPct(stocks){
-  const k = pctKey();
   const vals = (stocks || [])
-    .map(s => (_quotes[s.code] || {})[k])
+    .map(s => pctOf(s.code))
     .filter(v => v !== undefined && v !== null);
   if(!vals.length) return null;
   return vals.reduce((a,b) => a+b, 0) / vals.length;
@@ -1088,8 +1154,7 @@ function renderRankStocks(group){
   const isNxt = gapMode();
   const sorted = sortStocks(visibleStocks(group.stocks)).slice();
   // 랭킹 뷰에선 항상 등락률(괴리율) 큰 순
-  const k = pctKey();
-  sorted.sort((a,b) => ((_quotes[b.code]||{})[k] ?? -999) - ((_quotes[a.code]||{})[k] ?? -999));
+  sorted.sort((a,b) => (pctOf(b.code) ?? -999) - (pctOf(a.code) ?? -999));
 
   if(!sorted.length) return '<div class="rank-empty">종목 없음</div>';
 
@@ -1122,11 +1187,10 @@ function sortStocks(stocks){
   arr.sort((a, b) => {
     const qa = _quotes[a.code] || {};
     const qb = _quotes[b.code] || {};
-    if(_sort === 'chg_desc') return (qb.chg_pct ?? -999) - (qa.chg_pct ?? -999);
-    if(_sort === 'chg_asc')  return (qa.chg_pct ??  999) - (qb.chg_pct ??  999);
-    if(_sort === 'vol_desc') return (qb.volume  ??   -1) - (qa.volume  ??   -1);
-    if(_sort === 'gap_desc') return (qb.gap_pct ?? -999) - (qa.gap_pct ?? -999);
-    if(_sort === 'gap_asc')  return (qa.gap_pct ??  999) - (qb.gap_pct ??  999);
+    const pa = pctOf(a.code), pb = pctOf(b.code);
+    if(_sort === 'chg_desc' || _sort === 'gap_desc') return (pb ?? -999) - (pa ?? -999);
+    if(_sort === 'chg_asc'  || _sort === 'gap_asc')  return (pa ??  999) - (pb ??  999);
+    if(_sort === 'vol_desc') return (qb.volume ?? -1) - (qa.volume ?? -1);
     return 0;
   });
   return arr;
@@ -1469,8 +1533,7 @@ function renderGroup(sectorId, group){
   // 그룹 요약 (평균)
   let summary = '';
   if(stocks.length){
-    const key = pctKey();
-    const vals = stocks.map(s => (_quotes[s.code] || {})[key]).filter(v => v !== undefined && v !== null);
+    const vals = stocks.map(s => pctOf(s.code)).filter(v => v !== undefined && v !== null);
     if(vals.length){
       const avg = vals.reduce((a,b)=>a+b, 0) / vals.length;
       const cls = avg > 0 ? 'up' : (avg < 0 ? 'down' : 'flat');
@@ -1523,15 +1586,16 @@ function renderStockRow(groupId, st, showGroup){
   const groupCol = showGroup ? '<td style="font-size:11.5px;color:#7a8099">' + esc(st._group || '') + '</td>' : '';
 
   let priceCols;
-  let mainPct;   // 색상 기준
+  let mainPct;
   if(isNxt){
-    // KRX 종가 · NXT 현재가 · 괴리 · 괴리율
-    const krxClose = q.krx_close ? num(q.krx_close) : '—';
+    const g = gapOf(q);
+    const krxClose = g.base ? num(g.base) : '—';
     const nxtPrice = has ? num(q.price) : '—';
-    const gapVal = (q.gap !== undefined && q.gap !== null) ? (q.gap > 0 ? '+' : '') + num(q.gap) : '—';
-    const gapPctVal = (q.gap_pct !== undefined && q.gap_pct !== null)
-      ? (q.gap_pct > 0 ? '+' : '') + q.gap_pct.toFixed(2) + '%' : '—';
-    mainPct = q.gap_pct;
+    const gapVal = (g.gap !== null && g.gap !== undefined)
+      ? (g.gap > 0 ? '+' : '') + num(g.gap) : '—';
+    const gapPctVal = (g.pct !== null && g.pct !== undefined)
+      ? (g.pct > 0 ? '+' : '') + g.pct.toFixed(2) + '%' : '—';
+    mainPct = g.pct;
     const gcls = mainPct > 0 ? 'up' : (mainPct < 0 ? 'down' : 'flat');
     const noNxt = q.no_nxt ? '<span class="hot" style="background:#f1f3f5;color:#7a8099">시간외X</span>' : '';
     priceCols =
@@ -1925,7 +1989,8 @@ async function refreshQuotes(codes, opts){
     const res = await fetch('/api/watchlist/quotes', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({codes: allCodes, market: _market, force: !!opts.force})
+      body: JSON.stringify({codes: allCodes, market: _market,
+                            session: effectiveSession(), force: !!opts.force})
     });
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
@@ -2049,8 +2114,7 @@ async function openStock(code, name){
 
   // 2) 현재 시세
   const q = _quotes[code] || {};
-  const k = pctKey();
-  const v = q[k];
+  const v = pctOf(code);
   const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
   const pct = (v === undefined || v === null) ? '—'
             : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
@@ -2058,9 +2122,10 @@ async function openStock(code, name){
 
   let html = '';
   if(q.price){
+    const g = gapOf(q);
     html += '<div class="stock-quote">' +
-      (isNxt && q.krx_close
-        ? '<span class="sq-item"><b>KRX 마감</b>' + num(q.krx_close) + '</span>' +
+      (isNxt && g.base
+        ? '<span class="sq-item"><b>KRX 마감</b>' + num(g.base) + '</span>' +
           '<span class="sq-item"><b>NXT</b>' + num(q.price) + '</span>' +
           '<span class="sq-item ' + cls + '"><b>괴리율</b>' + pct + '</span>'
         : '<span class="sq-item"><b>현재가</b>' + num(q.price) + '</span>' +
@@ -2164,7 +2229,6 @@ function findMyStock(q){
   q = (q || '').trim().toLowerCase().replace(/\s/g, '');
   if(q.length < 1){ box.classList.remove('open'); box.innerHTML = ''; return; }
 
-  const k = pctKey();
   const themeHits = [];   // 그룹(테마) 매칭
   const stockHits = [];   // 종목 매칭
 
@@ -2229,8 +2293,7 @@ function findMyStock(q){
     html += '<div class="find-section">📈 종목 ' + list.length + '개</div>';
     html += list.slice(0, 8).map(entry => {
       const st = entry.stock;
-      const q2 = _quotes[st.code] || {};
-      const v = q2[k];
+      const v = pctOf(st.code);
       const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
       const pct = (v === undefined || v === null) ? '—'
                 : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
@@ -2277,18 +2340,17 @@ function median(arr){
 }
 
 function detectSignals(){
-  const k = pctKey();
   const out = [];
 
   for(const sector of _data.sectors){
     for(const g of (sector.groups || [])){
       const stocks = (g.stocks || []).filter(s => {
-        const q = _quotes[s.code];
-        return q && q[k] !== undefined && q[k] !== null;
+        const v = pctOf(s.code);
+        return v !== undefined && v !== null;
       });
       if(stocks.length < SIG.MIN_STOCKS) continue;
 
-      const vals = stocks.map(s => _quotes[s.code][k]);
+      const vals = stocks.map(s => pctOf(s.code));
       const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
       // 중앙값 — 한 종목이 튀어서 평균을 끌어올리는 걸 걸러냄
       const med = median(vals);
@@ -2320,7 +2382,7 @@ function detectSignals(){
       // ② 나머지 종목은 잠잠한데 홀로 튀는 종목 (중앙값 기준)
       if(Math.abs(med) <= SIG.GROUP_CALM){
         for(const s of stocks){
-          const v = _quotes[s.code][k];
+          const v = pctOf(s.code);
           if(Math.abs(v) >= SIG.SOLO_MOVE){
             out.push(Object.assign({}, base, {
               type: 'solo', icon: '⚡', score: Math.abs(v),
@@ -2778,6 +2840,8 @@ function initControls(){
     if(['manual','chg_desc','chg_asc','vol_desc','gap_desc','gap_asc'].includes(so)) _sort = so;
     const vw = localStorage.getItem('wl_view');
     if(['list','rank'].includes(vw)) _view = vw;
+    const ss = localStorage.getItem('wl_session');
+    if(['auto','pre','after'].includes(ss)) _session = ss;
     const saved = parseInt(localStorage.getItem('wl_cols') || '2', 10);
     if([1,2,3].includes(saved)) _cols = saved;
   } catch(e){}
@@ -2797,7 +2861,11 @@ function initControls(){
   document.querySelectorAll('.seg[data-scope]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-scope') === _rankScope);
   });
+  document.querySelectorAll('.seg[data-sess]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-sess') === _session);
+  });
   updateNxtOnlyVisible();
+  updateNxtSessionVisible();
   // 복원된 뷰에 맞춰 컨트롤 표시
   const tabs = document.getElementById('sector-tabs');
   const flatWrap = document.getElementById('flat-wrap');
@@ -3034,15 +3102,13 @@ _no_nxt_cache = {"date": "", "codes": set()}     # 오늘 NXT 체결이 없던 �
 
 def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
                           token: str = "", app_key: str = "", app_secret: str = "",
-                          nxt_only: bool = False) -> dict:
+                          nxt_only: bool = False, session: str = "") -> dict:
     """
     시장별 최적 경로로 시세 조회.
 
-    KRX/통합 → 네이버 일괄 API (한 요청에 40종목)
-    NXT      → KIS 개별 조회 + KRX 종가는 네이버 일괄
-
-    ⚡ 한 번 조회해서 NXT 체결이 없던 종목은 그날 내내 KIS 조회를 건너뛴다.
-       (요청 수가 회를 거듭할수록 줄어듦)
+    session: 'pre'  → 전일 KRX 마감가를 괴리 기준으로
+             'after'→ 당일 KRX 마감가를 괴리 기준으로
+             ''     → 시간으로 자동 판단
     """
     import concurrent.futures
     from datetime import datetime as _dt
@@ -3062,11 +3128,14 @@ def fetch_quotes_with_gap(codes: list, kis_get_fn, market: str = "UN",
 
     now = _dt.now()
     mins = now.hour * 60 + now.minute
-    intraday = (9 * 60) <= mins < (15 * 60 + 40)
-    # 세션 구분 — 프리마켓은 '전일 종가', 애프터마켓은 '당일 종가'가 기준이라
-    # 같은 날이라도 캐시를 섞으면 안 된다.
-    session = "pre" if mins < 9 * 60 else "after"
-    today = now.strftime("%Y-%m-%d") + "-" + session
+    # 세션 — 명시 지정 우선, 없으면 시간으로 판단
+    if session in ("pre", "after"):
+        sess = session
+        intraday = False          # 수동 지정이면 항상 괴리 계산
+    else:
+        sess = "pre" if mins < 9 * 60 else "after"
+        intraday = (9 * 60) <= mins < (15 * 60 + 40)
+    today = now.strftime("%Y-%m-%d") + "-" + sess
 
     if _krx_close_cache["date"] != today:
         _krx_close_cache["date"] = today
