@@ -131,6 +131,19 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* ⭐ 즐겨찾기 별표 */
+.star-btn{
+  background:transparent;border:0;cursor:pointer;
+  font-size:15px;line-height:1;padding:0 6px 0 0;
+  color:#d7dce3;font-family:inherit;transition:all .12s;
+  vertical-align:middle;
+}
+.star-btn:hover{color:#f0b429;transform:scale(1.2)}
+.star-btn.on{color:#f0b429}
+.star-btn.group-star{font-size:17px;padding:0 4px 0 0}
+body.readonly .star-btn{display:none}
+#watchlist-body.cols-3 .star-btn{font-size:13px;padding-right:4px}
+
 /* 📈 종목 상세 */
 .stock-name.clickable{cursor:pointer;border-bottom:1px dashed transparent}
 .stock-name.clickable:hover{color:#0984e3;border-bottom-color:#0984e3}
@@ -1043,8 +1056,13 @@ function renderRankGroupsAll(){
     const cls = r.avg > 0 ? 'up' : (r.avg < 0 ? 'down' : 'flat');
     const width = Math.min(100, Math.abs(r.avg) / maxAbs * 100);
     const pctText = (r.avg > 0 ? '+' : '') + r.avg.toFixed(2) + '%';
+    const gObj = (_data.sectors.find(x => x.id === r.sectorId) || {groups:[]})
+                   .groups.find(x => x.id === r.groupId);
     html += '<div class="rank-row ' + (open?'open':'') + '" onclick="toggleGroupOpen(\'' + r.groupId + '\')">' +
       '<span class="rank-idx">' + (i+1) + '</span>' +
+      '<button class="star-btn' + (gObj && isGroupFav(gObj) ? ' on' : '') + '" ' +
+        'onclick="event.stopPropagation();quickFavGroup(\'' + r.groupId + '\', this)" ' +
+        'title="이 테마 전체 담기">★</button>' +
       '<span class="rank-caret">▶</span>' +
       '<span class="rank-name">' + esc(r.groupName) + '</span>' +
       '<span class="rank-count">' + esc(r.sectorName) + ' · ' + r.count + '종목</span>' +
@@ -1549,6 +1567,9 @@ function renderGroup(sectorId, group){
   return '<div class="group" data-group-id="' + group.id + '">' +
     '<div class="group-header">' +
       (_editing ? '<span class="group-drag" title="드래그로 순서 변경">⋮⋮</span>' : '') +
+      '<button class="star-btn group-star' + (isGroupFav(group) ? ' on' : '') + '" ' +
+        'title="이 테마 전체를 즐겨찾기에 담기" ' +
+        'onclick="quickFavGroup(\'' + group.id + '\', this)">★</button>' +
       '<span class="group-icon">📌</span>' +
       '<span class="group-name">' + esc(group.name) + '</span>' +
       (_editing ? '<button class="tab-icon-btn dark" onclick="renameGroupPrompt(\'' + group.id + '\')" title="이름 변경">✏️</button>' : '') +
@@ -1626,7 +1647,11 @@ function renderStockRow(groupId, st, showGroup){
     ? '<span class="hot">🔥</span>' : '';
 
   return '<tr class="stock-row" data-code="' + st.code + '">' +
-    '<td><span class="stock-name clickable" onclick="openStock(\'' + st.code + '\',\'' +
+    '<td>' +
+      '<button class="star-btn' + (isFav(st.code) ? ' on' : '') + '" title="즐겨찾기 담기" ' +
+        'onclick="event.stopPropagation();quickFav(\'' + st.code + '\',\'' +
+        esc(st.name).replace(/'/g, "\\'") + '\', this)">★</button>' +
+      '<span class="stock-name clickable" onclick="openStock(\'' + st.code + '\',\'' +
       esc(st.name).replace(/'/g, "\\'") + '\')">' + esc(st.name) + '</span>' +
       '<span class="stock-code">' + esc(st.code) + '</span>' + mktBadge + hotBadge + '</td>' +
     groupCol +
@@ -2100,6 +2125,181 @@ document.addEventListener('visibilitychange', () => {
 
 // 초기 컨트롤 상태 세팅
 let _stockOpen = null;   // 현재 팝업에 열린 종목
+let _favData = null;     // 즐겨찾기 원본 (담기/해제용)
+let _favCodes = new Set();
+
+function isFav(code){ return _favCodes.has(code); }
+
+// 그룹 전체가 이미 담겨 있는지
+function isGroupFav(group){
+  const st = (group && group.stocks) || [];
+  if(!st.length) return false;
+  return st.every(x => _favCodes.has(x.code));
+}
+
+// ★ 테마(그룹) 통째로 담기 / 빼기
+async function quickFavGroup(groupId, btn){
+  if(_RO) return;
+  const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
+  let group = null;
+  if(sector) group = (sector.groups || []).find(g => g.id === groupId);
+  if(!group){
+    for(const s of _data.sectors){
+      const g = (s.groups || []).find(x => x.id === groupId);
+      if(g){ group = g; break; }
+    }
+  }
+  if(!group) return;
+  const stocks = group.stocks || [];
+  if(!stocks.length){ showSaved('⚠️ 종목이 없는 테마'); return; }
+
+  try {
+    if(isGroupFav(group)){
+      // 전부 담겨 있으면 → 빼기
+      const codes = new Set(stocks.map(x => x.code));
+      if(_favData && _favData.sectors){
+        for(const s of _favData.sectors){
+          for(const g of (s.groups || [])){
+            g.stocks = (g.stocks || []).filter(x => !codes.has(x.code));
+          }
+        }
+        // 빈 섹터 정리 (TODAY는 유지)
+        _favData.sectors = _favData.sectors.filter(s =>
+          s.id === 'today' || (s.groups || []).some(g => (g.stocks || []).length));
+      }
+      rebuildFavCodes();
+      const ok = await saveFav();
+      renderBody();
+      showSaved(ok ? '☆ "' + group.name + '" ' + stocks.length + '종목 뺌' : '⚠️ 저장 실패');
+      return;
+    }
+
+    // 담기 — 테마 이름을 살릴지 TODAY로 넣을지 선택
+    const keepTheme = confirm(
+      '"' + group.name + '" ' + stocks.length + '종목을 즐겨찾기에 담습니다.\n\n' +
+      '[확인] 테마 이름 그대로 별도 섹터로 담기\n' +
+      '[취소] 🔥 TODAY에 모두 담기'
+    );
+
+    let target;
+    if(keepTheme){
+      const secName = (sector ? sector.name + ' › ' : '') + group.name;
+      if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
+      let fs = _favData.sectors.find(s => s.name === secName);
+      if(!fs){
+        fs = {id: 'f' + Math.random().toString(36).slice(2,10), name: secName,
+              groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '기본', stocks: []}]};
+        _favData.sectors.push(fs);
+      }
+      if(!fs.groups || !fs.groups.length){
+        fs.groups = [{id: 'g' + Math.random().toString(36).slice(2,8), name: '기본', stocks: []}];
+      }
+      target = fs.groups[0];
+      target.stocks = target.stocks || [];
+    } else {
+      target = ensureFavToday();
+    }
+
+    let added = 0;
+    const have = new Set((target.stocks || []).map(x => x.code));
+    for(const st of stocks){
+      if(have.has(st.code)) continue;
+      target.stocks.push({code: st.code, name: st.name, memo: ''});
+      have.add(st.code);
+      added++;
+    }
+    rebuildFavCodes();
+    const ok = await saveFav();
+    renderBody();
+    showSaved(ok
+      ? '⭐ "' + group.name + '" ' + added + '종목 담김' + (added < stocks.length ? ' (중복 제외)' : '')
+      : '⚠️ 저장 실패');
+  } catch(e){
+    showSaved('⚠️ 오류: ' + (e.message || e));
+  }
+}
+
+// 즐겨찾기 목록 미리 읽기 (별표 상태 표시용)
+async function loadFav(){
+  if(_RO) return;
+  try {
+    const res = await fetch('/api/post/watchlist_fav');
+    if(!res.ok) return;
+    const d = await res.json();
+    if(d && d.content){
+      try { _favData = JSON.parse(d.content); } catch(e){ _favData = null; }
+    }
+    rebuildFavCodes();
+    renderBody();
+  } catch(e){}
+}
+
+function rebuildFavCodes(){
+  _favCodes = new Set();
+  if(!_favData || !_favData.sectors) return;
+  for(const s of _favData.sectors){
+    for(const g of (s.groups || [])){
+      for(const st of (g.stocks || [])) _favCodes.add(st.code);
+    }
+  }
+}
+
+function ensureFavToday(){
+  if(!_favData || !_favData.sectors || !_favData.sectors.length){
+    _favData = {sectors: [], currentSectorId: 'today'};
+  }
+  let today = _favData.sectors.find(s => s.id === 'today');
+  if(!today){
+    today = {id:'today', name:'🔥 TODAY',
+             groups:[{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}]};
+    _favData.sectors.unshift(today);
+  }
+  if(!today.groups || !today.groups.length){
+    today.groups = [{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}];
+  }
+  today.groups[0].stocks = today.groups[0].stocks || [];
+  return today.groups[0];
+}
+
+async function saveFav(){
+  const res = await fetch('/api/post/watchlist_fav', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({content: JSON.stringify(_favData),
+                          date: new Date().toISOString().slice(0,10)})
+  });
+  return res.ok;
+}
+
+// ⭐ 표에서 바로 담기/해제
+async function quickFav(code, name, btn){
+  if(_RO) return;
+  try {
+    if(_favCodes.has(code)){
+      // 해제 — 모든 섹터/그룹에서 제거
+      if(_favData && _favData.sectors){
+        for(const s of _favData.sectors){
+          for(const g of (s.groups || [])){
+            g.stocks = (g.stocks || []).filter(x => x.code !== code);
+          }
+        }
+      }
+      _favCodes.delete(code);
+      if(btn) btn.classList.remove('on');
+      const ok = await saveFav();
+      showSaved(ok ? '☆ 즐겨찾기에서 뺌: ' + name : '⚠️ 저장 실패');
+    } else {
+      const g = ensureFavToday();
+      g.stocks.push({code, name, memo: ''});
+      _favCodes.add(code);
+      if(btn) btn.classList.add('on');
+      const ok = await saveFav();
+      showSaved(ok ? '⭐ TODAY에 담김: ' + name : '⚠️ 저장 실패');
+    }
+  } catch(e){
+    showSaved('⚠️ 오류: ' + (e.message || e));
+  }
+}
 
 // ⭐ 즐겨찾기(TODAY)에 담기 — 별도 저장소라 창고와 독립
 async function addToFav(){
@@ -2108,47 +2308,13 @@ async function addToFav(){
   const btn = document.getElementById('fav-add-btn');
   if(btn){ btn.disabled = true; btn.textContent = '⏳ 담는 중...'; }
   try {
-    // 기존 즐겨찾기 읽기
-    let fav = null;
-    const res = await fetch('/api/post/watchlist_fav');
-    if(res.ok){
-      const d = await res.json();
-      if(d && d.content){ try { fav = JSON.parse(d.content); } catch(e){} }
-    }
-    if(!fav || !fav.sectors || !fav.sectors.length){
-      fav = {sectors: [{id:'today', name:'🔥 TODAY',
-                        groups:[{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}]}],
-             currentSectorId:'today'};
-    }
-    let today = fav.sectors.find(s => s.id === 'today');
-    if(!today){
-      today = {id:'today', name:'🔥 TODAY',
-               groups:[{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}]};
-      fav.sectors.unshift(today);
-    }
-    if(!today.groups || !today.groups.length){
-      today.groups = [{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}];
-    }
-    const g = today.groups[0];
-    g.stocks = g.stocks || [];
-    if(g.stocks.some(x => x.code === code)){
-      showSaved('⚠️ 이미 즐겨찾기에 있음: ' + name);
-      return;
-    }
-    g.stocks.push({code, name, memo: ''});
-
-    const save = await fetch('/api/post/watchlist_fav', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({content: JSON.stringify(fav),
-                            date: new Date().toISOString().slice(0,10)})
-    });
-    if(save.ok) showSaved('⭐ TODAY에 담김: ' + name);
-    else showSaved('⚠️ 담기 실패 HTTP ' + save.status);
-  } catch(e){
-    showSaved('⚠️ 오류: ' + (e.message || e));
+    await quickFav(code, name, null);
+    renderBody();
   } finally {
-    if(btn){ btn.disabled = false; btn.textContent = '⭐ 즐겨찾기에 담기'; }
+    if(btn){
+      btn.disabled = false;
+      btn.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기' : '⭐ 즐겨찾기에 담기';
+    }
   }
 }
 
@@ -2159,7 +2325,10 @@ async function openStock(code, name){
   document.getElementById('stock-title').textContent = name + '  ' + code;
   _stockOpen = {code: code, name: name};
   const fb = document.getElementById('fav-add-btn');
-  if(fb) fb.style.display = _RO ? 'none' : '';
+  if(fb){
+    fb.style.display = _RO ? 'none' : '';
+    fb.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기' : '⭐ 즐겨찾기에 담기';
+  }
   ov.classList.add('open');
 
   // 1) 워치리스트에서 이 종목이 속한 테마들
@@ -2944,6 +3113,7 @@ function initControls(){
 
 initControls();
 loadData();
+loadFav();
 startAutoRefresh();
 
 // 종목 마스터 백그라운드 예열 (보기 전용에선 불필요)
