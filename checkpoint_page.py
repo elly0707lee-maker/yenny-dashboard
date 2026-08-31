@@ -26,6 +26,55 @@ body{
   background:#f8f9fa;color:#1a1d23;min-height:100vh;
   font-weight:500;letter-spacing:-0.01em;
 }
+/* ✏️ 필기 레이어 */
+#draw-layer{
+  position:absolute;top:0;left:0;width:100%;
+  pointer-events:none;z-index:150;
+}
+#draw-canvas{display:block;width:100%;}
+body.draw-on #draw-layer{pointer-events:auto}
+body.draw-on{touch-action:auto}
+body.draw-on #draw-canvas{cursor:crosshair}
+/* 펜슬 전용 모드에서는 손가락 스크롤이 그대로 되도록 */
+body.draw-on.pen-only #draw-layer{touch-action:pan-y}
+
+#draw-toolbar{
+  display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:#1a1d23;border-radius:14px;padding:8px 12px;
+  align-items:center;gap:14px;z-index:200;
+  box-shadow:0 6px 24px rgba(0,0,0,0.28);
+}
+body.draw-on #draw-toolbar{display:flex}
+.dt-group{display:flex;align-items:center;gap:5px}
+.dt-btn{
+  background:rgba(255,255,255,0.1);border:0;color:#fff;
+  width:34px;height:34px;border-radius:9px;cursor:pointer;
+  font-size:15px;font-family:inherit;transition:all .12s;
+  display:flex;align-items:center;justify-content:center;
+}
+.dt-btn:hover{background:rgba(255,255,255,0.22)}
+.dt-btn.active{background:#fff;color:#1a1d23}
+.dt-color{
+  width:22px;height:22px;border-radius:50%;cursor:pointer;
+  border:2px solid transparent;transition:all .12s;display:inline-block;
+}
+.dt-color:hover{transform:scale(1.15)}
+.dt-color.active{border-color:#fff;transform:scale(1.15)}
+.dt-chk{
+  color:#fff;font-size:11px;display:flex;align-items:center;gap:4px;
+  cursor:pointer;white-space:nowrap;
+}
+.dt-close{
+  background:transparent;border:0;color:rgba(255,255,255,0.6);
+  font-size:15px;cursor:pointer;padding:4px 6px;font-family:inherit;
+}
+.dt-close:hover{color:#fff}
+
+@media print{
+  #draw-toolbar{display:none !important}
+  #draw-layer{position:absolute !important;pointer-events:none}
+}
+
 .topbar{background:#1a1d23;color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
 .topbar-title{font-size:18px;font-weight:700;letter-spacing:.02em}
 .topbar-actions{display:flex;gap:10px;align-items:center}
@@ -144,8 +193,41 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
     <button class="btn" onclick="loadCp()">↻ 새로고침</button>
     <button class="btn btn-primary" onclick="manualSave()" id="save-btn" style="display:none;">💾 저장</button>
     <button class="btn" onclick="doPrint()">🖨️ 인쇄</button>
+    <button class="btn" onclick="toggleDraw()" id="draw-btn" title="애플펜슬로 화면에 직접 필기">✏️ 필기</button>
     <button class="btn btn-danger" onclick="clearAll()">🗑 초기화</button>
   </div>
+</div>
+
+<!-- ✏️ 필기 레이어 -->
+<div id="draw-layer">
+  <canvas id="draw-canvas"></canvas>
+</div>
+<div id="draw-toolbar">
+  <div class="dt-group">
+    <button class="dt-btn active" data-tool="pen" onclick="setTool('pen')" title="펜">✏️</button>
+    <button class="dt-btn" data-tool="hi" onclick="setTool('hi')" title="형광펜">🖍️</button>
+    <button class="dt-btn" data-tool="eraser" onclick="setTool('eraser')" title="지우개">🧽</button>
+  </div>
+  <div class="dt-group" id="dt-colors">
+    <span class="dt-color active" data-c="#e03131" style="background:#e03131" onclick="setColor('#e03131')"></span>
+    <span class="dt-color" data-c="#1971c2" style="background:#1971c2" onclick="setColor('#1971c2')"></span>
+    <span class="dt-color" data-c="#2f9e44" style="background:#2f9e44" onclick="setColor('#2f9e44')"></span>
+    <span class="dt-color" data-c="#f08c00" style="background:#f08c00" onclick="setColor('#f08c00')"></span>
+    <span class="dt-color" data-c="#1a1d23" style="background:#1a1d23" onclick="setColor('#1a1d23')"></span>
+  </div>
+  <div class="dt-group">
+    <button class="dt-btn" data-w="2" onclick="setWidth(2)" title="가늘게">·</button>
+    <button class="dt-btn active" data-w="4" onclick="setWidth(4)" title="보통">•</button>
+    <button class="dt-btn" data-w="8" onclick="setWidth(8)" title="굵게">●</button>
+  </div>
+  <div class="dt-group">
+    <button class="dt-btn" onclick="undoDraw()" title="되돌리기">↶</button>
+    <button class="dt-btn" onclick="clearDraw()" title="전부 지우기">🗑</button>
+  </div>
+  <div class="dt-group">
+    <label class="dt-chk"><input type="checkbox" id="pen-only" checked onchange="togglePenOnly()"/> 펜슬만</label>
+  </div>
+  <button class="dt-close" onclick="toggleDraw()" title="필기 끄기">✕</button>
 </div>
 
 <div class="wrap">
@@ -405,6 +487,7 @@ function render(){
   }
   body.innerHTML = html || '<span class="content-empty">이 섹션은 비어있음.</span>';
   attachSortable();
+  if(_drawOn){ resizeCanvas(); redraw(); }
 }
 
 function attachSortable(){
@@ -583,6 +666,229 @@ function showSaved(msg){
   el.classList.add('visible');
   setTimeout(() => el.classList.remove('visible'), 2000);
 }
+
+// ── ✏️ 화면 필기 (애플펜슬) ──────────────────
+let _drawOn = false;
+let _tool = 'pen';
+let _color = '#e03131';
+let _width = 4;
+let _penOnly = true;
+let _strokes = [];        // [{tool,color,width,pts:[{x,y,p}]}]
+let _cur = null;
+let _drawSaveTimer = null;
+let _canvasH = 0;
+
+function drawCanvas(){ return document.getElementById('draw-canvas'); }
+
+function toggleDraw(){
+  _drawOn = !_drawOn;
+  document.body.classList.toggle('draw-on', _drawOn);
+  document.body.classList.toggle('pen-only', _penOnly);
+  const b = document.getElementById('draw-btn');
+  if(b){
+    b.textContent = _drawOn ? '✓ 필기 끄기' : '✏️ 필기';
+    b.classList.toggle('btn-primary', _drawOn);
+  }
+  if(_drawOn){ resizeCanvas(); redraw(); }
+}
+
+function setTool(t){
+  _tool = t;
+  document.querySelectorAll('.dt-btn[data-tool]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-tool') === t));
+  const cw = document.getElementById('dt-colors');
+  if(cw) cw.style.opacity = (t === 'eraser') ? '0.35' : '1';
+}
+function setColor(c){
+  _color = c;
+  document.querySelectorAll('.dt-color').forEach(el =>
+    el.classList.toggle('active', el.getAttribute('data-c') === c));
+  if(_tool === 'eraser') setTool('pen');
+}
+function setWidth(w){
+  _width = w;
+  document.querySelectorAll('.dt-btn[data-w]').forEach(b =>
+    b.classList.toggle('active', +b.getAttribute('data-w') === w));
+}
+function togglePenOnly(){
+  _penOnly = document.getElementById('pen-only').checked;
+  document.body.classList.toggle('pen-only', _penOnly);
+}
+
+// 문서 전체 높이에 맞춰 캔버스 크기 조정 (스크롤해도 그림이 붙어 있게)
+function resizeCanvas(){
+  const cv = drawCanvas();
+  if(!cv) return;
+  const h = Math.max(document.body.scrollHeight, window.innerHeight);
+  const w = document.documentElement.clientWidth;
+  const dpr = window.devicePixelRatio || 1;
+  _canvasH = h;
+  cv.style.height = h + 'px';
+  cv.width = Math.round(w * dpr);
+  cv.height = Math.round(h * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+}
+
+function redraw(){
+  const cv = drawCanvas();
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  ctx.clearRect(0, 0, cv.width / dpr, cv.height / dpr);
+  for(const s of _strokes) drawStroke(ctx, s);
+}
+
+function drawStroke(ctx, s){
+  const pts = s.pts || [];
+  if(pts.length < 1) return;
+  ctx.save();
+  if(s.tool === 'eraser'){
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = 'rgba(0,0,0,1)';
+    ctx.lineWidth = s.width * 6;
+  } else if(s.tool === 'hi'){
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.strokeStyle = s.color;
+    ctx.globalAlpha = 0.32;
+    ctx.lineWidth = s.width * 4;
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.width;
+  }
+  if(pts.length === 1){
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  // 필압 반영 — 구간별로 굵기를 달리해 그림
+  const base = ctx.lineWidth;
+  for(let i = 1; i < pts.length; i++){
+    const a = pts[i-1], b = pts[i];
+    if(s.tool === 'pen'){
+      const p = (a.p + b.p) / 2 || 0.5;
+      ctx.lineWidth = base * (0.4 + p * 1.2);
+    }
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function ptFrom(e){
+  const cv = drawCanvas();
+  const r = cv.getBoundingClientRect();
+  return {
+    x: e.clientX - r.left,
+    y: e.clientY - r.top,
+    p: (e.pressure && e.pressure > 0) ? e.pressure : 0.5,
+  };
+}
+
+function initDraw(){
+  const cv = drawCanvas();
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+
+  cv.addEventListener('pointerdown', (e) => {
+    if(!_drawOn) return;
+    if(_penOnly && e.pointerType !== 'pen') return;   // 손가락은 스크롤용
+    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);
+    _cur = {tool: _tool, color: _color, width: _width, pts: [ptFrom(e)]};
+    _strokes.push(_cur);
+  });
+
+  cv.addEventListener('pointermove', (e) => {
+    if(!_drawOn || !_cur) return;
+    if(_penOnly && e.pointerType !== 'pen') return;
+    e.preventDefault();
+    // 고해상도 이벤트가 있으면 다 반영 (선이 매끄러워짐)
+    const evs = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
+    for(const ev of evs) _cur.pts.push(ptFrom(ev));
+    // 마지막 구간만 그려서 부담 줄임
+    drawStroke(ctx, {tool:_cur.tool, color:_cur.color, width:_cur.width,
+                     pts:_cur.pts.slice(-Math.min(evs.length + 1, _cur.pts.length))});
+  });
+
+  const endStroke = (e) => {
+    if(!_cur) return;
+    _cur = null;
+    scheduleDrawSave();
+  };
+  cv.addEventListener('pointerup', endStroke);
+  cv.addEventListener('pointercancel', endStroke);
+  cv.addEventListener('pointerleave', endStroke);
+
+  window.addEventListener('resize', () => {
+    if(!_drawOn) return;
+    resizeCanvas(); redraw();
+  });
+}
+
+function undoDraw(){
+  if(!_strokes.length) return;
+  _strokes.pop();
+  redraw();
+  scheduleDrawSave();
+}
+
+function clearDraw(){
+  if(!_strokes.length) return;
+  if(!confirm('필기를 전부 지울까요?')) return;
+  _strokes = [];
+  redraw();
+  scheduleDrawSave();
+}
+
+function scheduleDrawSave(){
+  if(_drawSaveTimer) clearTimeout(_drawSaveTimer);
+  _drawSaveTimer = setTimeout(saveDraw, 1200);
+}
+
+async function saveDraw(){
+  try {
+    // 좌표를 소수점 1자리로 줄여 용량 절약
+    const compact = _strokes.map(s => ({
+      t: s.tool, c: s.color, w: s.width,
+      p: s.pts.map(p => [Math.round(p.x*10)/10, Math.round(p.y*10)/10, Math.round(p.p*100)/100]),
+    }));
+    const payload = {version: 1, h: _canvasH, strokes: compact};
+    await fetch('/api/post/cpdraw', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: JSON.stringify(payload),
+                            date: new Date().toISOString().slice(0,10)})
+    });
+  } catch(e){ console.error('draw save', e); }
+}
+
+async function loadDraw(){
+  try {
+    const res = await fetch('/api/post/cpdraw');
+    if(!res.ok) return;
+    const d = await res.json();
+    if(!d || !d.content) return;
+    const payload = JSON.parse(d.content);
+    _strokes = (payload.strokes || []).map(s => ({
+      tool: s.t, color: s.c, width: s.w,
+      pts: (s.p || []).map(a => ({x: a[0], y: a[1], p: a[2]})),
+    }));
+    resizeCanvas();
+    redraw();
+  } catch(e){}
+}
+
+initDraw();
+setTimeout(() => { resizeCanvas(); loadDraw(); }, 300);
 
 async function loadCp(){
   try {
