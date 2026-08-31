@@ -354,6 +354,11 @@ async function loadData(){
   } catch(e){ _data = null; }
 
   if(!_data || !_data.sectors || !_data.sectors.length) initEmpty();
+  // TODAY는 항상 존재하도록 보정 (창고에서 담을 때 기본 대상)
+  if(!_data.sectors.some(s => s.id === TODAY_ID)){
+    _data.sectors.unshift({id: TODAY_ID, name: '🔥 TODAY',
+                           groups: [{id: genId(), name: '', stocks: []}]});
+  }
   if(!_data.currentSectorId || !_data.sectors.find(s => s.id === _data.currentSectorId)){
     _data.currentSectorId = _data.sectors[0].id;
   }
@@ -777,12 +782,38 @@ function isTyping(){
   return t === 'input' || t === 'textarea';
 }
 
+// 다른 탭(창고)에서 담은 종목을 반영하기 위해 주기적으로 다시 읽음
+async function syncFromServer(){
+  if(_editing || isTyping()) return;
+  try {
+    const res = await fetch('/api/post/watchlist_fav');
+    if(!res.ok) return;
+    const d = await res.json();
+    if(!d || !d.content) return;
+    let fresh;
+    try { fresh = JSON.parse(d.content); } catch(e){ return; }
+    if(JSON.stringify(fresh) === JSON.stringify(_data)) return;
+    const keep = _data.currentSectorId;
+    _data = fresh;
+    if(!_data.sectors.some(s => s.id === TODAY_ID)){
+      _data.sectors.unshift({id: TODAY_ID, name: '🔥 TODAY',
+                             groups: [{id: genId(), name: '', stocks: []}]});
+    }
+    if(_data.sectors.some(s => s.id === keep)) _data.currentSectorId = keep;
+    render();
+    refreshQuotes();
+    showSaved('🔄 다른 탭 변경 반영');
+  } catch(e){}
+}
+
 function startAuto(){
   if(_autoTimer) clearInterval(_autoTimer);
   _autoTimer = setInterval(() => {
     if(document.hidden || _editing || isTyping()) return;
     refreshQuotes();
   }, 30000);
+  // 서버 동기화는 20초마다
+  setInterval(() => { if(!document.hidden) syncFromServer(); }, 20000);
 }
 
 // ── 컨트롤 ──────────────────────────────
@@ -837,7 +868,10 @@ function initControls(){
 }
 
 document.addEventListener('visibilitychange', () => {
-  if(!document.hidden && !_editing && !isTyping()) refreshQuotes();
+  if(document.hidden) return;
+  if(_editing || isTyping()) return;
+  syncFromServer();
+  refreshQuotes();
 });
 
 initControls();
