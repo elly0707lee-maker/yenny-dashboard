@@ -131,6 +131,54 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .memo-input:focus{background:#fff;border-color:#1a1d23;color:#1a1d23}
 .memo-input::placeholder{color:#c5ccd6;font-style:italic}
 
+.stock-name.clickable{cursor:pointer;border-bottom:1px dashed transparent}
+.stock-name.clickable:hover{color:#0984e3;border-bottom-color:#0984e3}
+.today-header{
+  border-bottom:1.5px solid #e17055 !important;color:#e17055;
+  margin-top:18px;font-size:13px;
+}
+
+/* 모달 */
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);
+  z-index:300;align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex}
+.modal{
+  background:#fff;border-radius:14px;width:100%;max-width:600px;
+  max-height:88vh;display:flex;flex-direction:column;
+  box-shadow:0 12px 40px rgba(0,0,0,0.25);
+}
+.modal-head{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:16px 20px;border-bottom:1px solid #e5e7eb;
+}
+.modal-title{font-size:16px;font-weight:700}
+.modal-body{padding:16px 20px;overflow-y:auto;flex:1}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid #e5e7eb}
+.stock-quote{
+  display:flex;gap:18px;flex-wrap:wrap;
+  background:#f8f9fa;border-radius:8px;padding:12px 14px;margin-bottom:14px;
+}
+.sq-item{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.sq-item b{display:block;font-size:10px;color:#7a8099;font-weight:600;margin-bottom:2px}
+.stock-section{
+  font-size:11.5px;color:#7a8099;font-weight:700;
+  margin:14px 0 7px;padding-bottom:5px;border-bottom:1px solid #e5e7eb;
+}
+.stock-places{display:flex;flex-direction:column;gap:5px}
+.stock-place{
+  background:#fff;border:1px solid #e5e7eb;border-radius:8px;
+  padding:9px 13px;font-size:12.5px;font-weight:600;
+}
+.db-entry{background:#fafbfc;border:1px solid #eceff1;border-radius:8px;padding:10px 13px;margin-bottom:6px}
+.db-theme{
+  display:inline-block;font-size:11px;font-weight:700;
+  background:#e8f4fd;color:#0277bd;padding:2px 9px;border-radius:10px;margin-bottom:6px;
+}
+.db-desc{font-size:12.5px;line-height:1.6;color:#2d3436}
+.stock-empty{font-size:12px;color:#a8b0bd;font-style:italic;padding:10px 2px}
+
 .row-actions{display:none;gap:2px}
 .stock-row:hover .row-actions{display:inline-flex}
 
@@ -235,6 +283,18 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 </div>
 
 <div id="save-indicator" class="save-indicator">💾 저장됨</div>
+
+<!-- 📈 종목 상세 -->
+<div id="stock-overlay" class="modal-overlay" onclick="if(event.target===this)closeStock()">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title" id="stock-title">종목</span>
+      <button class="btn btn-mini" onclick="closeStock()">✕</button>
+    </div>
+    <div class="modal-body" id="stock-body"></div>
+    <div class="modal-foot"><button class="btn" onclick="closeStock()">닫기</button></div>
+  </div>
+</div>
 
 <script>
 (function(){
@@ -420,11 +480,15 @@ function renderBody(){
   let html = '';
   if(isToday(s)){
     html += '<div class="today-note">' +
-      '<b>🔥 TODAY</b> 오늘 방송에서 볼 종목만 모아두는 칸입니다. 그룹 없이 한 장으로 봅니다.' +
-      (_editing ? ' <button class="btn btn-mini btn-danger" style="margin-left:auto" onclick="clearToday()">🗑 오늘 것 비우기</button>' : '') +
+      '<b>🔥 TODAY</b> 오늘 볼 종목. 구분을 넣어 나눌 수 있습니다.' +
+      '<button class="btn btn-mini" style="margin-left:auto" onclick="addTodayHeader()">+ 구분 추가</button>' +
+      (_editing ? ' <button class="btn btn-mini btn-danger" onclick="clearToday()">🗑 전체 비우기</button>' : '') +
       '</div>';
     if(!s.groups.length) s.groups = [{id: genId(), name: '', stocks: []}];
-    html += renderGroup(s.groups[0], true);
+    // 첫 그룹은 헤더 없이, 나머지는 구분 헤더와 함께
+    s.groups.forEach((g, i) => {
+      html += renderGroup(g, i === 0 && !g.name, true);
+    });
   } else {
     if(!s.groups.length){
       html += '<span class="content-empty">그룹이 없습니다' + (_editing ? '' : ' · 편집 모드에서 추가하세요') + '</span>';
@@ -438,12 +502,11 @@ function renderBody(){
   body.innerHTML = html;
 }
 
-function renderGroup(g, hideHeader){
+function renderGroup(g, hideHeader, inToday){
   const isNxt = gapMode();
   const stocks = sortStocks(g.stocks);
   let head = '';
   if(!hideHeader){
-    // 그룹 평균
     const vals = (g.stocks||[]).map(x => pctOf(x.code)).filter(v => v !== undefined && v !== null);
     let avgHtml = '';
     if(vals.length){
@@ -452,8 +515,11 @@ function renderGroup(g, hideHeader){
       avgHtml = '<span style="margin-left:8px;font-size:11.5px;" class="' + cls + '">평균 ' +
                 (avg>0?'+':'') + avg.toFixed(2) + '%</span>';
     }
-    head = '<div class="group-header">📌 <span>' + esc(g.name || '그룹') + '</span>' + avgHtml +
-      (_editing ? '<span class="group-actions">' +
+    const icon = inToday ? '▸' : '📌';
+    const showBtns = inToday || _editing;
+    head = '<div class="group-header' + (inToday ? ' today-header' : '') + '">' +
+      icon + ' <span>' + esc(g.name || (inToday ? '구분' : '그룹')) + '</span>' + avgHtml +
+      (showBtns ? '<span class="group-actions">' +
         '<button class="btn btn-mini" onclick="renameGroup(\'' + g.id + '\')">✏️</button>' +
         '<button class="btn btn-mini btn-danger" onclick="deleteGroup(\'' + g.id + '\')">🗑</button></span>' : '') +
       '</div>';
@@ -519,7 +585,8 @@ function renderRow(gid, st, isNxt){
   }
 
   return '<tr class="stock-row">' +
-    '<td><span class="stock-name">' + esc(st.name) + '</span>' +
+    '<td><span class="stock-name clickable" onclick="openStock(\'' + st.code + '\',\'' +
+      esc(st.name).replace(/'/g, "\\'") + '\')">' + esc(st.name) + '</span>' +
       '<span class="stock-code">' + esc(st.code) + '</span>' + badge + hot + '</td>' +
     cols +
     '<td class="num">' + num(q.volume) + '</td>' +
@@ -614,6 +681,117 @@ function clearToday(){
   render(); scheduleSave();
   showSaved('🗑 TODAY 비움');
 }
+
+// TODAY에 구분 헤더 추가
+function addTodayHeader(){
+  const s = _data.sectors.find(x => x.id === TODAY_ID);
+  if(!s) return;
+  const v = prompt('구분 이름 (예: 오프닝, 대담 1부, 마감)', '');
+  if(v === null) return;
+  const name = v.trim().slice(0,30);
+  if(!name) return;
+  s.groups = s.groups || [];
+  s.groups.push({id: genId(), name: name, stocks: []});
+  render(); scheduleSave();
+  showSaved('▸ "' + name + '" 구분 추가됨');
+}
+
+// ── 📈 종목 상세 (창고 섹터 위치 + K-Stock DB) ────
+let _detailOpen = null;
+
+async function openStock(code, name){
+  _detailOpen = {code, name};
+  const ov = document.getElementById('stock-overlay');
+  const body = document.getElementById('stock-body');
+  document.getElementById('stock-title').textContent = name + '  ' + code;
+  ov.classList.add('open');
+
+  const q = _quotes[code] || {};
+  const v = pctOf(code);
+  const cls = v > 0 ? 'up' : (v < 0 ? 'down' : 'flat');
+  const pct = (v === undefined || v === null) ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+  const isNxt = gapMode();
+
+  let html = '';
+  if(q.price){
+    const g = gapOf(q);
+    html += '<div class="stock-quote">' +
+      (isNxt && g.base
+        ? '<span class="sq-item"><b>KRX 마감</b>' + num(g.base) + '</span>' +
+          '<span class="sq-item"><b>NXT</b>' + num(q.price) + '</span>' +
+          '<span class="sq-item ' + cls + '"><b>괴리율</b>' + pct + '</span>'
+        : '<span class="sq-item"><b>현재가</b>' + num(q.price) + '</span>' +
+          '<span class="sq-item ' + cls + '"><b>등락률</b>' + pct + '</span>') +
+      '<span class="sq-item"><b>거래량</b>' + num(q.volume || 0) + '</span>' +
+      '</div>';
+  }
+  html += '<div class="stock-section">📁 전체 관심종목에서의 위치</div>' +
+          '<div id="stock-places"><div class="stock-empty">확인 중...</div></div>' +
+          '<div class="stock-section">📚 K-Stock DB</div>' +
+          '<div id="stock-db"><div class="stock-empty">불러오는 중...</div></div>';
+  body.innerHTML = html;
+
+  // 창고(전체 관심종목) 위치
+  try {
+    const res = await fetch('/api/post/watchlist');
+    const el = document.getElementById('stock-places');
+    if(el){
+      let places = [];
+      if(res.ok){
+        const d = await res.json();
+        if(d && d.content){
+          try {
+            const wl = JSON.parse(d.content);
+            for(const s of (wl.sectors || [])){
+              for(const g of (s.groups || [])){
+                if((g.stocks || []).some(x => x.code === code)){
+                  places.push(s.name + ' › ' + g.name);
+                }
+              }
+            }
+          } catch(e){}
+        }
+      }
+      el.innerHTML = places.length
+        ? '<div class="stock-places">' + places.map(p =>
+            '<div class="stock-place">' + esc(p) + '</div>').join('') + '</div>'
+        : '<div class="stock-empty">전체 관심종목에는 없습니다</div>';
+    }
+  } catch(e){
+    const el = document.getElementById('stock-places');
+    if(el) el.innerHTML = '<div class="stock-empty">확인 실패</div>';
+  }
+
+  // K-Stock DB
+  try {
+    const res = await fetch('/api/watchlist/stock-info?code=' + encodeURIComponent(code));
+    const d = await res.json();
+    const el = document.getElementById('stock-db');
+    if(!el) return;
+    const entries = d.entries || [];
+    el.innerHTML = entries.length
+      ? entries.map(e => '<div class="db-entry">' +
+          (e.theme ? '<div class="db-theme">' + esc(e.theme) + '</div>' : '') +
+          (e.desc ? '<div class="db-desc">' + esc(e.desc) + '</div>' : '') +
+          '</div>').join('')
+      : '<div class="stock-empty">DB에 등록된 정보가 없습니다' +
+        (d.db_size ? ' (' + d.db_size + '종목 중)' : '') + '</div>';
+  } catch(e){
+    const el = document.getElementById('stock-db');
+    if(el) el.innerHTML = '<div class="stock-empty">⚠️ ' + esc(String(e.message || e)) + '</div>';
+  }
+}
+
+function closeStock(){
+  document.getElementById('stock-overlay').classList.remove('open');
+}
+
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape'){
+    const ov = document.getElementById('stock-overlay');
+    if(ov && ov.classList.contains('open')) closeStock();
+  }
+});
 
 function setMemo(gid, code, val){
   const s = currentSector(); if(!s) return;
