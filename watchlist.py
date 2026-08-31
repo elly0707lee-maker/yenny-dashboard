@@ -131,6 +131,19 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+/* ⭐ 담을 곳 선택기 */
+.fav-target{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,0.12);border-radius:8px;padding:5px 10px;
+}
+.ft-label{font-size:10.5px;color:#f0b429;font-weight:700;white-space:nowrap}
+.fav-target select{
+  background:#fff;border:1px solid #e5e7eb;border-radius:6px;
+  padding:4px 8px;font-size:11.5px;font-family:inherit;
+  outline:none;cursor:pointer;max-width:170px;
+}
+body.readonly .fav-target{display:none}
+
 /* ⭐ 즐겨찾기 별표 */
 .star-btn{
   background:transparent;border:0;cursor:pointer;
@@ -561,6 +574,10 @@ body.edit-mode .add-group-btn{display:inline-block}
     <button class="btn" onclick="openBulk()" id="bulk-btn">📥 일괄 추가</button>
     <button class="btn btn-primary" onclick="refreshStaged({force:true})" id="refresh-btn">🔄 시세 갱신</button>
     <button class="btn" onclick="copyShareLink()" id="share-btn" title="보기 전용 링크 복사">🔗 공유</button>
+    <span class="fav-target" id="fav-target-wrap" title="★ 누르면 여기에 담깁니다">
+      <span class="ft-label">★ 담을 곳</span>
+      <select id="fav-target" onchange="setFavTarget()"></select>
+    </span>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
   </div>
 </div>
@@ -2130,6 +2147,71 @@ let _favCodes = new Set();
 
 function isFav(code){ return _favCodes.has(code); }
 
+let _favTarget = 'today';   // ★ 누르면 담길 즐겨찾기 섹터 id
+
+function setFavTarget(){
+  const sel = document.getElementById('fav-target');
+  if(!sel) return;
+  if(sel.value === '__new__'){
+    const v = prompt('새로 만들 즐겨찾기 그룹 이름', '');
+    if(v === null || !v.trim()){ sel.value = _favTarget; return; }
+    const name = v.trim().slice(0, 30);
+    if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
+    const fs = {id: 'f' + Math.random().toString(36).slice(2,10), name: name,
+                groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '기본', stocks: []}]};
+    _favData.sectors.push(fs);
+    _favTarget = fs.id;
+    saveFav().then(() => { renderFavTarget(); showSaved('⭐ "' + name + '" 만들어짐'); });
+    return;
+  }
+  _favTarget = sel.value;
+  try { localStorage.setItem('wl_fav_target', _favTarget); } catch(e){}
+  renderBody();
+}
+
+function renderFavTarget(){
+  const sel = document.getElementById('fav-target');
+  if(!sel) return;
+  const secs = (_favData && _favData.sectors) ? _favData.sectors : [];
+  let html = '';
+  const hasToday = secs.some(s => s.id === 'today');
+  if(!hasToday) html += '<option value="today">🔥 TODAY</option>';
+  html += secs.map(s => {
+    const cnt = (s.groups || []).reduce((a,g) => a + (g.stocks||[]).length, 0);
+    return '<option value="' + s.id + '">' + esc(s.name) + ' (' + cnt + ')</option>';
+  }).join('');
+  html += '<option value="__new__">+ 새 그룹 만들기…</option>';
+  sel.innerHTML = html;
+  if(!secs.some(s => s.id === _favTarget) && _favTarget !== 'today') _favTarget = 'today';
+  sel.value = _favTarget;
+}
+
+// 담을 대상 그룹 확보 (없으면 만들어줌)
+function favTargetGroup(){
+  if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
+  let s = _favData.sectors.find(x => x.id === _favTarget);
+  if(!s){
+    // TODAY가 없으면 만들고, 다른 대상이 사라졌으면 TODAY로
+    s = _favData.sectors.find(x => x.id === 'today');
+    if(!s){
+      s = {id: 'today', name: '🔥 TODAY',
+           groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}]};
+      _favData.sectors.unshift(s);
+    }
+    _favTarget = s.id;
+  }
+  if(!s.groups || !s.groups.length){
+    s.groups = [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}];
+  }
+  s.groups[0].stocks = s.groups[0].stocks || [];
+  return {sector: s, group: s.groups[0]};
+}
+
+function favTargetName(){
+  const s = (_favData && _favData.sectors || []).find(x => x.id === _favTarget);
+  return s ? s.name : '🔥 TODAY';
+}
+
 // 그룹 전체가 이미 담겨 있는지
 function isGroupFav(group){
   const st = (group && group.stocks) || [];
@@ -2140,14 +2222,10 @@ function isGroupFav(group){
 // ★ 테마(그룹) 통째로 담기 / 빼기
 async function quickFavGroup(groupId, btn){
   if(_RO) return;
-  const sector = _data.sectors.find(s => s.id === _data.currentSectorId);
   let group = null;
-  if(sector) group = (sector.groups || []).find(g => g.id === groupId);
-  if(!group){
-    for(const s of _data.sectors){
-      const g = (s.groups || []).find(x => x.id === groupId);
-      if(g){ group = g; break; }
-    }
+  for(const s of _data.sectors){
+    const g = (s.groups || []).find(x => x.id === groupId);
+    if(g){ group = g; break; }
   }
   if(!group) return;
   const stocks = group.stocks || [];
@@ -2155,53 +2233,22 @@ async function quickFavGroup(groupId, btn){
 
   try {
     if(isGroupFav(group)){
-      // 전부 담겨 있으면 → 빼기
       const codes = new Set(stocks.map(x => x.code));
       if(_favData && _favData.sectors){
         for(const s of _favData.sectors){
-          for(const g of (s.groups || [])){
-            g.stocks = (g.stocks || []).filter(x => !codes.has(x.code));
-          }
+          for(const g of (s.groups || [])) g.stocks = (g.stocks || []).filter(x => !codes.has(x.code));
         }
-        // 빈 섹터 정리 (TODAY는 유지)
-        _favData.sectors = _favData.sectors.filter(s =>
-          s.id === 'today' || (s.groups || []).some(g => (g.stocks || []).length));
       }
       rebuildFavCodes();
       const ok = await saveFav();
-      renderBody();
-      showSaved(ok ? '☆ "' + group.name + '" ' + stocks.length + '종목 뺌' : '⚠️ 저장 실패');
+      renderBody(); renderFavTarget();
+      showSaved(ok ? '☆ ' + stocks.length + '종목 뺌' : '⚠️ 저장 실패');
       return;
     }
 
-    // 담기 — 테마 이름을 살릴지 TODAY로 넣을지 선택
-    const keepTheme = confirm(
-      '"' + group.name + '" ' + stocks.length + '종목을 즐겨찾기에 담습니다.\n\n' +
-      '[확인] 테마 이름 그대로 별도 섹터로 담기\n' +
-      '[취소] 🔥 TODAY에 모두 담기'
-    );
-
-    let target;
-    if(keepTheme){
-      const secName = (sector ? sector.name + ' › ' : '') + group.name;
-      if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
-      let fs = _favData.sectors.find(s => s.name === secName);
-      if(!fs){
-        fs = {id: 'f' + Math.random().toString(36).slice(2,10), name: secName,
-              groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '기본', stocks: []}]};
-        _favData.sectors.push(fs);
-      }
-      if(!fs.groups || !fs.groups.length){
-        fs.groups = [{id: 'g' + Math.random().toString(36).slice(2,8), name: '기본', stocks: []}];
-      }
-      target = fs.groups[0];
-      target.stocks = target.stocks || [];
-    } else {
-      target = ensureFavToday();
-    }
-
+    const {group: target} = favTargetGroup();
+    const have = new Set(target.stocks.map(x => x.code));
     let added = 0;
-    const have = new Set((target.stocks || []).map(x => x.code));
     for(const st of stocks){
       if(have.has(st.code)) continue;
       target.stocks.push({code: st.code, name: st.name, memo: ''});
@@ -2210,10 +2257,8 @@ async function quickFavGroup(groupId, btn){
     }
     rebuildFavCodes();
     const ok = await saveFav();
-    renderBody();
-    showSaved(ok
-      ? '⭐ "' + group.name + '" ' + added + '종목 담김' + (added < stocks.length ? ' (중복 제외)' : '')
-      : '⚠️ 저장 실패');
+    renderBody(); renderFavTarget();
+    showSaved(ok ? '⭐ 「' + favTargetName() + '」에 ' + added + '종목 담김' : '⚠️ 저장 실패');
   } catch(e){
     showSaved('⚠️ 오류: ' + (e.message || e));
   }
@@ -2230,6 +2275,11 @@ async function loadFav(){
       try { _favData = JSON.parse(d.content); } catch(e){ _favData = null; }
     }
     rebuildFavCodes();
+    try {
+      const t = localStorage.getItem('wl_fav_target');
+      if(t) _favTarget = t;
+    } catch(e){}
+    renderFavTarget();
     renderBody();
   } catch(e){}
 }
@@ -2244,22 +2294,6 @@ function rebuildFavCodes(){
   }
 }
 
-function ensureFavToday(){
-  if(!_favData || !_favData.sectors || !_favData.sectors.length){
-    _favData = {sectors: [], currentSectorId: 'today'};
-  }
-  let today = _favData.sectors.find(s => s.id === 'today');
-  if(!today){
-    today = {id:'today', name:'🔥 TODAY',
-             groups:[{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}]};
-    _favData.sectors.unshift(today);
-  }
-  if(!today.groups || !today.groups.length){
-    today.groups = [{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}];
-  }
-  today.groups[0].stocks = today.groups[0].stocks || [];
-  return today.groups[0];
-}
 
 async function saveFav(){
   const res = await fetch('/api/post/watchlist_fav', {
@@ -2276,7 +2310,6 @@ async function quickFav(code, name, btn){
   if(_RO) return;
   try {
     if(_favCodes.has(code)){
-      // 해제 — 모든 섹터/그룹에서 제거
       if(_favData && _favData.sectors){
         for(const s of _favData.sectors){
           for(const g of (s.groups || [])){
@@ -2287,14 +2320,16 @@ async function quickFav(code, name, btn){
       _favCodes.delete(code);
       if(btn) btn.classList.remove('on');
       const ok = await saveFav();
+      renderFavTarget();
       showSaved(ok ? '☆ 즐겨찾기에서 뺌: ' + name : '⚠️ 저장 실패');
     } else {
-      const g = ensureFavToday();
-      g.stocks.push({code, name, memo: ''});
+      const {group} = favTargetGroup();
+      group.stocks.push({code, name, memo: ''});
       _favCodes.add(code);
       if(btn) btn.classList.add('on');
       const ok = await saveFav();
-      showSaved(ok ? '⭐ TODAY에 담김: ' + name : '⚠️ 저장 실패');
+      renderFavTarget();
+      showSaved(ok ? '⭐ 「' + favTargetName() + '」에 담김: ' + name : '⚠️ 저장 실패');
     }
   } catch(e){
     showSaved('⚠️ 오류: ' + (e.message || e));
@@ -2313,7 +2348,8 @@ async function addToFav(){
   } finally {
     if(btn){
       btn.disabled = false;
-      btn.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기' : '⭐ 즐겨찾기에 담기';
+      btn.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기'
+                                    : '⭐ 「' + favTargetName() + '」에 담기';
     }
   }
 }
@@ -2327,7 +2363,8 @@ async function openStock(code, name){
   const fb = document.getElementById('fav-add-btn');
   if(fb){
     fb.style.display = _RO ? 'none' : '';
-    fb.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기' : '⭐ 즐겨찾기에 담기';
+    fb.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기'
+                                 : '⭐ 「' + favTargetName() + '」에 담기';
   }
   ov.classList.add('open');
 
