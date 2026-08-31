@@ -14,6 +14,7 @@ from postit_board import get_postit_board_html
 from sector_news import get_sector_news_html, fetch_all_sectors_sync
 from telegram_pulse import generate_pulse_sync
 from watchlist import get_watchlist_html, fetch_stock_quotes, fetch_quotes_with_gap
+from watchlist_fav import get_fav_html
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -295,6 +296,7 @@ POST_TYPE_KEEP = {
     "postit": 1,     # 질문 보드 — 최신 1개
     "tgpulse": 1,    # 텔레 크로스체크 — 최신 1개
     "watchlist": 1,  # 관심종목 시황 — 최신 1개
+    "watchlist_fav": 1,  # ⭐ 즐겨찾기 — 최신 1개
 }
 
 def save_post(t, content, date):
@@ -651,6 +653,15 @@ def api_watchlist_gap_debug():
         import traceback; traceback.print_exc()
         out["error"] = f"{type(e).__name__}: {str(e)[:200]}"
     return jsonify(out)
+
+
+@app.route("/watchlist/fav")
+@requires_auth
+def watchlist_fav_page():
+    html = get_fav_html()
+    secret = f'<script>window._API_SECRET="{API_SECRET}";</script>'
+    html = html.replace('</head>', f'{secret}</head>', 1)
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/watchlist")
@@ -1286,7 +1297,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -1296,7 +1307,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -1339,7 +1350,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -1358,7 +1369,7 @@ def api_save_post(pt):
             pass
     if not content:
         # mindmap/checkpoint/closing/onair/buzz/postit/tgpulse/watchlist는 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse", "watchlist"):
+        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
@@ -2542,6 +2553,7 @@ input.input-line:focus{outline:none;border-color:#e8b84b;background:#fff}
         <a href="/checkpoint" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">☑ 체크포인트 →</a>
         <a href="/sector-news" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">📰 섹터 뉴스 →</a>
         <a href="/watchlist" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">📊 관심종목 →</a>
+        <a href="/watchlist/fav" target="_blank" class="btn btn-mindmap" style="white-space:nowrap;">⭐ 즐겨찾기 →</a>
       </div>
     </div>
   </div>
