@@ -33,10 +33,13 @@ body{
 }
 #draw-canvas{display:block;width:100%;}
 body.draw-on #draw-layer{pointer-events:auto}
-body.draw-on{touch-action:auto}
 body.draw-on #draw-canvas{cursor:crosshair}
-/* 펜슬 전용 모드에서는 손가락 스크롤이 그대로 되도록 */
-body.draw-on.pen-only #draw-layer{touch-action:pan-y}
+/* 펜슬 전용: 캔버스는 터치 제스처를 브라우저에 넘기지 않음.
+   손가락 스크롤은 JS에서 pointerType으로 판별해 따로 처리한다. */
+body.draw-on #draw-layer,
+body.draw-on #draw-canvas{touch-action:none}
+/* 펜슬 전용 모드일 때 손가락은 스크롤되도록 레이어를 통과시킴 */
+body.draw-on.finger-scroll #draw-layer{pointer-events:none}
 
 #draw-toolbar{
   display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
@@ -63,6 +66,10 @@ body.draw-on #draw-toolbar{display:flex}
 .dt-chk{
   color:#fff;font-size:11px;display:flex;align-items:center;gap:4px;
   cursor:pointer;white-space:nowrap;
+}
+.dt-diag{
+  color:rgba(255,255,255,0.55);font-size:10px;white-space:nowrap;
+  font-variant-numeric:tabular-nums;
 }
 .dt-close{
   background:transparent;border:0;color:rgba(255,255,255,0.6);
@@ -226,6 +233,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
   </div>
   <div class="dt-group">
     <label class="dt-chk"><input type="checkbox" id="pen-only" checked onchange="togglePenOnly()"/> 펜슬만</label>
+    <span class="dt-diag" id="dt-diag">입력: —</span>
   </div>
   <button class="dt-close" onclick="toggleDraw()" title="필기 끄기">✕</button>
 </div>
@@ -683,7 +691,6 @@ function drawCanvas(){ return document.getElementById('draw-canvas'); }
 function toggleDraw(){
   _drawOn = !_drawOn;
   document.body.classList.toggle('draw-on', _drawOn);
-  document.body.classList.toggle('pen-only', _penOnly);
   const b = document.getElementById('draw-btn');
   if(b){
     b.textContent = _drawOn ? '✓ 필기 끄기' : '✏️ 필기';
@@ -712,7 +719,6 @@ function setWidth(w){
 }
 function togglePenOnly(){
   _penOnly = document.getElementById('pen-only').checked;
-  document.body.classList.toggle('pen-only', _penOnly);
 }
 
 // 문서 전체 높이에 맞춰 캔버스 크기 조정 (스크롤해도 그림이 붙어 있게)
@@ -795,31 +801,67 @@ function ptFrom(e){
 
 function initDraw(){
   const cv = drawCanvas();
-  if(!cv) return;
+  const layer = document.getElementById('draw-layer');
+  if(!cv || !layer) return;
   const ctx = cv.getContext('2d');
+
+  function diag(msg){
+    const el = document.getElementById('dt-diag');
+    if(el) el.textContent = msg;
+  }
+
+  // 사파리는 TouchEvent의 touchType으로 스타일러스를 구분한다.
+  // 손가락이면 레이어를 통과시켜 페이지가 스크롤되게 하고,
+  // 펜슬이면 캔버스가 입력을 받는다. (touchstart가 pointerdown보다 먼저 옴)
+  layer.addEventListener('touchstart', (e) => {
+    if(!_drawOn) return;
+    const t = e.touches && e.touches[0];
+    const tt = t && t.touchType ? t.touchType : '(없음)';
+    const isStylus = (tt === 'stylus');
+    diag('입력: ' + tt);
+    if(_penOnly && !isStylus){
+      document.body.classList.add('finger-scroll');
+    }
+  }, {passive: true, capture: true});
+
+  const clearFinger = () => document.body.classList.remove('finger-scroll');
+  window.addEventListener('touchend', clearFinger);
+  window.addEventListener('touchcancel', clearFinger);
+
+  function isPen(e){
+    if(!_penOnly) return true;
+    if(e.pointerType === 'pen') return true;
+    // 사파리에서 pointerType이 touch로 와도 필압/기울기가 있으면 펜슬로 인정
+    if(e.pointerType === 'touch'){
+      if(typeof e.pressure === 'number' && e.pressure > 0 && e.pressure !== 0.5) return true;
+      if((e.tiltX && e.tiltX !== 0) || (e.tiltY && e.tiltY !== 0)) return true;
+      if(typeof e.altitudeAngle === 'number') return true;
+    }
+    return false;
+  }
 
   cv.addEventListener('pointerdown', (e) => {
     if(!_drawOn) return;
-    if(_penOnly && e.pointerType !== 'pen') return;   // 손가락은 스크롤용
+    diag('입력: ' + e.pointerType + ' p=' + (e.pressure ?? '-'));
+    if(!isPen(e)) return;
     e.preventDefault();
-    cv.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    try { cv.setPointerCapture(e.pointerId); } catch(err){}
     _cur = {tool: _tool, color: _color, width: _width, pts: [ptFrom(e)]};
     _strokes.push(_cur);
   });
 
   cv.addEventListener('pointermove', (e) => {
     if(!_drawOn || !_cur) return;
-    if(_penOnly && e.pointerType !== 'pen') return;
     e.preventDefault();
-    // 고해상도 이벤트가 있으면 다 반영 (선이 매끄러워짐)
+    e.stopPropagation();
     const evs = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
     for(const ev of evs) _cur.pts.push(ptFrom(ev));
-    // 마지막 구간만 그려서 부담 줄임
     drawStroke(ctx, {tool:_cur.tool, color:_cur.color, width:_cur.width,
                      pts:_cur.pts.slice(-Math.min(evs.length + 1, _cur.pts.length))});
   });
 
-  const endStroke = (e) => {
+  const endStroke = () => {
     if(!_cur) return;
     _cur = null;
     scheduleDrawSave();
@@ -827,6 +869,16 @@ function initDraw(){
   cv.addEventListener('pointerup', endStroke);
   cv.addEventListener('pointercancel', endStroke);
   cv.addEventListener('pointerleave', endStroke);
+
+  // 필기 중이면 브라우저 기본 제스처 차단
+  cv.addEventListener('touchstart', (e) => {
+    if(!_drawOn) return;
+    const t = e.touches && e.touches[0];
+    if(!_penOnly || (t && t.touchType === 'stylus')) e.preventDefault();
+  }, {passive:false});
+  cv.addEventListener('touchmove', (e) => {
+    if(_drawOn && _cur) e.preventDefault();
+  }, {passive:false});
 
   window.addEventListener('resize', () => {
     if(!_drawOn) return;
