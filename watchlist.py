@@ -131,19 +131,6 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
-/* ⭐ 담을 곳 선택기 */
-.fav-target{
-  display:inline-flex;align-items:center;gap:6px;
-  background:rgba(255,255,255,0.12);border-radius:8px;padding:5px 10px;
-}
-.ft-label{font-size:10.5px;color:#f0b429;font-weight:700;white-space:nowrap}
-.fav-target select{
-  background:#fff;border:1px solid #e5e7eb;border-radius:6px;
-  padding:4px 8px;font-size:11.5px;font-family:inherit;
-  outline:none;cursor:pointer;max-width:170px;
-}
-body.readonly .fav-target{display:none}
-
 /* ⭐ 즐겨찾기 별표 */
 .star-btn{
   background:transparent;border:0;cursor:pointer;
@@ -574,10 +561,6 @@ body.edit-mode .add-group-btn{display:inline-block}
     <button class="btn" onclick="openBulk()" id="bulk-btn">📥 일괄 추가</button>
     <button class="btn btn-primary" onclick="refreshStaged({force:true})" id="refresh-btn">🔄 시세 갱신</button>
     <button class="btn" onclick="copyShareLink()" id="share-btn" title="보기 전용 링크 복사">🔗 공유</button>
-    <span class="fav-target" id="fav-target-wrap" title="★ 누르면 여기에 담깁니다">
-      <span class="ft-label">★ 담을 곳</span>
-      <select id="fav-target" onchange="setFavTarget()"></select>
-    </span>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
   </div>
 </div>
@@ -2147,69 +2130,37 @@ let _favCodes = new Set();
 
 function isFav(code){ return _favCodes.has(code); }
 
-let _favTarget = 'today';   // ★ 누르면 담길 즐겨찾기 섹터 id
-
-function setFavTarget(){
-  const sel = document.getElementById('fav-target');
-  if(!sel) return;
-  if(sel.value === '__new__'){
-    const v = prompt('새로 만들 즐겨찾기 그룹 이름', '');
-    if(v === null || !v.trim()){ sel.value = _favTarget; return; }
-    const name = v.trim().slice(0, 30);
-    if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
-    const fs = {id: 'f' + Math.random().toString(36).slice(2,10), name: name,
-                groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '기본', stocks: []}]};
-    _favData.sectors.push(fs);
-    _favTarget = fs.id;
-    saveFav().then(() => { renderFavTarget(); showSaved('⭐ "' + name + '" 만들어짐'); });
-    return;
-  }
-  _favTarget = sel.value;
-  try { localStorage.setItem('wl_fav_target', _favTarget); } catch(e){}
-  renderBody();
-}
-
-function renderFavTarget(){
-  const sel = document.getElementById('fav-target');
-  if(!sel) return;
-  const secs = (_favData && _favData.sectors) ? _favData.sectors : [];
-  let html = '';
-  const hasToday = secs.some(s => s.id === 'today');
-  if(!hasToday) html += '<option value="today">🔥 TODAY</option>';
-  html += secs.map(s => {
-    const cnt = (s.groups || []).reduce((a,g) => a + (g.stocks||[]).length, 0);
-    return '<option value="' + s.id + '">' + esc(s.name) + ' (' + cnt + ')</option>';
-  }).join('');
-  html += '<option value="__new__">+ 새 그룹 만들기…</option>';
-  sel.innerHTML = html;
-  if(!secs.some(s => s.id === _favTarget) && _favTarget !== 'today') _favTarget = 'today';
-  sel.value = _favTarget;
-}
-
-// 담을 대상 그룹 확보 (없으면 만들어줌)
-function favTargetGroup(){
+// 개별 종목 → 🔥 TODAY / 테마 통째 → 그 이름의 별도 섹터
+function favTodayGroup(){
   if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
-  let s = _favData.sectors.find(x => x.id === _favTarget);
+  let s = _favData.sectors.find(x => x.id === 'today');
   if(!s){
-    // TODAY가 없으면 만들고, 다른 대상이 사라졌으면 TODAY로
-    s = _favData.sectors.find(x => x.id === 'today');
-    if(!s){
-      s = {id: 'today', name: '🔥 TODAY',
-           groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}]};
-      _favData.sectors.unshift(s);
-    }
-    _favTarget = s.id;
+    s = {id: 'today', name: '🔥 TODAY',
+         groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}]};
+    _favData.sectors.unshift(s);
+  }
+  if(!s.groups || !s.groups.length){
+    s.groups = [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}];
+  }
+  s.groups[0].stocks = s.groups[0].stocks || [];
+  return s.groups[0];
+}
+
+// 테마용 섹터 확보 (창고의 "섹터 › 그룹" 이름 그대로)
+function favThemeGroup(sectorName, groupName){
+  if(!_favData || !_favData.sectors) _favData = {sectors: [], currentSectorId: 'today'};
+  const name = (sectorName ? sectorName + ' › ' : '') + groupName;
+  let s = _favData.sectors.find(x => x.name === name && x.id !== 'today');
+  if(!s){
+    s = {id: 'f' + Math.random().toString(36).slice(2,10), name: name,
+         groups: [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}]};
+    _favData.sectors.push(s);
   }
   if(!s.groups || !s.groups.length){
     s.groups = [{id: 'g' + Math.random().toString(36).slice(2,8), name: '', stocks: []}];
   }
   s.groups[0].stocks = s.groups[0].stocks || [];
   return {sector: s, group: s.groups[0]};
-}
-
-function favTargetName(){
-  const s = (_favData && _favData.sectors || []).find(x => x.id === _favTarget);
-  return s ? s.name : '🔥 TODAY';
 }
 
 // 그룹 전체가 이미 담겨 있는지
@@ -2219,13 +2170,13 @@ function isGroupFav(group){
   return st.every(x => _favCodes.has(x.code));
 }
 
-// ★ 테마(그룹) 통째로 담기 / 빼기
+// ★ 테마(그룹) 통째로 담기 / 빼기 → 그 테마 이름의 별도 섹터로
 async function quickFavGroup(groupId, btn){
   if(_RO) return;
-  let group = null;
+  let group = null, sectorName = '';
   for(const s of _data.sectors){
     const g = (s.groups || []).find(x => x.id === groupId);
-    if(g){ group = g; break; }
+    if(g){ group = g; sectorName = s.name; break; }
   }
   if(!group) return;
   const stocks = group.stocks || [];
@@ -2241,12 +2192,12 @@ async function quickFavGroup(groupId, btn){
       }
       rebuildFavCodes();
       const ok = await saveFav();
-      renderBody(); renderFavTarget();
+      renderBody();
       showSaved(ok ? '☆ ' + stocks.length + '종목 뺌' : '⚠️ 저장 실패');
       return;
     }
 
-    const {group: target} = favTargetGroup();
+    const {sector: fs, group: target} = favThemeGroup(sectorName, group.name);
     const have = new Set(target.stocks.map(x => x.code));
     let added = 0;
     for(const st of stocks){
@@ -2257,8 +2208,8 @@ async function quickFavGroup(groupId, btn){
     }
     rebuildFavCodes();
     const ok = await saveFav();
-    renderBody(); renderFavTarget();
-    showSaved(ok ? '⭐ 「' + favTargetName() + '」에 ' + added + '종목 담김' : '⚠️ 저장 실패');
+    renderBody();
+    showSaved(ok ? '⭐ 「' + fs.name + '」 섹터로 ' + added + '종목 담김' : '⚠️ 저장 실패');
   } catch(e){
     showSaved('⚠️ 오류: ' + (e.message || e));
   }
@@ -2275,11 +2226,6 @@ async function loadFav(){
       try { _favData = JSON.parse(d.content); } catch(e){ _favData = null; }
     }
     rebuildFavCodes();
-    try {
-      const t = localStorage.getItem('wl_fav_target');
-      if(t) _favTarget = t;
-    } catch(e){}
-    renderFavTarget();
     renderBody();
   } catch(e){}
 }
@@ -2305,7 +2251,7 @@ async function saveFav(){
   return res.ok;
 }
 
-// ⭐ 표에서 바로 담기/해제
+// ⭐ 개별 종목 담기/해제 → 항상 🔥 TODAY
 async function quickFav(code, name, btn){
   if(_RO) return;
   try {
@@ -2320,16 +2266,14 @@ async function quickFav(code, name, btn){
       _favCodes.delete(code);
       if(btn) btn.classList.remove('on');
       const ok = await saveFav();
-      renderFavTarget();
       showSaved(ok ? '☆ 즐겨찾기에서 뺌: ' + name : '⚠️ 저장 실패');
     } else {
-      const {group} = favTargetGroup();
-      group.stocks.push({code, name, memo: ''});
+      const g = favTodayGroup();
+      g.stocks.push({code, name, memo: ''});
       _favCodes.add(code);
       if(btn) btn.classList.add('on');
       const ok = await saveFav();
-      renderFavTarget();
-      showSaved(ok ? '⭐ 「' + favTargetName() + '」에 담김: ' + name : '⚠️ 저장 실패');
+      showSaved(ok ? '⭐ TODAY에 담김: ' + name : '⚠️ 저장 실패');
     }
   } catch(e){
     showSaved('⚠️ 오류: ' + (e.message || e));
@@ -2348,8 +2292,7 @@ async function addToFav(){
   } finally {
     if(btn){
       btn.disabled = false;
-      btn.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기'
-                                    : '⭐ 「' + favTargetName() + '」에 담기';
+      btn.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기' : '⭐ TODAY에 담기';
     }
   }
 }
@@ -2363,8 +2306,7 @@ async function openStock(code, name){
   const fb = document.getElementById('fav-add-btn');
   if(fb){
     fb.style.display = _RO ? 'none' : '';
-    fb.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기'
-                                 : '⭐ 「' + favTargetName() + '」에 담기';
+    fb.textContent = isFav(code) ? '★ 즐겨찾기에서 빼기' : '⭐ TODAY에 담기';
   }
   ov.classList.add('open');
 
