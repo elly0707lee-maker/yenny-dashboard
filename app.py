@@ -297,6 +297,7 @@ POST_TYPE_KEEP = {
     "tgpulse": 1,    # 텔레 크로스체크 — 최신 1개
     "watchlist": 1,  # 관심종목 시황 — 최신 1개
     "watchlist_fav": 1,  # ⭐ 즐겨찾기 — 최신 1개
+    "cpdraw": 1,     # ✏️ 체크포인트 필기 — 최신 1개
 }
 
 def save_post(t, content, date):
@@ -1297,7 +1298,7 @@ def api_sector():
 @app.route("/api/post/<pt>")
 @requires_auth
 def api_get_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav", "cpdraw")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     return jsonify(get_latest_post(pt) or {})
@@ -1307,7 +1308,7 @@ def api_get_post(pt):
 @requires_auth
 def debug_post(pt):
     """원본 텍스트 디버그용 - 카드 파싱 안 될 때 원본 확인"""
-    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav")
+    valid = ("checkpoint", "closing", "briefing", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav", "cpdraw")
     if pt not in valid:
         return Response("invalid", 400)
     data = get_latest_post(pt) or {}
@@ -1350,7 +1351,7 @@ def api_save_checkpoint_replace():
 
 @app.route("/api/post/<pt>", methods=["POST"])
 def api_save_post(pt):
-    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav")
+    valid = ("checkpoint", "closing", "briefing", "futures", "aftermarket", "report", "report_up", "report_dn", "report_feature", "note", "todo", "calendar", "memo", "report", "wdaebon", "mindmap", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav", "cpdraw")
     if pt not in valid:
         return jsonify({"error": "invalid"}), 400
     # 대시보드 직접 저장은 인증 필요
@@ -1369,7 +1370,7 @@ def api_save_post(pt):
             pass
     if not content:
         # mindmap/checkpoint/closing/onair/buzz/postit/tgpulse/watchlist는 빈 콘텐츠 저장 허용 (초기화용)
-        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav"):
+        if pt not in ("mindmap", "checkpoint", "closing", "onair", "buzz", "postit", "tgpulse", "watchlist", "watchlist_fav", "cpdraw"):
             return jsonify({"error": "content required"}), 400
 
     # 체크포인트: 봇이 보내는 메시지는 mode 플래그로 동작 결정
