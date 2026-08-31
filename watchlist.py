@@ -635,6 +635,7 @@ body.edit-mode .add-group-btn{display:inline-block}
     </div>
     <div class="modal-body" id="stock-body"></div>
     <div class="modal-foot">
+      <button class="btn btn-primary" onclick="addToFav()" id="fav-add-btn">⭐ 즐겨찾기에 담기</button>
       <button class="btn" onclick="closeStock()">닫기</button>
     </div>
   </div>
@@ -2098,11 +2099,67 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // 초기 컨트롤 상태 세팅
+let _stockOpen = null;   // 현재 팝업에 열린 종목
+
+// ⭐ 즐겨찾기(TODAY)에 담기 — 별도 저장소라 창고와 독립
+async function addToFav(){
+  if(_stockOpen === null) return;
+  const {code, name} = _stockOpen;
+  const btn = document.getElementById('fav-add-btn');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ 담는 중...'; }
+  try {
+    // 기존 즐겨찾기 읽기
+    let fav = null;
+    const res = await fetch('/api/post/watchlist_fav');
+    if(res.ok){
+      const d = await res.json();
+      if(d && d.content){ try { fav = JSON.parse(d.content); } catch(e){} }
+    }
+    if(!fav || !fav.sectors || !fav.sectors.length){
+      fav = {sectors: [{id:'today', name:'🔥 TODAY',
+                        groups:[{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}]}],
+             currentSectorId:'today'};
+    }
+    let today = fav.sectors.find(s => s.id === 'today');
+    if(!today){
+      today = {id:'today', name:'🔥 TODAY',
+               groups:[{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}]};
+      fav.sectors.unshift(today);
+    }
+    if(!today.groups || !today.groups.length){
+      today.groups = [{id:'g'+Math.random().toString(36).slice(2,8), name:'', stocks:[]}];
+    }
+    const g = today.groups[0];
+    g.stocks = g.stocks || [];
+    if(g.stocks.some(x => x.code === code)){
+      showSaved('⚠️ 이미 즐겨찾기에 있음: ' + name);
+      return;
+    }
+    g.stocks.push({code, name, memo: ''});
+
+    const save = await fetch('/api/post/watchlist_fav', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content: JSON.stringify(fav),
+                            date: new Date().toISOString().slice(0,10)})
+    });
+    if(save.ok) showSaved('⭐ TODAY에 담김: ' + name);
+    else showSaved('⚠️ 담기 실패 HTTP ' + save.status);
+  } catch(e){
+    showSaved('⚠️ 오류: ' + (e.message || e));
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = '⭐ 즐겨찾기에 담기'; }
+  }
+}
+
 // ── 📈 종목 상세 (워치리스트 위치 + K-Stock DB) ────
 async function openStock(code, name){
   const ov = document.getElementById('stock-overlay');
   const body = document.getElementById('stock-body');
   document.getElementById('stock-title').textContent = name + '  ' + code;
+  _stockOpen = {code: code, name: name};
+  const fb = document.getElementById('fav-add-btn');
+  if(fb) fb.style.display = _RO ? 'none' : '';
   ov.classList.add('open');
 
   // 1) 워치리스트에서 이 종목이 속한 테마들
