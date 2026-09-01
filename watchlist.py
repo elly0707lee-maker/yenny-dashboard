@@ -131,6 +131,14 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .chk input{cursor:pointer}
 .market-hint{font-size:11px;color:#7a8099;font-style:italic}
 
+.chart-ic{
+  text-decoration:none;font-size:12px;opacity:0.3;
+  padding:0 3px;transition:opacity .12s;
+}
+.chart-ic:hover{opacity:1}
+.stock-row:hover .chart-ic{opacity:0.75}
+body.readonly .chart-ic{opacity:0.5}
+
 /* ⭐ 즐겨찾기 별표 */
 .star-btn{
   background:transparent;border:0;cursor:pointer;
@@ -648,6 +656,7 @@ body.edit-mode .add-group-btn{display:inline-block}
     </div>
     <div class="modal-body" id="stock-body"></div>
     <div class="modal-foot">
+      <a class="btn" id="chart-link" href="#" target="_blank">📈 네이버 차트</a>
       <button class="btn btn-primary" onclick="addToFav()" id="fav-add-btn">⭐ 즐겨찾기에 담기</button>
       <button class="btn" onclick="closeStock()">닫기</button>
     </div>
@@ -1657,7 +1666,7 @@ function renderStockRow(groupId, st, showGroup){
     groupCol +
     priceCols +
     '<td class="num">' + volume + '</td>' +
-    '<td><span class="row-actions"><button class="btn btn-mini btn-danger" onclick="deleteStock(\'' + groupId + '\', \'' + st.code + '\')" title="삭제">✕</button></span></td>' +
+    '<td>' + chartBtn(st.code) + '<span class="row-actions"><button class="btn btn-mini btn-danger" onclick="deleteStock(\'' + groupId + '\', \'' + st.code + '\')" title="삭제">✕</button></span></td>' +
     '</tr>';
 }
 
@@ -2297,12 +2306,21 @@ async function addToFav(){
   }
 }
 
+// 네이버 차트 링크
+function chartUrl(code){ return 'https://m.stock.naver.com/fchart/domestic/stock/' + code; }
+function chartBtn(code){
+  return '<a class="chart-ic" href="' + chartUrl(code) + '" target="_blank" ' +
+         'onclick="event.stopPropagation()" title="네이버 차트">📈</a>';
+}
+
 // ── 📈 종목 상세 (워치리스트 위치 + K-Stock DB) ────
 async function openStock(code, name){
   const ov = document.getElementById('stock-overlay');
   const body = document.getElementById('stock-body');
   document.getElementById('stock-title').textContent = name + '  ' + code;
   _stockOpen = {code: code, name: name};
+  const cl = document.getElementById('chart-link');
+  if(cl) cl.href = chartUrl(code);
   const fb = document.getElementById('fav-add-btn');
   if(fb){
     fb.style.display = _RO ? 'none' : '';
