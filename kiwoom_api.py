@@ -78,6 +78,116 @@ def call(api_id: str, body: dict = None, cont_yn: str = "N", next_key: str = "",
     return out
 
 
+THEME_PATH = "/api/dostk/thme"
+
+_theme_cache = {"key": "", "at": 0.0, "items": []}
+
+
+def get_themes(date_tp: str = "1", sort: str = "0", force: bool = False) -> list:
+    """
+    인포스탁 테마 목록 + 등락률 (ka90001)
+
+    date_tp: 기간 (1~99일)
+    sort: 0=전체, 1=상위등락률, 2=하위등락률, 3=상위기간수익률, 4=하위기간수익률
+    """
+    key = f"{date_tp}|{sort}"
+    if not force and _theme_cache["key"] == key and (time.time() - _theme_cache["at"]) < 120:
+        return _theme_cache["items"]
+
+    items, cont, nkey = [], "N", ""
+    for _ in range(6):          # 페이지 최대 6회
+        r = call("ka90001", {
+            "qry_tp": sort,
+            "date_tp": str(date_tp),
+            "flu_pl_amt_tp": "1",
+            "stex_tp": "1",
+        }, cont_yn=cont, next_key=nkey, path=THEME_PATH)
+        if r.get("return_code") not in (0, "0"):
+            break
+        for t in (r.get("thema_grp") or []):
+            items.append({
+                "code": (t.get("thema_grp_cd") or "").strip(),
+                "name": (t.get("thema_nm") or "").strip(),
+                "count": _to_int(t.get("stk_num")),
+                "chg_pct": _to_float(t.get("flu_rt")),
+                "up": _to_int(t.get("rising_stk_num")),
+                "down": _to_int(t.get("fall_stk_num")),
+                "period_pct": _to_float(t.get("dt_prft_rt")),
+                "main": (t.get("main_stk") or "").strip(),
+            })
+        if r.get("_cont_yn") != "Y" or not r.get("_next_key"):
+            break
+        cont, nkey = "Y", r.get("_next_key")
+
+    if items:
+        _theme_cache["key"] = key
+        _theme_cache["at"] = time.time()
+        _theme_cache["items"] = items
+    return items
+
+
+def get_theme_stocks(theme_code: str, date_tp: str = "1") -> list:
+    """테마 구성 종목 (ka90002)"""
+    out, cont, nkey = [], "N", ""
+    for _ in range(4):
+        r = call("ka90002", {
+            "date_tp": str(date_tp),
+            "thema_grp_cd": str(theme_code),
+            "stex_tp": "1",
+        }, cont_yn=cont, next_key=nkey, path=THEME_PATH)
+        if r.get("return_code") not in (0, "0"):
+            out.append({"_error": r.get("return_msg"), "_keys": list(r.keys())})
+            break
+        # 응답 배열 키 이름이 버전마다 다를 수 있어 리스트를 찾아서 사용
+        arr = None
+        for k, v in r.items():
+            if k.startswith("_"):
+                continue
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                arr = v
+                break
+        for s in (arr or []):
+            code = ""
+            for ck in ("stk_cd", "stk_code", "code"):
+                v = s.get(ck)
+                if isinstance(v, str) and v.strip():
+                    code = v.strip()[-6:]
+                    break
+            name = ""
+            for nk in ("stk_nm", "stk_name", "name"):
+                v = s.get(nk)
+                if isinstance(v, str) and v.strip():
+                    name = v.strip()
+                    break
+            if not code:
+                continue
+            out.append({
+                "code": code,
+                "name": name or code,
+                "price": _to_int(s.get("cur_prc")),
+                "chg_pct": _to_float(s.get("flu_rt")),
+                "volume": _to_int(s.get("acc_trde_qty") or s.get("trde_qty")),
+            })
+        if r.get("_cont_yn") != "Y" or not r.get("_next_key"):
+            break
+        cont, nkey = "Y", r.get("_next_key")
+    return out
+
+
+def _to_int(v, d=0):
+    try:
+        return int(float(str(v).replace(",", "").replace("+", "").strip() or d))
+    except Exception:
+        return d
+
+
+def _to_float(v, d=0.0):
+    try:
+        return float(str(v).replace(",", "").replace("+", "").strip() or d)
+    except Exception:
+        return d
+
+
 def diagnose() -> dict:
     """연결 진단 — 어디까지 되는지 단계별 확인"""
     out = {"keys_set": has_keys(), "base": BASE}
