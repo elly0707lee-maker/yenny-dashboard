@@ -685,8 +685,8 @@ def _rank_float(v, d=0.0):
         return d
 
 
-def _rank_raw(kind: str, market: str = "all") -> dict:
-    """순위 API 원본 응답"""
+def _rank_raw(kind: str, market: str = "all", mdiv: str = "J") -> dict:
+    """순위 API 원본 응답. mdiv: J=KRX / NX=NXT / UN=통합"""
     iscd = RANK_MARKET.get(market, "0000")
     if kind in ("up", "down"):
         return kis_get(
@@ -694,7 +694,7 @@ def _rank_raw(kind: str, market: str = "all") -> dict:
             "FHPST01700000",
             {
                 "fid_rsfl_rate2": "",
-                "fid_cond_mrkt_div_code": "J",
+                "fid_cond_mrkt_div_code": mdiv,
                 "fid_cond_scr_div_code": "20170",
                 "fid_input_iscd": iscd,
                 "fid_rank_sort_cls_code": "0" if kind == "up" else "1",
@@ -715,7 +715,7 @@ def _rank_raw(kind: str, market: str = "all") -> dict:
             "FHPST01740000",
             {
                 "fid_input_price_2": "",
-                "fid_cond_mrkt_div_code": "J",
+                "fid_cond_mrkt_div_code": mdiv,
                 "fid_cond_scr_div_code": "20174",
                 "fid_div_cls_code": "0",
                 "fid_input_iscd": iscd,
@@ -730,7 +730,7 @@ def _rank_raw(kind: str, market: str = "all") -> dict:
         "/uapi/domestic-stock/v1/quotations/volume-rank",
         "FHPST01710000",
         {
-            "fid_cond_mrkt_div_code": "J",
+            "fid_cond_mrkt_div_code": mdiv,
             "fid_cond_scr_div_code": "20171",
             "fid_input_iscd": iscd,
             "fid_div_cls_code": "0",
@@ -855,9 +855,10 @@ def api_ranking_debug():
     """순위 API 원본 응답 확인"""
     kind = (request.args.get("kind") or "up").strip()
     market = (request.args.get("market") or "all").strip()
-    out = {"kind": kind, "market": market}
+    mdiv = (request.args.get("mdiv") or "J").strip().upper()
+    out = {"kind": kind, "market": market, "mdiv": mdiv}
     try:
-        r = _rank_raw(kind, market)
+        r = _rank_raw(kind, market, mdiv)
         out["rt_cd"] = r.get("rt_cd")
         out["msg1"] = r.get("msg1")
         out["msg_cd"] = r.get("msg_cd")
@@ -936,6 +937,41 @@ def api_stock_news():
         print(f"[stock-news] {e}")
         return jsonify({"ok": False, "items": [],
                         "error": f"{type(e).__name__}: {str(e)[:150]}"})
+
+
+@app.route("/api/ranking-nxt-test")
+@requires_auth
+def api_ranking_nxt_test():
+    """순위 API가 NXT/통합 시장구분을 지원하는지 시험"""
+    kind = (request.args.get("kind") or "cap").strip()
+    out = {"kind": kind}
+    try:
+        get_kis_token()
+    except Exception as e:
+        return jsonify({"error": f"토큰 실패: {str(e)[:150]}"})
+    for mdiv in ("J", "NX", "UN"):
+        try:
+            r = _rank_raw(kind, "all", mdiv)
+            rows = r.get("output") or r.get("output1") or []
+            if isinstance(rows, dict):
+                rows = [rows]
+            first = {}
+            if rows:
+                o = rows[0]
+                first = {
+                    "name": o.get("hts_kor_isnm") or o.get("kor_isnm"),
+                    "price": o.get("stck_prpr"),
+                    "chg_pct": o.get("prdy_ctrt"),
+                }
+            out[mdiv] = {
+                "rt_cd": r.get("rt_cd"),
+                "msg1": r.get("msg1"),
+                "count": len(rows),
+                "first": first,
+            }
+        except Exception as e:
+            out[mdiv] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+    return jsonify(out)
 
 
 @app.route("/api/myip")
