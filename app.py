@@ -873,6 +873,71 @@ def api_ranking_debug():
     return jsonify(out)
 
 
+@app.route("/api/stock-news")
+@requires_auth
+def api_stock_news():
+    """종목 뉴스 — 네이버 뉴스 검색"""
+    import re as _re
+    from datetime import datetime as _dt
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"ok": False, "items": [], "error": "q required"}), 400
+
+    NAVER_ID = os.environ.get("NAVER_CLIENT_ID", "")
+    NAVER_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
+    if not NAVER_ID or not NAVER_SECRET:
+        return jsonify({"ok": False, "items": [],
+                        "error": "네이버 API 키 미설정"})
+    try:
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            params={"query": q + " 주가", "display": 12, "sort": "date"},
+            headers={"X-Naver-Client-Id": NAVER_ID,
+                     "X-Naver-Client-Secret": NAVER_SECRET},
+            timeout=8,
+        )
+        data = r.json()
+        items = []
+        for it in (data.get("items") or []):
+            title = _re.sub(r"<[^>]+>", "", it.get("title") or "")
+            title = (title.replace("&quot;", '"').replace("&amp;", "&")
+                     .replace("&lt;", "<").replace("&gt;", ">")
+                     .replace("&apos;", "'").replace("&nbsp;", " ").strip())
+            desc = _re.sub(r"<[^>]+>", "", it.get("description") or "")
+            desc = (desc.replace("&quot;", '"').replace("&amp;", "&")
+                    .replace("&lt;", "<").replace("&gt;", ">")
+                    .replace("&apos;", "'").replace("&nbsp;", " ").strip())
+            # 발행 시각 → 상대 시간
+            rel = ""
+            try:
+                pub = _dt.strptime(it.get("pubDate", ""), "%a, %d %b %Y %H:%M:%S %z")
+                diff = _dt.now(pub.tzinfo) - pub
+                mins = int(diff.total_seconds() / 60)
+                if mins < 60:
+                    rel = f"{max(mins,1)}분 전"
+                elif mins < 60 * 24:
+                    rel = f"{mins // 60}시간 전"
+                else:
+                    rel = f"{mins // (60*24)}일 전"
+            except Exception:
+                pass
+            link = it.get("originallink") or it.get("link") or ""
+            src = ""
+            try:
+                m = _re.search(r"https?://(?:www\.)?([^/]+)", link)
+                if m:
+                    src = m.group(1).split(".")[0]
+            except Exception:
+                pass
+            items.append({"title": title, "desc": desc[:120],
+                          "link": link, "time": rel, "source": src})
+        return jsonify({"ok": True, "items": items, "query": q})
+    except Exception as e:
+        print(f"[stock-news] {e}")
+        return jsonify({"ok": False, "items": [],
+                        "error": f"{type(e).__name__}: {str(e)[:150]}"})
+
+
 @app.route("/api/myip")
 @requires_auth
 def api_myip():
