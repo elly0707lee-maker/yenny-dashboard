@@ -183,6 +183,13 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   font-variant-numeric:tabular-nums;flex:0 0 auto;
 }
 .rank-empty{font-size:11.5px;color:#a8b0bd;font-style:italic;padding:14px 2px}
+.rank-more{
+  width:100%;padding:8px;border:1px dashed #c5ccd6;border-radius:9px;
+  background:transparent;color:#7a8099;font-size:11.5px;cursor:pointer;
+  font-family:inherit;transition:all .12s;
+}
+.rank-more:hover{background:#fff;color:#1a1d23;border-color:#1a1d23}
+.split-right{max-height:calc(100vh - 130px);overflow-y:auto}
 
 .stock-name.clickable{cursor:pointer;border-bottom:1px dashed transparent}
 .stock-name.clickable:hover{color:#0984e3;border-bottom-color:#0984e3}
@@ -361,6 +368,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
         <div class="rank-head"><span class="rank-title">💵 거래대금 상위</span></div>
         <div id="rank-amount"><div class="rank-empty">불러오는 중...</div></div>
       </div>
+      <button class="rank-more" id="rank-more" onclick="toggleRankLimit()">▾ 30위까지 보기</button>
     </div>
   </div>
 </div>
@@ -887,6 +895,7 @@ let _fluc = 'up';
 let _rankMarket = 'all';
 let _ranks = {};
 let _rankLoading = false;
+let _rankLimit = 10;
 
 function setFluc(k){
   _fluc = k;
@@ -918,7 +927,8 @@ async function loadRanks(force){
   if(!_ranks['amount']) setRankMsg('rank-amount', '불러오는 중...');
 
   try {
-    const res = await fetch('/api/rankings?market=' + _rankMarket + '&fluc=' + _fluc);
+    const res = await fetch('/api/rankings?market=' + _rankMarket + '&fluc=' + _fluc +
+                            '&limit=' + _rankLimit);
     const d = await res.json();
     if(!d.ok){
       ['rank-fluc','rank-cap','rank-amount'].forEach(id =>
@@ -942,6 +952,15 @@ async function loadRanks(force){
     _rankLoading = false;
     if(btn) btn.textContent = '🔄';
   }
+}
+
+function toggleRankLimit(){
+  _rankLimit = (_rankLimit === 10) ? 30 : 10;
+  const b = document.getElementById('rank-more');
+  if(b) b.textContent = (_rankLimit === 10) ? '▾ 30위까지 보기' : '▴ 10위만 보기';
+  try { localStorage.setItem('fav_rlimit', String(_rankLimit)); } catch(e){}
+  _ranks = {};
+  loadRanks(true);
 }
 
 function setRankMsg(id, msg){
@@ -1257,6 +1276,8 @@ function initControls(){
     if(['up','down'].includes(fl)) _fluc = fl;
     const rm = localStorage.getItem('fav_rmkt');
     if(['all','kospi','kosdaq'].includes(rm)) _rankMarket = rm;
+    const rl = parseInt(localStorage.getItem('fav_rlimit') || '10', 10);
+    if([10,30].includes(rl)) _rankLimit = rl;
   } catch(e){}
   document.querySelectorAll('.seg[data-mkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market));
@@ -1268,6 +1289,8 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-fluc') === _fluc));
   document.querySelectorAll('.seg[data-rmkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-rmkt') === _rankMarket));
+  const rmb = document.getElementById('rank-more');
+  if(rmb) rmb.textContent = (_rankLimit === 10) ? '▾ 30위까지 보기' : '▴ 10위만 보기';
   const sw = document.getElementById('sess-wrap');
   if(sw) sw.style.display = (_market === 'NX') ? '' : 'none';
   updateHint();
