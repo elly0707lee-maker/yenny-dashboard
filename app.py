@@ -666,6 +666,39 @@ def watchlist_fav_page():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/api/kiwoom/themes")
+@requires_auth
+def api_kiwoom_themes():
+    """인포스탁 테마 목록 + 등락률"""
+    date_tp = (request.args.get("days") or "1").strip()
+    sort = (request.args.get("sort") or "0").strip()
+    force = request.args.get("force") == "1"
+    try:
+        items = kiwoom_api.get_themes(date_tp, sort, force)
+        return jsonify({"ok": True, "items": items, "count": len(items)})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "items": [],
+                        "error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+
+@app.route("/api/kiwoom/theme-stocks")
+@requires_auth
+def api_kiwoom_theme_stocks():
+    """테마 구성 종목"""
+    code = (request.args.get("code") or "").strip()
+    days = (request.args.get("days") or "1").strip()
+    if not code:
+        return jsonify({"ok": False, "error": "code required"}), 400
+    try:
+        items = kiwoom_api.get_theme_stocks(code, days)
+        return jsonify({"ok": True, "items": items, "count": len(items)})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "items": [],
+                        "error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+
 @app.route("/api/kiwoom/diagnose")
 @requires_auth
 def api_kiwoom_diagnose():
