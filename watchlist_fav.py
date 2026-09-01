@@ -131,51 +131,54 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .memo-input:focus{background:#fff;border-color:#1a1d23;color:#1a1d23}
 .memo-input::placeholder{color:#c5ccd6;font-style:italic}
 
-/* 🏷️ 테마 패널 */
-.theme-bar{
-  display:flex;gap:5px;align-items:center;flex-wrap:wrap;
-  padding-bottom:12px;margin-bottom:14px;border-bottom:1.5px solid #e5e7eb;
+/* 좌우 분할 */
+.split{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start}
+.split-right{position:sticky;top:110px}
+@media (max-width:1100px){
+  .split{grid-template-columns:1fr}
+  .split-right{position:static}
 }
-.theme-search{
-  padding:5px 11px;border:1px solid #e5e7eb;border-radius:16px;
-  font-size:11.5px;font-family:inherit;outline:none;width:150px;
-  background:#f8f9fa;margin-left:10px;
+
+/* 📊 순위 */
+.rank-block{
+  background:#fff;border:1px solid #e5e7eb;border-radius:11px;
+  padding:12px 14px;margin-bottom:12px;
 }
-.theme-search:focus{border-color:#1a1d23;background:#fff;width:200px}
-.theme-meta{font-size:11px;color:#a8b0bd;margin-left:auto}
-.theme-list{display:flex;flex-direction:column;gap:5px}
-.theme-row{
-  background:#fff;border:1px solid #e5e7eb;border-radius:10px;
-  padding:11px 15px;cursor:pointer;transition:all .12s;
-  display:flex;align-items:center;gap:11px;
+.rank-head{
+  display:flex;align-items:center;gap:8px;
+  padding-bottom:8px;margin-bottom:6px;border-bottom:1.5px solid #1a1d23;
 }
-.theme-row:hover{border-color:#1a1d23;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
-.theme-row.open{border-color:#1a1d23}
-.th-idx{font-size:11px;font-weight:700;color:#a8b0bd;min-width:20px;text-align:right}
-.th-caret{font-size:10px;color:#a8b0bd;transition:transform .15s}
-.theme-row.open .th-caret{transform:rotate(90deg);color:#1a1d23}
-.th-name{font-size:14px;font-weight:700;white-space:nowrap}
-.th-cnt{font-size:10.5px;color:#a8b0bd;white-space:nowrap}
-.th-updown{font-size:10.5px;white-space:nowrap}
-.th-main{
-  flex:1;font-size:11.5px;color:#7a8099;min-width:0;
+.rank-title{font-size:13px;font-weight:700;white-space:nowrap}
+.rank-toggle{display:flex;gap:3px;margin-left:auto}
+.rank-toggle .seg{padding:3px 9px;font-size:10.5px}
+.rank-row{
+  display:flex;align-items:center;gap:7px;
+  padding:6px 2px;border-bottom:1px solid #f4f6f8;
+  font-size:12px;cursor:pointer;transition:background .1s;
+}
+.rank-row:last-child{border-bottom:none}
+.rank-row:hover{background:#f8f9fa}
+.rk-no{
+  font-size:10.5px;color:#a8b0bd;min-width:15px;text-align:right;
+  font-variant-numeric:tabular-nums;flex:0 0 auto;
+}
+.rk-star{
+  background:transparent;border:0;cursor:pointer;font-size:13px;
+  color:#dfe4ea;padding:0;transition:all .12s;flex:0 0 auto;
+}
+.rk-star:hover{color:#f0b429;transform:scale(1.2)}
+.rk-star.on{color:#f0b429}
+.rk-name{
+  font-weight:600;flex:1;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.th-pct{font-size:15px;font-weight:700;min-width:74px;text-align:right;
-  font-variant-numeric:tabular-nums}
-.th-period{font-size:11px;min-width:64px;text-align:right;
-  font-variant-numeric:tabular-nums;color:#a8b0bd}
-.theme-stocks{
-  margin:2px 0 8px 26px;padding-left:14px;border-left:2px dashed #e5e7eb;
+.rk-name:hover{color:#0984e3}
+.rk-sub{font-size:10px;color:#a8b0bd;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.rk-pct{
+  font-weight:700;min-width:52px;text-align:right;
+  font-variant-numeric:tabular-nums;flex:0 0 auto;
 }
-.theme-stocks .stock-table th{font-size:10px;padding:5px 8px}
-.theme-stocks .stock-row td{padding:6px 8px;font-size:12px}
-.th-star{
-  background:transparent;border:0;cursor:pointer;font-size:15px;
-  color:#d7dce3;padding:0 2px;transition:all .12s;
-}
-.th-star:hover{color:#f0b429;transform:scale(1.2)}
-.th-star.on{color:#f0b429}
+.rank-empty{font-size:11.5px;color:#a8b0bd;font-style:italic;padding:14px 2px}
 
 .stock-name.clickable{cursor:pointer;border-bottom:1px dashed transparent}
 .stock-name.clickable:hover{color:#0984e3;border-bottom-color:#0984e3}
@@ -292,7 +295,6 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
     <a href="/watchlist" class="btn">📊 전체 관심종목</a>
-    <button class="btn" onclick="toggleThemeView()" id="theme-btn">🏷️ 테마</button>
     <button class="btn" onclick="toggleEdit()" id="edit-btn">⚙️ 편집</button>
     <button class="btn btn-primary" onclick="refreshQuotes({force:true})" id="refresh-btn">🔄 시세 갱신</button>
     <button class="btn" onclick="window.print()">🖨️ 인쇄</button>
@@ -325,29 +327,34 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 
 <div class="wrap">
   <div class="updated" id="updated"></div>
-
-  <!-- 🏷️ 테마 (인포스탁) -->
-  <div id="theme-panel" style="display:none">
-    <div class="theme-bar">
-      <span class="ctrl-label">기간</span>
-      <button class="seg active" data-days="1" onclick="setThemeDays(1)">1일</button>
-      <button class="seg" data-days="5" onclick="setThemeDays(5)">5일</button>
-      <button class="seg" data-days="20" onclick="setThemeDays(20)">20일</button>
-      <span class="ctrl-label" style="margin-left:10px">정렬</span>
-      <button class="seg active" data-tsort="up" onclick="setThemeSort('up')">등락률 ↓</button>
-      <button class="seg" data-tsort="down" onclick="setThemeSort('down')">등락률 ↑</button>
-      <input type="text" id="theme-search" class="theme-search" placeholder="🔎 테마 검색"
-             oninput="renderThemes()" oncompositionstart="_composing=true"
-             oncompositionend="_composing=false;renderThemes()"/>
-      <button class="btn btn-mini" onclick="loadThemes(true)">🔄 갱신</button>
-      <span class="theme-meta" id="theme-meta"></span>
+  <div class="split">
+    <div class="split-left">
+      <div class="sector-tabs" id="sector-tabs"></div>
+      <div id="fav-body"><div class="content-empty">불러오는 중...</div></div>
     </div>
-    <div id="theme-list"><div class="content-empty">불러오는 중...</div></div>
-  </div>
-
-  <div id="fav-main">
-    <div class="sector-tabs" id="sector-tabs"></div>
-    <div id="fav-body"><div class="content-empty">불러오는 중...</div></div>
+    <div class="split-right">
+      <div class="rank-block">
+        <div class="rank-head">
+          <span class="rank-title">📊 등락률</span>
+          <span class="rank-toggle">
+            <button class="seg active" data-fluc="up" onclick="setFluc('up')">상승</button>
+            <button class="seg" data-fluc="down" onclick="setFluc('down')">하락</button>
+          </span>
+        </div>
+        <div id="rank-fluc"><div class="rank-empty">불러오는 중...</div></div>
+      </div>
+      <div class="rank-block">
+        <div class="rank-head"><span class="rank-title">💰 시총 상위</span></div>
+        <div id="rank-cap"><div class="rank-empty">불러오는 중...</div></div>
+      </div>
+      <div class="rank-block">
+        <div class="rank-head">
+          <span class="rank-title">💵 거래대금 상위</span>
+          <button class="btn btn-mini" style="margin-left:auto" onclick="loadRanks(true)">🔄</button>
+        </div>
+        <div id="rank-amount"><div class="rank-empty">불러오는 중...</div></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -508,7 +515,13 @@ function initEmpty(){
 function currentSector(){ return _data.sectors.find(s => s.id === _data.currentSectorId); }
 function isToday(s){ return s && s.id === TODAY_ID; }
 
-function render(){ renderTabs(); renderBody(); }
+function render(){
+  renderTabs(); renderBody();
+  // 순위 목록의 ★ 상태도 갱신
+  if(_ranks[_fluc]) renderRank('rank-fluc', _ranks[_fluc]);
+  if(_ranks['cap']) renderRank('rank-cap', _ranks['cap']);
+  if(_ranks['amount']) renderRank('rank-amount', _ranks['amount']);
+}
 
 function renderTabs(){
   const el = document.getElementById('sector-tabs');
@@ -862,138 +875,79 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ── 🏷️ 인포스탁 테마 ─────────────────────
-let _themeView = false;
-let _themes = [];
-let _themeDays = 1;
-let _themeSort = 'up';
-let _openThemes = {};
-let _themeStocks = {};   // {code: [종목]}
+// ── 📊 순위 (한투 API) ─────────────────────
+let _fluc = 'up';
+let _ranks = {};        // {kind: [items]}
 
-function toggleThemeView(){
-  _themeView = !_themeView;
-  document.getElementById('theme-panel').style.display = _themeView ? '' : 'none';
-  document.getElementById('fav-main').style.display = _themeView ? 'none' : '';
-  const b = document.getElementById('theme-btn');
-  b.classList.toggle('btn-primary', _themeView);
-  if(_themeView && !_themes.length) loadThemes();
+function setFluc(k){
+  _fluc = k;
+  document.querySelectorAll('.seg[data-fluc]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-fluc') === k));
+  try { localStorage.setItem('fav_fluc', k); } catch(e){}
+  if(_ranks[k]) renderRank('rank-fluc', _ranks[k]);
+  else loadRank(k, 'rank-fluc');
 }
 
-function setThemeDays(d){
-  _themeDays = d;
-  document.querySelectorAll('.seg[data-days]').forEach(b =>
-    b.classList.toggle('active', +b.getAttribute('data-days') === d));
-  _themeStocks = {};
-  loadThemes(true);
-}
-
-function setThemeSort(s){
-  _themeSort = s;
-  document.querySelectorAll('.seg[data-tsort]').forEach(b =>
-    b.classList.toggle('active', b.getAttribute('data-tsort') === s));
-  renderThemes();
-}
-
-async function loadThemes(force){
-  const list = document.getElementById('theme-list');
-  list.innerHTML = '<div class="content-empty">테마 불러오는 중...</div>';
+async function loadRank(kind, elId){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  if(!_ranks[kind]) el.innerHTML = '<div class="rank-empty">불러오는 중...</div>';
   try {
-    const url = '/api/kiwoom/themes?days=' + _themeDays + (force ? '&force=1' : '');
-    const res = await fetch(url);
+    const res = await fetch('/api/ranking?kind=' + kind);
     const d = await res.json();
     if(!d.ok){
-      list.innerHTML = '<div class="content-empty">⚠️ ' + esc(d.error || '불러오기 실패') + '</div>';
+      el.innerHTML = '<div class="rank-empty">⚠️ ' + esc(d.error || '실패') + '</div>';
       return;
     }
-    _themes = d.items || [];
-    document.getElementById('theme-meta').textContent =
-      _themes.length + '개 테마 · ' + new Date().toLocaleTimeString('ko-KR');
-    renderThemes();
+    _ranks[kind] = d.items || [];
+    renderRank(elId, _ranks[kind]);
   } catch(e){
-    list.innerHTML = '<div class="content-empty">⚠️ ' + esc(e.message || e) + '</div>';
+    el.innerHTML = '<div class="rank-empty">⚠️ ' + esc(e.message || e) + '</div>';
   }
 }
 
-function renderThemes(){
-  if(_composing) return;
-  const list = document.getElementById('theme-list');
-  if(!list) return;
-  const q = (document.getElementById('theme-search').value || '')
-              .trim().toLowerCase().replace(/\s/g,'');
-  let rows = _themes.slice();
-  if(q){
-    rows = rows.filter(t =>
-      (t.name||'').toLowerCase().replace(/\s/g,'').includes(q) ||
-      (t.main||'').toLowerCase().replace(/\s/g,'').includes(q));
-  }
-  rows.sort((a,b) => _themeSort === 'up'
-    ? (b.chg_pct - a.chg_pct) : (a.chg_pct - b.chg_pct));
+function loadRanks(force){
+  if(force) _ranks = {};
+  loadRank(_fluc, 'rank-fluc');
+  loadRank('cap', 'rank-cap');
+  loadRank('amount', 'rank-amount');
+}
 
-  if(!rows.length){
-    list.innerHTML = '<div class="content-empty">' +
-      (q ? '「' + esc(q) + '」 해당 테마 없음' : '테마 없음') + '</div>';
+// 억 단위로 축약
+function shortAmt(n){
+  if(!n) return '';
+  const eok = n / 100000000;
+  if(eok >= 10000) return Math.round(eok/10000) + '조';
+  if(eok >= 1) return Math.round(eok).toLocaleString('ko-KR') + '억';
+  return Math.round(n/10000).toLocaleString('ko-KR') + '만';
+}
+
+function renderRank(elId, items){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  if(!items || !items.length){
+    el.innerHTML = '<div class="rank-empty">데이터 없음</div>';
     return;
   }
-
-  let html = '<div class="theme-list">';
-  rows.forEach((t, i) => {
-    const open = !!_openThemes[t.code];
-    const cls = t.chg_pct > 0 ? 'up' : (t.chg_pct < 0 ? 'down' : 'flat');
-    const pcls = t.period_pct > 0 ? 'up' : (t.period_pct < 0 ? 'down' : 'flat');
-    html += '<div class="theme-row ' + (open?'open':'') + '" onclick="toggleTheme(\'' + t.code + '\')">' +
-      '<span class="th-idx">' + (i+1) + '</span>' +
-      '<span class="th-caret">▶</span>' +
-      '<button class="th-star" onclick="event.stopPropagation();favTheme(\'' + t.code + '\', this)" ' +
-        'title="이 테마를 즐겨찾기로">★</button>' +
-      '<span class="th-name">' + esc(t.name) + '</span>' +
-      '<span class="th-cnt">' + t.count + '종목</span>' +
-      '<span class="th-updown"><span class="up">▲' + t.up + '</span> ' +
-        '<span class="down">▼' + t.down + '</span></span>' +
-      '<span class="th-main">' + esc(t.main) + '</span>' +
-      '<span class="th-period ' + pcls + '">' + (t.period_pct>0?'+':'') + t.period_pct.toFixed(2) + '%</span>' +
-      '<span class="th-pct ' + cls + '">' + (t.chg_pct>0?'+':'') + t.chg_pct.toFixed(2) + '%</span>' +
+  const isCap = (elId === 'rank-cap');
+  const isAmt = (elId === 'rank-amount');
+  el.innerHTML = items.map((it, i) => {
+    const cls = it.chg_pct > 0 ? 'up' : (it.chg_pct < 0 ? 'down' : 'flat');
+    let sub = '';
+    if(isCap) sub = shortAmt(it.cap * 100000000 || 0);
+    else if(isAmt) sub = shortAmt(it.amount);
+    return '<div class="rank-row">' +
+      '<span class="rk-no">' + (i+1) + '</span>' +
+      '<button class="rk-star' + (isFavCode(it.code) ? ' on' : '') + '" ' +
+        'onclick="event.stopPropagation();favStock(\'' + it.code + '\',\'' +
+        esc(it.name).replace(/'/g,"\\'") + '\', this)" title="TODAY에 담기">★</button>' +
+      '<span class="rk-name" onclick="openStock(\'' + it.code + '\',\'' +
+        esc(it.name).replace(/'/g,"\\'") + '\')">' + esc(it.name) + '</span>' +
+      (sub ? '<span class="rk-sub">' + sub + '</span>' : '') +
+      '<span class="rk-pct ' + cls + '">' + (it.chg_pct>0?'+':'') +
+        it.chg_pct.toFixed(2) + '%</span>' +
       '</div>';
-    if(open) html += renderThemeStocks(t.code);
-  });
-  html += '</div>';
-  list.innerHTML = html;
-}
-
-function renderThemeStocks(code){
-  const st = _themeStocks[code];
-  if(st === undefined) return '<div class="theme-stocks"><div class="content-empty" style="padding:14px">종목 불러오는 중...</div></div>';
-  if(!st.length) return '<div class="theme-stocks"><div class="content-empty" style="padding:14px">종목 없음</div></div>';
-  return '<div class="theme-stocks" onclick="event.stopPropagation()">' +
-    '<table class="stock-table"><thead><tr>' +
-    '<th>종목명</th><th class="num">현재가</th><th class="num">등락률</th><th class="num">거래량</th><th></th>' +
-    '</tr></thead><tbody>' +
-    st.map(s => {
-      const cls = s.chg_pct > 0 ? 'up' : (s.chg_pct < 0 ? 'down' : 'flat');
-      return '<tr class="stock-row">' +
-        '<td><button class="th-star' + (isFavCode(s.code) ? ' on' : '') + '" ' +
-          'onclick="favStock(\'' + s.code + '\',\'' + esc(s.name).replace(/'/g,"\\'") + '\', this)">★</button>' +
-          '<span class="stock-name clickable" onclick="openStock(\'' + s.code + '\',\'' +
-          esc(s.name).replace(/'/g,"\\'") + '\')">' + esc(s.name) + '</span>' +
-          '<span class="stock-code">' + esc(s.code) + '</span></td>' +
-        '<td class="num">' + num(s.price) + '</td>' +
-        '<td class="num ' + cls + '">' + (s.chg_pct>0?'+':'') + s.chg_pct.toFixed(2) + '%</td>' +
-        '<td class="num">' + num(s.volume) + '</td>' +
-        '<td></td></tr>';
-    }).join('') + '</tbody></table></div>';
-}
-
-async function toggleTheme(code){
-  _openThemes[code] = !_openThemes[code];
-  renderThemes();
-  if(_openThemes[code] && _themeStocks[code] === undefined){
-    try {
-      const res = await fetch('/api/kiwoom/theme-stocks?code=' + encodeURIComponent(code) +
-                              '&days=' + _themeDays);
-      const d = await res.json();
-      _themeStocks[code] = d.ok ? (d.items || []) : [];
-    } catch(e){ _themeStocks[code] = []; }
-    renderThemes();
-  }
+  }).join('');
 }
 
 // 즐겨찾기에 이미 있는지
@@ -1006,7 +960,7 @@ function isFavCode(code){
   return false;
 }
 
-// 테마 종목 하나 → TODAY
+// 순위에서 ★ → TODAY 담기/빼기
 function favStock(code, name, btn){
   const s = _data.sectors.find(x => x.id === TODAY_ID);
   if(!s) return;
@@ -1023,45 +977,8 @@ function favStock(code, name, btn){
     showSaved('⭐ TODAY에 담김: ' + name);
   }
   scheduleSave();
-}
-
-// 테마 통째로 → 그 이름의 섹터
-async function favTheme(code, btn){
-  const t = _themes.find(x => x.code === code);
-  if(!t) return;
-  let stocks = _themeStocks[code];
-  if(stocks === undefined){
-    showSaved('⏳ 종목 불러오는 중...');
-    try {
-      const res = await fetch('/api/kiwoom/theme-stocks?code=' + encodeURIComponent(code) +
-                              '&days=' + _themeDays);
-      const d = await res.json();
-      stocks = _themeStocks[code] = d.ok ? (d.items || []) : [];
-    } catch(e){ stocks = _themeStocks[code] = []; }
-  }
-  if(!stocks.length){ showSaved('⚠️ 구성 종목을 못 가져옴'); return; }
-
-  const name = '🏷️ ' + t.name;
-  let fs = _data.sectors.find(x => x.name === name);
-  if(!fs){
-    fs = {id: genId(), name: name, groups: [{id: genId(), name: '', stocks: []}]};
-    _data.sectors.push(fs);
-  }
-  if(!fs.groups || !fs.groups.length) fs.groups = [{id: genId(), name: '', stocks: []}];
-  const g = fs.groups[0];
-  g.stocks = g.stocks || [];
-  const have = new Set(g.stocks.map(x => x.code));
-  let added = 0;
-  for(const s of stocks){
-    if(have.has(s.code)) continue;
-    g.stocks.push({code: s.code, name: s.name, memo: ''});
-    have.add(s.code);
-    added++;
-  }
-  if(btn) btn.classList.add('on');
-  scheduleSave();
   render();
-  showSaved('⭐ 「' + t.name + '」 ' + added + '종목 담김');
+  refreshQuotes({force:true});
 }
 
 function setMemo(gid, code, val){
@@ -1303,6 +1220,8 @@ function initControls(){
     if(['auto','pre','after'].includes(s)) _session = s;
     const so = localStorage.getItem('fav_sort');
     if(['manual','chg_desc','chg_asc'].includes(so)) _sort = so;
+    const fl = localStorage.getItem('fav_fluc');
+    if(['up','down'].includes(fl)) _fluc = fl;
   } catch(e){}
   document.querySelectorAll('.seg[data-mkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market));
@@ -1310,6 +1229,8 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-sess') === _session));
   document.querySelectorAll('.seg[data-sort]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-sort') === _sort));
+  document.querySelectorAll('.seg[data-fluc]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-fluc') === _fluc));
   const sw = document.getElementById('sess-wrap');
   if(sw) sw.style.display = (_market === 'NX') ? '' : 'none';
   updateHint();
@@ -1326,6 +1247,8 @@ document.addEventListener('visibilitychange', () => {
 initControls();
 loadData();
 startAuto();
+loadRanks();
+setInterval(() => { if(!document.hidden && !_editing) loadRanks(true); }, 180000);
 </script>
 </body>
 </html>
