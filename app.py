@@ -15,7 +15,6 @@ from sector_news import get_sector_news_html, fetch_all_sectors_sync
 from telegram_pulse import generate_pulse_sync
 from watchlist import get_watchlist_html, fetch_stock_quotes, fetch_quotes_with_gap
 from watchlist_fav import get_fav_html
-import kiwoom_api
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -666,48 +665,188 @@ def watchlist_fav_page():
     return Response(html, mimetype="text/html")
 
 
-@app.route("/api/kiwoom/themes")
-@requires_auth
-def api_kiwoom_themes():
-    """인포스탁 테마 목록 + 등락률"""
-    date_tp = (request.args.get("days") or "1").strip()
-    sort = (request.args.get("sort") or "0").strip()
-    force = request.args.get("force") == "1"
+_rank_cache = {}   # {key: {"at": ts, "items": [...]}}
+
+
+def _rank_num(v, d=0):
     try:
-        items = kiwoom_api.get_themes(date_tp, sort, force)
-        return jsonify({"ok": True, "items": items, "count": len(items)})
+        return int(float(str(v).replace(",", "").replace("+", "").strip() or d))
+    except Exception:
+        return d
+
+
+def _rank_float(v, d=0.0):
+    try:
+        return float(str(v).replace(",", "").replace("+", "").strip() or d)
+    except Exception:
+        return d
+
+
+def fetch_ranking(kind: str, limit: int = 10) -> list:
+    """
+    한투 순위 조회
+      kind: up(등락률 상위) / down(등락률 하위) / cap(시총 상위) / amount(거래대금 상위)
+    """
+    import time as _t
+    key = f"{kind}|{limit}"
+    c = _rank_cache.get(key)
+    if c and (_t.time() - c["at"]) < 60:
+        return c["items"]
+
+    try:
+        if kind in ("up", "down"):
+            # 등락률 순위
+            r = kis_get(
+                "/uapi/domestic-stock/v1/ranking/fluctuation",
+                "FHPST01700000",
+                {
+                    "fid_cond_mrkt_div_code": "J",
+                    "fid_cond_scr_div_code": "20170",
+                    "fid_input_iscd": "0000",          # 전체
+                    "fid_rank_sort_cls_code": "0" if kind == "up" else "1",
+                    "fid_input_cnt_1": "0",
+                    "fid_prc_cls_code": "0",
+                    "fid_input_price_1": "",
+                    "fid_input_price_2": "",
+                    "fid_vol_cnt": "",
+                    "fid_trgt_cls_code": "0",
+                    "fid_trgt_exls_cls_code": "0",
+                    "fid_div_cls_code": "0",
+                    "fid_rsfl_rate1": "",
+                    "fid_rsfl_rate2": "",
+                },
+            )
+        elif kind == "cap":
+            r = kis_get(
+                "/uapi/domestic-stock/v1/ranking/market-cap",
+                "FHPST01740000",
+                {
+                    "fid_cond_mrkt_div_code": "J",
+                    "fid_cond_scr_div_code": "20174",
+                    "fid_input_iscd": "0000",
+                    "fid_div_cls_code": "0",
+                    "fid_trgt_cls_code": "0",
+                    "fid_trgt_exls_cls_code": "0",
+                    "fid_input_price_1": "",
+                    "fid_input_price_2": "",
+                    "fid_vol_cnt": "",
+                },
+            )
+        else:  # amount — 거래대금 상위
+            r = kis_get(
+                "/uapi/domestic-stock/v1/quotations/volume-rank",
+                "FHPST01710000",
+                {
+                    "fid_cond_mrkt_div_code": "J",
+                    "fid_cond_scr_div_code": "20171",
+                    "fid_input_iscd": "0000",
+                    "fid_div_cls_code": "0",
+                    "fid_blng_cls_code": "3",      # 3 = 거래대금순
+                    "fid_trgt_cls_code": "111111111",
+                    "fid_trgt_exls_cls_code": "0000000000",
+                    "fid_input_price_1": "",
+                    "fid_input_price_2": "",
+                    "fid_vol_cnt": "",
+                    "fid_input_date_1": "",
+                },
+            )
+
+        rows = r.get("output") or r.get("output1") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+
+        items = []
+        for o in rows[:limit]:
+            code = (o.get("mksc_shrn_iscd") or o.get("stck_shrn_iscd")
+                    or o.get("mksc_shrn_iscd1") or "").strip()
+            name = (o.get("hts_kor_isnm") or o.get("kor_isnm") or "").strip()
+            if not code:
+                continue
+            price = _rank_num(o.get("stck_prpr"))
+            chg = _rank_num(o.get("prdy_vrss"))
+            pct = _rank_float(o.get("prdy_ctrt"))
+            sign = str(o.get("prdy_vrss_sign", "3"))
+            if sign in ("4", "5"):
+                chg, pct = -abs(chg), -abs(pct)
+            items.append({
+                "code": code,
+                "name": name or code,
+                "price": price,
+                "chg": chg,
+                "chg_pct": pct,
+                "volume": _rank_num(o.get("acml_vol")),
+                "amount": _rank_num(o.get("acml_tr_pbmn")),
+                "cap": _rank_num(o.get("stck_avls")),
+            })
+        if items:
+            _rank_cache[key] = {"at": _t.time(), "items": items}
+        return items
+    except Exception as e:
+        print(f"[ranking] {kind} 실패: {e}")
+        return []
+
+
+@app.route("/api/ranking")
+@requires_auth
+def api_ranking():
+    """순위 조회 — up / down / cap / amount"""
+    kind = (request.args.get("kind") or "up").strip()
+    if kind not in ("up", "down", "cap", "amount"):
+        return jsonify({"ok": False, "error": "invalid kind"}), 400
+    try:
+        items = fetch_ranking(kind, 10)
+        return jsonify({"ok": True, "kind": kind, "items": items})
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"ok": False, "items": [],
                         "error": f"{type(e).__name__}: {str(e)[:200]}"})
 
 
-@app.route("/api/kiwoom/theme-stocks")
+@app.route("/api/ranking-debug")
 @requires_auth
-def api_kiwoom_theme_stocks():
-    """테마 구성 종목"""
-    code = (request.args.get("code") or "").strip()
-    days = (request.args.get("days") or "1").strip()
-    if not code:
-        return jsonify({"ok": False, "error": "code required"}), 400
+def api_ranking_debug():
+    """순위 API 원본 응답 확인"""
+    kind = (request.args.get("kind") or "up").strip()
+    out = {"kind": kind}
     try:
-        items = kiwoom_api.get_theme_stocks(code, days)
-        return jsonify({"ok": True, "items": items, "count": len(items)})
+        if kind in ("up", "down"):
+            r = kis_get("/uapi/domestic-stock/v1/ranking/fluctuation", "FHPST01700000", {
+                "fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20170",
+                "fid_input_iscd": "0000",
+                "fid_rank_sort_cls_code": "0" if kind == "up" else "1",
+                "fid_input_cnt_1": "0", "fid_prc_cls_code": "0",
+                "fid_input_price_1": "", "fid_input_price_2": "", "fid_vol_cnt": "",
+                "fid_trgt_cls_code": "0", "fid_trgt_exls_cls_code": "0",
+                "fid_div_cls_code": "0", "fid_rsfl_rate1": "", "fid_rsfl_rate2": "",
+            })
+        elif kind == "cap":
+            r = kis_get("/uapi/domestic-stock/v1/ranking/market-cap", "FHPST01740000", {
+                "fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20174",
+                "fid_input_iscd": "0000", "fid_div_cls_code": "0",
+                "fid_trgt_cls_code": "0", "fid_trgt_exls_cls_code": "0",
+                "fid_input_price_1": "", "fid_input_price_2": "", "fid_vol_cnt": "",
+            })
+        else:
+            r = kis_get("/uapi/domestic-stock/v1/quotations/volume-rank", "FHPST01710000", {
+                "fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20171",
+                "fid_input_iscd": "0000", "fid_div_cls_code": "0",
+                "fid_blng_cls_code": "3", "fid_trgt_cls_code": "111111111",
+                "fid_trgt_exls_cls_code": "0000000000",
+                "fid_input_price_1": "", "fid_input_price_2": "",
+                "fid_vol_cnt": "", "fid_input_date_1": "",
+            })
+        out["rt_cd"] = r.get("rt_cd")
+        out["msg1"] = r.get("msg1")
+        out["keys"] = [k for k in r.keys()]
+        rows = r.get("output") or r.get("output1") or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        out["count"] = len(rows)
+        out["sample"] = rows[:2]
     except Exception as e:
         import traceback; traceback.print_exc()
-        return jsonify({"ok": False, "items": [],
-                        "error": f"{type(e).__name__}: {str(e)[:200]}"})
-
-
-@app.route("/api/kiwoom/diagnose")
-@requires_auth
-def api_kiwoom_diagnose():
-    """키움 REST API 연결 진단"""
-    try:
-        return jsonify(kiwoom_api.diagnose())
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": f"{type(e).__name__}: {str(e)[:300]}"})
+        out["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+    return jsonify(out)
 
 
 @app.route("/api/myip")
