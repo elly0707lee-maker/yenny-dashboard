@@ -156,7 +156,29 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   margin-top:20px;padding-top:16px;border-top:2px solid #e5e7eb;
 }
 .news-head{display:flex;align-items:center;gap:9px;margin-bottom:10px}
-.news-title{font-size:14px;font-weight:700;white-space:nowrap}
+.news-title{
+  font-size:14px;font-weight:700;white-space:nowrap;
+  color:#1a1d23;text-decoration:none;
+  border-bottom:1px dashed transparent;
+}
+.news-title[href="#"]{pointer-events:none}
+.news-title:hover{color:#0984e3;border-bottom-color:#0984e3}
+.news-acts{display:flex;gap:4px;margin-left:auto}
+.news-db{
+  background:#fafbfc;border:1px solid #eceff1;border-radius:9px;
+  padding:11px 14px;margin-bottom:12px;
+}
+.news-db .db-entry{
+  background:#fff;border:1px solid #f1f3f5;border-radius:7px;
+  padding:9px 12px;margin-bottom:6px;
+}
+.news-db .db-entry:last-child{margin-bottom:0}
+.news-db .db-theme{
+  display:inline-block;font-size:10.5px;font-weight:700;
+  background:#e8f4fd;color:#0277bd;padding:2px 9px;border-radius:10px;margin-bottom:5px;
+}
+.news-db .db-desc{font-size:12px;line-height:1.6;color:#2d3436}
+.news-db .empty{font-size:12px;color:#a8b0bd;font-style:italic}
 .news-sub{font-size:11.5px;color:#a8b0bd}
 .news-item{
   display:block;padding:9px 11px;border-radius:8px;
@@ -431,11 +453,14 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
       <!-- 📰 선택 종목 뉴스 -->
       <div class="news-panel" id="news-panel">
         <div class="news-head">
-          <span class="news-title" id="news-title">📰 뉴스</span>
+          <a class="news-title" id="news-title" href="#" target="_blank">📰 뉴스</a>
           <span class="news-sub" id="news-sub">종목을 클릭하면 관련 뉴스가 나옵니다</span>
-          <button class="btn btn-mini" id="news-refresh" style="margin-left:auto;display:none"
-                  onclick="loadNews(_newsCode, _newsName, true)">🔄</button>
+          <span class="news-acts" id="news-acts" style="display:none">
+            <button class="btn btn-mini" onclick="toggleNewsDb()" id="db-btn">📚 DB</button>
+            <button class="btn btn-mini" onclick="loadNews(_newsCode, _newsName, true)">🔄</button>
+          </span>
         </div>
+        <div id="news-db" class="news-db" style="display:none"></div>
         <div id="news-body"></div>
       </div>
     </div>
@@ -1172,10 +1197,20 @@ async function loadNews(code, name, force){
   const t = document.getElementById('news-title');
   const s = document.getElementById('news-sub');
   const b = document.getElementById('news-body');
-  const rb = document.getElementById('news-refresh');
-  if(t) t.textContent = '📰 ' + _newsName;
+  const acts = document.getElementById('news-acts');
+  if(t){
+    t.textContent = '📈 ' + _newsName;
+    t.href = chartUrl(code);
+    t.title = '네이버 차트 열기';
+  }
   if(s) s.textContent = code;
-  if(rb) rb.style.display = '';
+  if(acts) acts.style.display = 'flex';
+  // 종목이 바뀌면 DB 패널은 닫고 비움
+  const dbEl = document.getElementById('news-db');
+  if(dbEl){ dbEl.style.display = 'none'; dbEl.innerHTML = ''; }
+  _dbOpen = false; _dbCode = '';
+  const dbBtn = document.getElementById('db-btn');
+  if(dbBtn) dbBtn.classList.remove('btn-primary');
   if(b) b.innerHTML = '<div class="news-empty">뉴스 불러오는 중...</div>';
   try {
     const r = await fetch('/api/stock-news?q=' + encodeURIComponent(_newsName));
@@ -1197,6 +1232,37 @@ async function loadNews(code, name, force){
     b.innerHTML = '<div class="news-empty">⚠️ ' + esc(e.message || e) + '</div>';
   } finally {
     _newsLoading = false;
+  }
+}
+
+// K-Stock DB 패널 토글
+let _dbOpen = false, _dbCode = '';
+
+async function toggleNewsDb(){
+  const el = document.getElementById('news-db');
+  const btn = document.getElementById('db-btn');
+  if(!el || !_newsCode) return;
+  _dbOpen = !_dbOpen;
+  el.style.display = _dbOpen ? 'block' : 'none';
+  if(btn) btn.classList.toggle('btn-primary', _dbOpen);
+  if(!_dbOpen) return;
+  if(_dbCode === _newsCode) return;   // 이미 불러온 종목
+
+  el.innerHTML = '<div class="empty">DB 불러오는 중...</div>';
+  try {
+    const r = await fetch('/api/watchlist/stock-info?code=' + encodeURIComponent(_newsCode));
+    const d = await r.json();
+    _dbCode = _newsCode;
+    const entries = d.entries || [];
+    el.innerHTML = entries.length
+      ? entries.map(e => '<div class="db-entry">' +
+          (e.theme ? '<div class="db-theme">' + esc(e.theme) + '</div>' : '') +
+          (e.desc ? '<div class="db-desc">' + esc(e.desc) + '</div>' : '') +
+          '</div>').join('')
+      : '<div class="empty">K-Stock DB에 등록된 정보가 없습니다' +
+        (d.db_size ? ' (' + d.db_size + '종목 중)' : '') + '</div>';
+  } catch(e){
+    el.innerHTML = '<div class="empty">⚠️ ' + esc(e.message || e) + '</div>';
   }
 }
 
