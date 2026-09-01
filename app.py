@@ -814,25 +814,27 @@ def fetch_ranking(kind: str, market: str = "all", limit: int = 10) -> dict:
 @app.route("/api/rankings")
 @requires_auth
 def api_rankings():
-    """등락률·시총·거래대금 순위를 한 번에 (병렬)"""
-    import concurrent.futures
+    """등락률·시총·거래대금 순위를 한 번에.
+    ⚠️ 병렬로 부르면 토큰 갱신이 겹쳐 credentials 오류가 나므로 순차 호출한다."""
     market = (request.args.get("market") or "all").strip()
     fluc = (request.args.get("fluc") or "up").strip()
+    limit = min(30, max(10, int(request.args.get("limit") or 10)))
     if market not in RANK_MARKET:
         market = "all"
     if fluc not in ("up", "down"):
         fluc = "up"
-    kinds = [fluc, "cap", "amount"]
     out = {}
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
-            futs = {k: ex.submit(fetch_ranking, k, market, 10) for k in kinds}
-            for k, f in futs.items():
-                out[k] = f.result()
-        return jsonify({"ok": True, "market": market, "fluc": fluc, "data": out})
+        get_kis_token()          # 토큰을 먼저 확보해 경합 방지
     except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+        return jsonify({"ok": False, "error": f"토큰 실패: {str(e)[:150]}"})
+    for k in (fluc, "cap", "amount"):
+        try:
+            out[k] = fetch_ranking(k, market, limit)
+        except Exception as e:
+            out[k] = {"items": [], "error": f"{type(e).__name__}: {str(e)[:120]}"}
+    return jsonify({"ok": True, "market": market, "fluc": fluc,
+                    "limit": limit, "data": out})
 
 
 @app.route("/api/ranking")
