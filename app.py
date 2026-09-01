@@ -15,6 +15,7 @@ from sector_news import get_sector_news_html, fetch_all_sectors_sync
 from telegram_pulse import generate_pulse_sync
 from watchlist import get_watchlist_html, fetch_stock_quotes, fetch_quotes_with_gap
 from watchlist_fav import get_fav_html
+import kiwoom_api
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB
@@ -663,6 +664,17 @@ def watchlist_fav_page():
     secret = f'<script>window._API_SECRET="{API_SECRET}";</script>'
     html = html.replace('</head>', f'{secret}</head>', 1)
     return Response(html, mimetype="text/html")
+
+
+@app.route("/api/kiwoom/diagnose")
+@requires_auth
+def api_kiwoom_diagnose():
+    """키움 REST API 연결 진단"""
+    try:
+        return jsonify(kiwoom_api.diagnose())
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": f"{type(e).__name__}: {str(e)[:300]}"})
 
 
 @app.route("/api/myip")
