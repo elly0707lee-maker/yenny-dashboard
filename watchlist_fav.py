@@ -139,6 +139,33 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   .split-right{position:static}
 }
 
+/* 🔎 전역 종목 검색 */
+.gs-wrap{position:relative}
+.gs-box{
+  padding:5px 12px;border:1px solid #e5e7eb;border-radius:16px;
+  font-size:11.5px;font-family:inherit;outline:none;width:210px;
+  background:#f8f9fa;transition:all .12s;
+}
+.gs-box:focus{border-color:#1a1d23;background:#fff;width:280px}
+.gs-list{
+  display:none;position:absolute;top:calc(100% + 4px);right:0;
+  min-width:280px;background:#fff;border:1px solid #e5e7eb;border-radius:9px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.12);z-index:120;
+  max-height:300px;overflow-y:auto;
+}
+.gs-list.open{display:block}
+.gs-item{
+  padding:9px 13px;font-size:12.5px;cursor:pointer;
+  display:flex;align-items:center;gap:9px;border-bottom:1px solid #f4f6f8;
+}
+.gs-item:last-child{border-bottom:none}
+.gs-item:hover,.gs-item.sel{background:#f1f3f5}
+.gs-name{font-weight:600;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gs-code{font-size:10.5px;color:#a8b0bd}
+.gs-tag{font-size:10px;color:#f0b429;font-weight:700}
+.gs-msg{padding:11px 13px;font-size:12px;color:#a8b0bd}
+
 /* 📊 순위 */
 .rank-market{
   display:flex;gap:4px;align-items:center;margin-bottom:10px;
@@ -182,9 +209,15 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   font-weight:700;min-width:52px;text-align:right;
   font-variant-numeric:tabular-nums;flex:0 0 auto;
 }
+.chart-ic{
+  text-decoration:none;font-size:12px;opacity:0.35;
+  padding:0 3px;transition:opacity .12s;flex:0 0 auto;
+}
+.chart-ic:hover{opacity:1}
+.stock-row:hover .chart-ic,.rank-row:hover .chart-ic,.gs-item:hover .chart-ic{opacity:0.8}
 .rank-empty{font-size:11.5px;color:#a8b0bd;font-style:italic;padding:14px 2px}
 .rank-more{
-  display:none;width:100%;padding:6px;margin-top:6px;
+  width:100%;padding:6px;margin-top:6px;
   border:1px dashed #dfe4ea;border-radius:7px;
   background:transparent;color:#a8b0bd;font-size:11px;cursor:pointer;
   font-family:inherit;transition:all .12s;
@@ -333,6 +366,17 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
     <button class="seg" data-sort="chg_asc" onclick="setSort('chg_asc')">등락률 ↑</button>
   </div>
   <div class="ctrl-group" style="margin-left:auto">
+    <div class="gs-wrap">
+      <input type="text" id="gs-input" class="gs-box" placeholder="🔎 종목 검색해서 TODAY에 담기"
+             autocomplete="off" oninput="gsSearch(this.value)"
+             oncompositionstart="_composing=true"
+             oncompositionend="_composing=false;gsSearch(this.value)"
+             onkeydown="gsKey(event)"
+             onblur="setTimeout(gsClose, 200)"/>
+      <div class="gs-list" id="gs-list"></div>
+    </div>
+  </div>
+  <div class="ctrl-group">
     <span class="market-hint" id="market-hint"></span>
   </div>
 </div>
@@ -386,7 +430,11 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
       <button class="btn btn-mini" onclick="closeStock()">✕</button>
     </div>
     <div class="modal-body" id="stock-body"></div>
-    <div class="modal-foot"><button class="btn" onclick="closeStock()">닫기</button></div>
+    <div class="modal-foot">
+      <a class="btn" id="chart-link" href="#" target="_blank">📈 네이버 차트</a>
+      <a class="btn" id="naver-link" href="#" target="_blank">🔍 종목 정보</a>
+      <button class="btn" onclick="closeStock()">닫기</button>
+    </div>
   </div>
 </div>
 
@@ -693,7 +741,8 @@ function renderRow(gid, st, isNxt){
     '<td class="memo-cell"><input class="memo-input" placeholder="메모..." ' +
       'value="' + esc(st.memo || '') + '" ' +
       'oninput="setMemo(\'' + gid + '\',\'' + st.code + '\', this.value)"/></td>' +
-    '<td><span class="row-actions"><button class="btn btn-mini btn-danger" ' +
+    '<td>' + chartBtn(st.code) +
+      '<span class="row-actions"><button class="btn btn-mini btn-danger" ' +
       'onclick="delStock(\'' + gid + '\',\'' + st.code + '\')">✕</button></span></td>' +
     '</tr>';
 }
@@ -804,6 +853,10 @@ async function openStock(code, name){
   const ov = document.getElementById('stock-overlay');
   const body = document.getElementById('stock-body');
   document.getElementById('stock-title').textContent = name + '  ' + code;
+  const cl = document.getElementById('chart-link');
+  if(cl) cl.href = 'https://m.stock.naver.com/fchart/domestic/stock/' + code;
+  const nl = document.getElementById('naver-link');
+  if(nl) nl.href = 'https://m.stock.naver.com/domestic/stock/' + code + '/total';
   ov.classList.add('open');
 
   const q = _quotes[code] || {};
@@ -968,9 +1021,8 @@ function toggleOne(which){
 function moreLabel(which, total){
   const b = document.getElementById('more-' + which);
   if(!b) return;
-  if(total <= 10){ b.style.display = 'none'; return; }
-  b.style.display = '';
-  b.textContent = _expand[which] ? '▴ 접기' : ('▾ ' + total + '위까지 보기');
+  b.style.display = 'block';
+  b.textContent = _expand[which] ? '▴ 접기' : ('▾ 더보기 (' + total + '위까지)');
 }
 
 function setRankMsg(id, msg){
@@ -1016,6 +1068,7 @@ function renderRank(elId, items){
       (sub ? '<span class="rk-sub">' + sub + '</span>' : '') +
       '<span class="rk-pct ' + cls + '">' + (it.chg_pct>0?'+':'') +
         it.chg_pct.toFixed(2) + '%</span>' +
+      chartBtn(it.code) +
       '</div>';
   }).join('');
   moreLabel(which, items.length);
@@ -1050,6 +1103,97 @@ function favStock(code, name, btn){
   scheduleSave();
   render();
   refreshQuotes({force:true});
+}
+
+// 네이버 차트 링크
+function chartUrl(code){ return 'https://m.stock.naver.com/fchart/domestic/stock/' + code; }
+function chartBtn(code){
+  return '<a class="chart-ic" href="' + chartUrl(code) + '" target="_blank" ' +
+         'onclick="event.stopPropagation()" title="네이버 차트">📈</a>';
+}
+
+// ── 🔎 전역 종목 검색 → TODAY에 담기 ──────
+const _gs = {timer:null, items:[], sel:-1};
+
+function gsSearch(q){
+  if(_composing) return;
+  q = (q || '').trim();
+  const list = document.getElementById('gs-list');
+  if(!list) return;
+  if(_gs.timer) clearTimeout(_gs.timer);
+  if(!q){ gsClose(); return; }
+
+  if(/^\d{6}$/.test(q)){
+    _gs.items = [{code:q, name:q}];
+    _gs.sel = 0;
+    list.innerHTML = '<div class="gs-item sel" onclick="gsPick(0)">' +
+      '<span class="gs-name">종목코드 ' + q + '</span>' +
+      '<span class="gs-code">직접 추가</span></div>';
+    list.classList.add('open');
+    return;
+  }
+
+  list.innerHTML = '<div class="gs-msg">검색 중...</div>';
+  list.classList.add('open');
+  _gs.timer = setTimeout(async () => {
+    try {
+      const r = await fetch('/api/watchlist/search?q=' + encodeURIComponent(q));
+      const d = await r.json();
+      const items = d.items || [];
+      _gs.items = items; _gs.sel = -1;
+      if(!items.length){
+        list.innerHTML = '<div class="gs-msg">검색 결과 없음 · 6자리 코드로 직접 입력 가능</div>';
+        return;
+      }
+      list.innerHTML = items.map((it,i) =>
+        '<div class="gs-item" data-i="' + i + '" onclick="gsPick(' + i + ')">' +
+        '<span class="gs-name">' + esc(it.name) + '</span>' +
+        '<span class="gs-code">' + esc(it.code) + '</span>' +
+        (isFavCode(it.code) ? '<span class="gs-tag">★ 담김</span>' : '') +
+        chartBtn(it.code) +
+        '</div>').join('');
+    } catch(e){
+      list.innerHTML = '<div class="gs-msg">검색 실패 · 6자리 코드로 직접 입력 가능</div>';
+    }
+  }, 300);
+}
+
+function gsKey(e){
+  if(_composing || e.isComposing || e.keyCode === 229) return;
+  const list = document.getElementById('gs-list');
+  if(!_gs.items.length || !list || !list.classList.contains('open')){
+    if(e.key === 'Enter'){
+      const v = (document.getElementById('gs-input').value || '').trim();
+      if(/^\d{6}$/.test(v)){ favStock(v, v, null); document.getElementById('gs-input').value=''; }
+    }
+    return;
+  }
+  if(e.key === 'ArrowDown'){ e.preventDefault(); _gs.sel = Math.min(_gs.sel+1, _gs.items.length-1); gsHi(); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); _gs.sel = Math.max(_gs.sel-1, 0); gsHi(); }
+  else if(e.key === 'Enter'){ e.preventDefault(); gsPick(_gs.sel < 0 ? 0 : _gs.sel); }
+  else if(e.key === 'Escape'){ gsClose(); }
+}
+
+function gsHi(){
+  const list = document.getElementById('gs-list');
+  if(!list) return;
+  list.querySelectorAll('.gs-item').forEach(el => el.classList.remove('sel'));
+  const t = list.querySelector('[data-i="' + _gs.sel + '"]');
+  if(t){ t.classList.add('sel'); t.scrollIntoView({block:'nearest'}); }
+}
+
+function gsPick(i){
+  const it = _gs.items[i];
+  if(!it) return;
+  favStock(it.code, it.name, null);
+  const inp = document.getElementById('gs-input');
+  if(inp){ inp.value = ''; inp.focus(); }
+  gsClose();
+}
+
+function gsClose(){
+  const list = document.getElementById('gs-list');
+  if(list) list.classList.remove('open');
 }
 
 function setMemo(gid, code, val){
@@ -1308,10 +1452,7 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-fluc') === _fluc));
   document.querySelectorAll('.seg[data-rmkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-rmkt') === _rankMarket));
-  ['fluc','cap','amount'].forEach(w => {
-    const b = document.getElementById('more-' + w);
-    if(b) b.style.display = 'none';
-  });
+
   const sw = document.getElementById('sess-wrap');
   if(sw) sw.style.display = (_market === 'NX') ? '' : 'none';
   updateHint();
