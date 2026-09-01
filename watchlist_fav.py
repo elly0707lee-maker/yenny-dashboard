@@ -277,6 +277,10 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .chart-ic:hover{opacity:1}
 .stock-row:hover .chart-ic,.rank-row:hover .chart-ic,.gs-item:hover .chart-ic{opacity:0.8}
+.rk-nonxt{
+  font-size:9.5px;color:#a8b0bd;background:#f4f6f8;
+  padding:1px 5px;border-radius:7px;flex:0 0 auto;
+}
 .rank-empty{font-size:11.5px;color:#a8b0bd;font-style:italic;padding:14px 2px}
 .rank-more{
   width:100%;padding:6px;margin-top:6px;
@@ -473,24 +477,14 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
       </div>
       <div class="rank-block">
         <div class="rank-head">
-          <span class="rank-title">📊 등락률</span>
+          <span class="rank-title">💰 시총 상위</span>
           <span class="rank-toggle">
-            <button class="seg active" data-fluc="up" onclick="setFluc('up')">상승</button>
-            <button class="seg" data-fluc="down" onclick="setFluc('down')">하락</button>
+            <button class="seg active" data-capm="J" onclick="setCapMode('J')">KRX</button>
+            <button class="seg" data-capm="NX" onclick="setCapMode('NX')">NXT</button>
           </span>
         </div>
-        <div id="rank-fluc"><div class="rank-empty">불러오는 중...</div></div>
-        <button class="rank-more" id="more-fluc" onclick="toggleOne('fluc')">▾ 더보기</button>
-      </div>
-      <div class="rank-block">
-        <div class="rank-head"><span class="rank-title">💰 시총 상위</span></div>
         <div id="rank-cap"><div class="rank-empty">불러오는 중...</div></div>
         <button class="rank-more" id="more-cap" onclick="toggleOne('cap')">▾ 더보기</button>
-      </div>
-      <div class="rank-block">
-        <div class="rank-head"><span class="rank-title">💵 거래대금 상위</span></div>
-        <div id="rank-amount"><div class="rank-empty">불러오는 중...</div></div>
-        <button class="rank-more" id="more-amount" onclick="toggleOne('amount')">▾ 더보기</button>
       </div>
     </div>
   </div>
@@ -660,9 +654,7 @@ function isToday(s){ return s && s.id === TODAY_ID; }
 function render(){
   renderTabs(); renderBody();
   // 순위 목록의 ★ 상태도 갱신
-  if(_ranks[_fluc]) renderRank('rank-fluc', _ranks[_fluc]);
   if(_ranks['cap']) renderRank('rank-cap', _ranks['cap']);
-  if(_ranks['amount']) renderRank('rank-amount', _ranks['amount']);
 }
 
 function renderTabs(){
@@ -1028,19 +1020,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── 📊 순위 (한투 API) ─────────────────────
-let _fluc = 'up';
+let _capMode = 'J';      // 시총 블록 KRX / NXT
+let _capNxt = {};        // {code: {pct, no_nxt}}
 let _rankMarket = 'all';
 let _ranks = {};
 let _rankLoading = false;
-let _expand = {fluc:false, cap:false, amount:false};   // 블록별 더보기
-
-function setFluc(k){
-  _fluc = k;
-  document.querySelectorAll('.seg[data-fluc]').forEach(b =>
-    b.classList.toggle('active', b.getAttribute('data-fluc') === k));
-  try { localStorage.setItem('fav_fluc', k); } catch(e){}
-  loadRanks();
-}
+let _expand = {cap:false};
 
 function setRankMarket(m){
   _rankMarket = m;
@@ -1057,46 +1042,73 @@ async function loadRanks(force){
   _rankLoading = true;
   const btn = document.getElementById('rank-refresh');
   if(btn) btn.textContent = '⏳';
-  // 캐시된 게 있으면 먼저 그려두고 갱신
-  if(_ranks[_fluc]) renderRank('rank-fluc', _ranks[_fluc]);
-  else setRankMsg('rank-fluc', '불러오는 중...');
   if(!_ranks['cap']) setRankMsg('rank-cap', '불러오는 중...');
-  if(!_ranks['amount']) setRankMsg('rank-amount', '불러오는 중...');
-
   try {
-    const res = await fetch('/api/rankings?market=' + _rankMarket + '&fluc=' + _fluc +
-                            '&limit=30');
+    const res = await fetch('/api/rankings?market=' + _rankMarket + '&limit=30');
     const d = await res.json();
-    if(!d.ok){
-      ['rank-fluc','rank-cap','rank-amount'].forEach(id =>
-        setRankMsg(id, '⚠️ ' + (d.error || '실패')));
-      return;
-    }
-    const map = {'rank-fluc': _fluc, 'rank-cap': 'cap', 'rank-amount': 'amount'};
-    for(const id in map){
-      const r = (d.data || {})[map[id]] || {};
-      if(r.items && r.items.length){
-        _ranks[map[id]] = r.items;
-        renderRank(id, r.items);
-      } else {
-        setRankMsg(id, '⚠️ ' + (r.error || '데이터 없음'));
-      }
+    if(!d.ok){ setRankMsg('rank-cap', '⚠️ ' + (d.error || '실패')); return; }
+    const r = (d.data || {})['cap'] || {};
+    if(r.items && r.items.length){
+      _ranks['cap'] = r.items;
+      _capNxt = {};                 // 순위가 바뀌면 NXT 캐시 무효
+      renderRank('rank-cap', r.items);
+      if(_capMode === 'NX') fetchCapNxt();
+    } else {
+      setRankMsg('rank-cap', '⚠️ ' + (r.error || '데이터 없음'));
     }
   } catch(e){
-    ['rank-fluc','rank-cap','rank-amount'].forEach(id =>
-      setRankMsg(id, '⚠️ ' + (e.message || e)));
+    setRankMsg('rank-cap', '⚠️ ' + (e.message || e));
   } finally {
     _rankLoading = false;
     if(btn) btn.textContent = '🔄';
   }
 }
 
+// KRX / NXT 전환 — NXT는 누를 때만 조회
+async function setCapMode(m){
+  _capMode = m;
+  document.querySelectorAll('.seg[data-capm]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-capm') === m));
+  try { localStorage.setItem('fav_capm', m); } catch(e){}
+  if(m === 'NX' && !Object.keys(_capNxt).length) await fetchCapNxt();
+  else renderRank('rank-cap', _ranks['cap'] || []);
+}
+
+// 시총 상위 종목의 NXT 시세 조회 (온디맨드)
+async function fetchCapNxt(){
+  const cap = _ranks['cap'] || [];
+  if(!cap.length) return;
+  setRankMsg('rank-cap', 'NXT 시세 불러오는 중...');
+  try {
+    const res = await fetch('/api/watchlist/quotes', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({codes: cap.map(x => x.code), market: 'NX',
+                            session: effectiveSession()})
+    });
+    const d = await res.json();
+    const q = (d && d.quotes) || {};
+    Object.assign(_quotes, q);
+    _capNxt = {};
+    for(const it of cap){
+      const v = q[it.code];
+      if(!v){ _capNxt[it.code] = null; continue; }
+      const base = v.krx_close || 0;
+      _capNxt[it.code] = {
+        pct: (base && v.price) ? Math.round((v.price - base) / base * 10000) / 100 : null,
+        no_nxt: !!v.no_nxt,
+      };
+    }
+  } catch(e){
+    console.error('cap nxt', e);
+  }
+  renderRank('rank-cap', cap);
+}
+
 function toggleOne(which){
   _expand[which] = !_expand[which];
   try { localStorage.setItem('fav_exp', JSON.stringify(_expand)); } catch(e){}
-  const idMap = {fluc:'rank-fluc', cap:'rank-cap', amount:'rank-amount'};
-  const keyMap = {fluc:_fluc, cap:'cap', amount:'amount'};
-  renderRank(idMap[which], _ranks[keyMap[which]] || []);
+  renderRank('rank-cap', _ranks['cap'] || []);
 }
 
 function moreLabel(which, total){
@@ -1123,22 +1135,24 @@ function shortAmt(n){
 function renderRank(elId, items){
   const el = document.getElementById(elId);
   if(!el) return;
-  const whichMap = {'rank-fluc':'fluc', 'rank-cap':'cap', 'rank-amount':'amount'};
-  const which = whichMap[elId];
-  if(!items || !items.length){
-    setRankMsg(elId, '데이터 없음');
-    const b = document.getElementById('more-' + which);
-    if(b) b.style.display = 'none';
-    return;
-  }
+  const which = 'cap';
+  if(!items || !items.length){ setRankMsg(elId, '데이터 없음'); return; }
   const shown = _expand[which] ? items : items.slice(0, 10);
-  const isCap = (elId === 'rank-cap');
-  const isAmt = (elId === 'rank-amount');
+  const nxt = (_capMode === 'NX');
   el.innerHTML = shown.map((it, i) => {
-    const cls = it.chg_pct > 0 ? 'up' : (it.chg_pct < 0 ? 'down' : 'flat');
-    let sub = '';
-    if(isCap) sub = shortAmt((it.cap || 0) * 100000000);
-    else if(isAmt) sub = shortAmt(it.amount);
+    let pct = it.chg_pct, tag = '';
+    if(nxt){
+      const n = _capNxt[it.code];
+      if(n && n.pct !== null && n.pct !== undefined){
+        pct = n.pct;
+        if(n.no_nxt) tag = '<span class="rk-nonxt">시간외X</span>';
+      } else {
+        pct = null;
+      }
+    }
+    const cls = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+    const pctTxt = (pct === null || pct === undefined) ? '—'
+                 : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
     return '<div class="rank-row">' +
       '<span class="rk-no">' + (i+1) + '</span>' +
       '<button class="rk-star' + (isFavCode(it.code) ? ' on' : '') + '" ' +
@@ -1146,9 +1160,9 @@ function renderRank(elId, items){
         esc(it.name).replace(/'/g,"\\'") + '\', this)" title="TODAY에 담기">★</button>' +
       '<span class="rk-name" onclick="loadNews(\'' + it.code + '\',\'' +
         esc(it.name).replace(/'/g,"\\'") + '\')" title="뉴스 보기">' + esc(it.name) + '</span>' +
-      (sub ? '<span class="rk-sub">' + sub + '</span>' : '') +
-      '<span class="rk-pct ' + cls + '">' + (it.chg_pct>0?'+':'') +
-        it.chg_pct.toFixed(2) + '%</span>' +
+      tag +
+      '<span class="rk-sub">' + shortAmt((it.cap || 0) * 100000000) + '</span>' +
+      '<span class="rk-pct ' + cls + '">' + pctTxt + '</span>' +
       chartBtn(it.code) +
       '</div>';
   }).join('');
@@ -1577,8 +1591,10 @@ function setSession(s){
   document.querySelectorAll('.seg[data-sess]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-sess') === s));
   _quotes = {};
+  _capNxt = {};
   updateHint(); renderBody();
   refreshQuotes({force:true});
+  if(_capMode === 'NX') fetchCapNxt();
 }
 function setSort(s){
   _sort = s;
@@ -1596,8 +1612,8 @@ function initControls(){
     if(['auto','pre','after'].includes(s)) _session = s;
     const so = localStorage.getItem('fav_sort');
     if(['manual','chg_desc','chg_asc'].includes(so)) _sort = so;
-    const fl = localStorage.getItem('fav_fluc');
-    if(['up','down'].includes(fl)) _fluc = fl;
+    const cm = localStorage.getItem('fav_capm');
+    if(['J','NX'].includes(cm)) _capMode = cm;
     const rm = localStorage.getItem('fav_rmkt');
     if(['all','kospi','kosdaq'].includes(rm)) _rankMarket = rm;
     const ex = JSON.parse(localStorage.getItem('fav_exp') || 'null');
@@ -1609,8 +1625,8 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-sess') === _session));
   document.querySelectorAll('.seg[data-sort]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-sort') === _sort));
-  document.querySelectorAll('.seg[data-fluc]').forEach(b =>
-    b.classList.toggle('active', b.getAttribute('data-fluc') === _fluc));
+  document.querySelectorAll('.seg[data-capm]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-capm') === _capMode));
   document.querySelectorAll('.seg[data-rmkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-rmkt') === _rankMarket));
 
