@@ -184,11 +184,12 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 .rank-empty{font-size:11.5px;color:#a8b0bd;font-style:italic;padding:14px 2px}
 .rank-more{
-  width:100%;padding:8px;border:1px dashed #c5ccd6;border-radius:9px;
-  background:transparent;color:#7a8099;font-size:11.5px;cursor:pointer;
+  display:none;width:100%;padding:6px;margin-top:6px;
+  border:1px dashed #dfe4ea;border-radius:7px;
+  background:transparent;color:#a8b0bd;font-size:11px;cursor:pointer;
   font-family:inherit;transition:all .12s;
 }
-.rank-more:hover{background:#fff;color:#1a1d23;border-color:#1a1d23}
+.rank-more:hover{background:#f8f9fa;color:#1a1d23;border-color:#c5ccd6}
 .split-right{max-height:calc(100vh - 130px);overflow-y:auto}
 
 .stock-name.clickable{cursor:pointer;border-bottom:1px dashed transparent}
@@ -359,16 +360,18 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
           </span>
         </div>
         <div id="rank-fluc"><div class="rank-empty">불러오는 중...</div></div>
+        <button class="rank-more" id="more-fluc" onclick="toggleOne('fluc')">▾ 더보기</button>
       </div>
       <div class="rank-block">
         <div class="rank-head"><span class="rank-title">💰 시총 상위</span></div>
         <div id="rank-cap"><div class="rank-empty">불러오는 중...</div></div>
+        <button class="rank-more" id="more-cap" onclick="toggleOne('cap')">▾ 더보기</button>
       </div>
       <div class="rank-block">
         <div class="rank-head"><span class="rank-title">💵 거래대금 상위</span></div>
         <div id="rank-amount"><div class="rank-empty">불러오는 중...</div></div>
+        <button class="rank-more" id="more-amount" onclick="toggleOne('amount')">▾ 더보기</button>
       </div>
-      <button class="rank-more" id="rank-more" onclick="toggleRankLimit()">▾ 30위까지 보기</button>
     </div>
   </div>
 </div>
@@ -895,7 +898,7 @@ let _fluc = 'up';
 let _rankMarket = 'all';
 let _ranks = {};
 let _rankLoading = false;
-let _rankLimit = 10;
+let _expand = {fluc:false, cap:false, amount:false};   // 블록별 더보기
 
 function setFluc(k){
   _fluc = k;
@@ -928,7 +931,7 @@ async function loadRanks(force){
 
   try {
     const res = await fetch('/api/rankings?market=' + _rankMarket + '&fluc=' + _fluc +
-                            '&limit=' + _rankLimit);
+                            '&limit=30');
     const d = await res.json();
     if(!d.ok){
       ['rank-fluc','rank-cap','rank-amount'].forEach(id =>
@@ -954,13 +957,20 @@ async function loadRanks(force){
   }
 }
 
-function toggleRankLimit(){
-  _rankLimit = (_rankLimit === 10) ? 30 : 10;
-  const b = document.getElementById('rank-more');
-  if(b) b.textContent = (_rankLimit === 10) ? '▾ 30위까지 보기' : '▴ 10위만 보기';
-  try { localStorage.setItem('fav_rlimit', String(_rankLimit)); } catch(e){}
-  _ranks = {};
-  loadRanks(true);
+function toggleOne(which){
+  _expand[which] = !_expand[which];
+  try { localStorage.setItem('fav_exp', JSON.stringify(_expand)); } catch(e){}
+  const idMap = {fluc:'rank-fluc', cap:'rank-cap', amount:'rank-amount'};
+  const keyMap = {fluc:_fluc, cap:'cap', amount:'amount'};
+  renderRank(idMap[which], _ranks[keyMap[which]] || []);
+}
+
+function moreLabel(which, total){
+  const b = document.getElementById('more-' + which);
+  if(!b) return;
+  if(total <= 10){ b.style.display = 'none'; return; }
+  b.style.display = '';
+  b.textContent = _expand[which] ? '▴ 접기' : ('▾ ' + total + '위까지 보기');
 }
 
 function setRankMsg(id, msg){
@@ -980,10 +990,18 @@ function shortAmt(n){
 function renderRank(elId, items){
   const el = document.getElementById(elId);
   if(!el) return;
-  if(!items || !items.length){ setRankMsg(elId, '데이터 없음'); return; }
+  const whichMap = {'rank-fluc':'fluc', 'rank-cap':'cap', 'rank-amount':'amount'};
+  const which = whichMap[elId];
+  if(!items || !items.length){
+    setRankMsg(elId, '데이터 없음');
+    const b = document.getElementById('more-' + which);
+    if(b) b.style.display = 'none';
+    return;
+  }
+  const shown = _expand[which] ? items : items.slice(0, 10);
   const isCap = (elId === 'rank-cap');
   const isAmt = (elId === 'rank-amount');
-  el.innerHTML = items.map((it, i) => {
+  el.innerHTML = shown.map((it, i) => {
     const cls = it.chg_pct > 0 ? 'up' : (it.chg_pct < 0 ? 'down' : 'flat');
     let sub = '';
     if(isCap) sub = shortAmt((it.cap || 0) * 100000000);
@@ -1000,6 +1018,7 @@ function renderRank(elId, items){
         it.chg_pct.toFixed(2) + '%</span>' +
       '</div>';
   }).join('');
+  moreLabel(which, items.length);
 }
 
 // 즐겨찾기에 이미 있는지
@@ -1276,8 +1295,8 @@ function initControls(){
     if(['up','down'].includes(fl)) _fluc = fl;
     const rm = localStorage.getItem('fav_rmkt');
     if(['all','kospi','kosdaq'].includes(rm)) _rankMarket = rm;
-    const rl = parseInt(localStorage.getItem('fav_rlimit') || '10', 10);
-    if([10,30].includes(rl)) _rankLimit = rl;
+    const ex = JSON.parse(localStorage.getItem('fav_exp') || 'null');
+    if(ex && typeof ex === 'object') _expand = Object.assign(_expand, ex);
   } catch(e){}
   document.querySelectorAll('.seg[data-mkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market));
@@ -1289,8 +1308,10 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-fluc') === _fluc));
   document.querySelectorAll('.seg[data-rmkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-rmkt') === _rankMarket));
-  const rmb = document.getElementById('rank-more');
-  if(rmb) rmb.textContent = (_rankLimit === 10) ? '▾ 30위까지 보기' : '▴ 10위만 보기';
+  ['fluc','cap','amount'].forEach(w => {
+    const b = document.getElementById('more-' + w);
+    if(b) b.style.display = 'none';
+  });
   const sw = document.getElementById('sess-wrap');
   if(sw) sw.style.display = (_market === 'NX') ? '' : 'none';
   updateHint();
