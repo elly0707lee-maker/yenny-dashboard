@@ -140,6 +140,10 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 }
 
 /* 📊 순위 */
+.rank-market{
+  display:flex;gap:4px;align-items:center;margin-bottom:10px;
+}
+.rank-market .seg{padding:4px 11px;font-size:11px}
 .rank-block{
   background:#fff;border:1px solid #e5e7eb;border-radius:11px;
   padding:12px 14px;margin-bottom:12px;
@@ -333,6 +337,12 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
       <div id="fav-body"><div class="content-empty">불러오는 중...</div></div>
     </div>
     <div class="split-right">
+      <div class="rank-market">
+        <button class="seg active" data-rmkt="all" onclick="setRankMarket('all')">전체</button>
+        <button class="seg" data-rmkt="kospi" onclick="setRankMarket('kospi')">코스피</button>
+        <button class="seg" data-rmkt="kosdaq" onclick="setRankMarket('kosdaq')">코스닥</button>
+        <button class="btn btn-mini" style="margin-left:auto" onclick="loadRanks(true)" id="rank-refresh">🔄</button>
+      </div>
       <div class="rank-block">
         <div class="rank-head">
           <span class="rank-title">📊 등락률</span>
@@ -348,10 +358,7 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
         <div id="rank-cap"><div class="rank-empty">불러오는 중...</div></div>
       </div>
       <div class="rank-block">
-        <div class="rank-head">
-          <span class="rank-title">💵 거래대금 상위</span>
-          <button class="btn btn-mini" style="margin-left:auto" onclick="loadRanks(true)">🔄</button>
-        </div>
+        <div class="rank-head"><span class="rank-title">💵 거래대금 상위</span></div>
         <div id="rank-amount"><div class="rank-empty">불러오는 중...</div></div>
       </div>
     </div>
@@ -877,47 +884,76 @@ document.addEventListener('keydown', (e) => {
 
 // ── 📊 순위 (한투 API) ─────────────────────
 let _fluc = 'up';
-let _ranks = {};        // {kind: [items]}
+let _rankMarket = 'all';
+let _ranks = {};
+let _rankLoading = false;
 
 function setFluc(k){
   _fluc = k;
   document.querySelectorAll('.seg[data-fluc]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-fluc') === k));
   try { localStorage.setItem('fav_fluc', k); } catch(e){}
-  if(_ranks[k]) renderRank('rank-fluc', _ranks[k]);
-  else loadRank(k, 'rank-fluc');
+  loadRanks();
 }
 
-async function loadRank(kind, elId){
-  const el = document.getElementById(elId);
-  if(!el) return;
-  if(!_ranks[kind]) el.innerHTML = '<div class="rank-empty">불러오는 중...</div>';
+function setRankMarket(m){
+  _rankMarket = m;
+  document.querySelectorAll('.seg[data-rmkt]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-rmkt') === m));
+  try { localStorage.setItem('fav_rmkt', m); } catch(e){}
+  _ranks = {};
+  loadRanks(true);
+}
+
+// 3개 순위를 한 번의 요청으로 (서버에서 병렬 처리)
+async function loadRanks(force){
+  if(_rankLoading) return;
+  _rankLoading = true;
+  const btn = document.getElementById('rank-refresh');
+  if(btn) btn.textContent = '⏳';
+  // 캐시된 게 있으면 먼저 그려두고 갱신
+  if(_ranks[_fluc]) renderRank('rank-fluc', _ranks[_fluc]);
+  else setRankMsg('rank-fluc', '불러오는 중...');
+  if(!_ranks['cap']) setRankMsg('rank-cap', '불러오는 중...');
+  if(!_ranks['amount']) setRankMsg('rank-amount', '불러오는 중...');
+
   try {
-    const res = await fetch('/api/ranking?kind=' + kind);
+    const res = await fetch('/api/rankings?market=' + _rankMarket + '&fluc=' + _fluc);
     const d = await res.json();
     if(!d.ok){
-      el.innerHTML = '<div class="rank-empty">⚠️ ' + esc(d.error || '실패') + '</div>';
+      ['rank-fluc','rank-cap','rank-amount'].forEach(id =>
+        setRankMsg(id, '⚠️ ' + (d.error || '실패')));
       return;
     }
-    _ranks[kind] = d.items || [];
-    renderRank(elId, _ranks[kind]);
+    const map = {'rank-fluc': _fluc, 'rank-cap': 'cap', 'rank-amount': 'amount'};
+    for(const id in map){
+      const r = (d.data || {})[map[id]] || {};
+      if(r.items && r.items.length){
+        _ranks[map[id]] = r.items;
+        renderRank(id, r.items);
+      } else {
+        setRankMsg(id, '⚠️ ' + (r.error || '데이터 없음'));
+      }
+    }
   } catch(e){
-    el.innerHTML = '<div class="rank-empty">⚠️ ' + esc(e.message || e) + '</div>';
+    ['rank-fluc','rank-cap','rank-amount'].forEach(id =>
+      setRankMsg(id, '⚠️ ' + (e.message || e)));
+  } finally {
+    _rankLoading = false;
+    if(btn) btn.textContent = '🔄';
   }
 }
 
-function loadRanks(force){
-  if(force) _ranks = {};
-  loadRank(_fluc, 'rank-fluc');
-  loadRank('cap', 'rank-cap');
-  loadRank('amount', 'rank-amount');
+function setRankMsg(id, msg){
+  const el = document.getElementById(id);
+  if(el) el.innerHTML = '<div class="rank-empty">' + esc(msg) + '</div>';
 }
 
-// 억 단위로 축약
+// 억·조 단위 축약
 function shortAmt(n){
   if(!n) return '';
   const eok = n / 100000000;
-  if(eok >= 10000) return Math.round(eok/10000) + '조';
+  if(eok >= 10000) return (eok/10000).toFixed(1) + '조';
   if(eok >= 1) return Math.round(eok).toLocaleString('ko-KR') + '억';
   return Math.round(n/10000).toLocaleString('ko-KR') + '만';
 }
@@ -925,16 +961,13 @@ function shortAmt(n){
 function renderRank(elId, items){
   const el = document.getElementById(elId);
   if(!el) return;
-  if(!items || !items.length){
-    el.innerHTML = '<div class="rank-empty">데이터 없음</div>';
-    return;
-  }
+  if(!items || !items.length){ setRankMsg(elId, '데이터 없음'); return; }
   const isCap = (elId === 'rank-cap');
   const isAmt = (elId === 'rank-amount');
   el.innerHTML = items.map((it, i) => {
     const cls = it.chg_pct > 0 ? 'up' : (it.chg_pct < 0 ? 'down' : 'flat');
     let sub = '';
-    if(isCap) sub = shortAmt(it.cap * 100000000 || 0);
+    if(isCap) sub = shortAmt((it.cap || 0) * 100000000);
     else if(isAmt) sub = shortAmt(it.amount);
     return '<div class="rank-row">' +
       '<span class="rk-no">' + (i+1) + '</span>' +
@@ -1222,6 +1255,8 @@ function initControls(){
     if(['manual','chg_desc','chg_asc'].includes(so)) _sort = so;
     const fl = localStorage.getItem('fav_fluc');
     if(['up','down'].includes(fl)) _fluc = fl;
+    const rm = localStorage.getItem('fav_rmkt');
+    if(['all','kospi','kosdaq'].includes(rm)) _rankMarket = rm;
   } catch(e){}
   document.querySelectorAll('.seg[data-mkt]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-mkt') === _market));
@@ -1231,6 +1266,8 @@ function initControls(){
     b.classList.toggle('active', b.getAttribute('data-sort') === _sort));
   document.querySelectorAll('.seg[data-fluc]').forEach(b =>
     b.classList.toggle('active', b.getAttribute('data-fluc') === _fluc));
+  document.querySelectorAll('.seg[data-rmkt]').forEach(b =>
+    b.classList.toggle('active', b.getAttribute('data-rmkt') === _rankMarket));
   const sw = document.getElementById('sess-wrap');
   if(sw) sw.style.display = (_market === 'NX') ? '' : 'none';
   updateHint();
