@@ -665,6 +665,29 @@ def watchlist_fav_page():
     return Response(html, mimetype="text/html")
 
 
+@app.route("/api/myip")
+@requires_auth
+def api_myip():
+    """서버가 외부로 나갈 때 쓰는 IP 확인 (증권사 API 등록용)."""
+    out = {}
+    for name, url in [
+        ("ipify", "https://api.ipify.org?format=json"),
+        ("aws", "https://checkip.amazonaws.com"),
+    ]:
+        try:
+            r = requests.get(url, timeout=6)
+            txt = r.text.strip()
+            if txt.startswith("{"):
+                try:
+                    txt = r.json().get("ip", txt)
+                except Exception:
+                    pass
+            out[name] = txt
+        except Exception as e:
+            out[name] = f"실패: {str(e)[:80]}"
+    return jsonify(out)
+
+
 @app.route("/watchlist")
 @requires_auth
 def watchlist_page():
