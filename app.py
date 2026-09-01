@@ -143,26 +143,45 @@ button:hover{background:#2d3436}
 def logout():
     session.clear()
     return redirect(url_for('login'))
-def get_kis_token():
+import threading as _kis_threading
+_kis_token_lock = _kis_threading.Lock()
+
+
+def get_kis_token(force=False):
+    """
+    KIS 접근토큰. 동시 요청이 겹쳐 서로를 무효화하지 않도록 락으로 보호한다.
+    (KIS는 새 토큰을 발급하면 이전 토큰이 무효가 되는 경우가 있음)
+    """
     import time
-    if _kis_token_cache["token"] and time.time() < _kis_token_cache["expires"]:
+    if not force and _kis_token_cache["token"] and time.time() < _kis_token_cache["expires"]:
         return _kis_token_cache["token"]
-    try:
-        r = requests.post(
-            "https://openapi.koreainvestment.com:9443/oauth2/tokenP",
-            json={"grant_type": "client_credentials",
-                  "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET},
-            timeout=6)
-        data = r.json()
-        token = data.get("access_token", "")
-        _kis_token_cache["token"] = token
-        _kis_token_cache["expires"] = time.time() + 3600 * 20  # 20시간
-        return token
-    except:
-        return ""
+
+    with _kis_token_lock:
+        # 락 대기 중 다른 스레드가 이미 발급했으면 그걸 사용
+        if not force and _kis_token_cache["token"] and time.time() < _kis_token_cache["expires"]:
+            return _kis_token_cache["token"]
+        try:
+            r = requests.post(
+                "https://openapi.koreainvestment.com:9443/oauth2/tokenP",
+                json={"grant_type": "client_credentials",
+                      "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET},
+                timeout=8)
+            data = r.json()
+            token = data.get("access_token", "")
+            if token:
+                _kis_token_cache["token"] = token
+                _kis_token_cache["expires"] = time.time() + 3600 * 20
+                print("[kis] 토큰 발급됨")
+            else:
+                print(f"[kis] 토큰 발급 실패: {str(data)[:200]}")
+            return token
+        except Exception as e:
+            print(f"[kis] 토큰 예외: {e}")
+            return ""
 
 
-def kis_get(path, tr_id, params):
+def kis_get(path, tr_id, params, _retry=True):
+    """KIS 조회. 토큰이 무효화되면 새로 받아 한 번만 재시도한다."""
     if not KIS_APP_KEY:
         return {}
     try:
@@ -176,9 +195,18 @@ def kis_get(path, tr_id, params):
         }
         r = requests.get(
             f"https://openapi.koreainvestment.com:9443{path}",
-            headers=headers, params=params, timeout=6)
-        return r.json()
-    except:
+            headers=headers, params=params, timeout=8)
+        data = r.json()
+        # 토큰 문제면 강제 재발급 후 1회 재시도
+        if _retry and isinstance(data, dict):
+            msg = str(data.get("msg1", "")) + str(data.get("msg_cd", ""))
+            if r.status_code in (401, 403) or "credentials" in msg or "토큰" in msg:
+                print(f"[kis] 토큰 무효 감지 → 재발급 후 재시도 ({tr_id})")
+                get_kis_token(force=True)
+                return kis_get(path, tr_id, params, _retry=False)
+        return data
+    except Exception as e:
+        print(f"[kis] {tr_id} 예외: {e}")
         return {}
 
 
