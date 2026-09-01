@@ -667,6 +667,9 @@ def watchlist_fav_page():
 
 _rank_cache = {}   # {key: {"at": ts, "items": [...]}}
 
+# 시장 코드 — 전체 / 코스피 / 코스닥
+RANK_MARKET = {"all": "0000", "kospi": "0001", "kosdaq": "1001"}
+
 
 def _rank_num(v, d=0):
     try:
@@ -682,84 +685,106 @@ def _rank_float(v, d=0.0):
         return d
 
 
-def fetch_ranking(kind: str, limit: int = 10) -> list:
+def _rank_raw(kind: str, market: str = "all") -> dict:
+    """순위 API 원본 응답"""
+    iscd = RANK_MARKET.get(market, "0000")
+    if kind in ("up", "down"):
+        return kis_get(
+            "/uapi/domestic-stock/v1/ranking/fluctuation",
+            "FHPST01700000",
+            {
+                "fid_rsfl_rate2": "",
+                "fid_cond_mrkt_div_code": "J",
+                "fid_cond_scr_div_code": "20170",
+                "fid_input_iscd": iscd,
+                "fid_rank_sort_cls_code": "0" if kind == "up" else "1",
+                "fid_input_cnt_1": "0",
+                "fid_prc_cls_code": "1",
+                "fid_input_price_1": "",
+                "fid_input_price_2": "",
+                "fid_vol_cnt": "",
+                "fid_trgt_cls_code": "0",
+                "fid_trgt_exls_cls_code": "0",
+                "fid_div_cls_code": "0",
+                "fid_rsfl_rate1": "",
+            },
+        )
+    if kind == "cap":
+        return kis_get(
+            "/uapi/domestic-stock/v1/ranking/market-cap",
+            "FHPST01740000",
+            {
+                "fid_input_price_2": "",
+                "fid_cond_mrkt_div_code": "J",
+                "fid_cond_scr_div_code": "20174",
+                "fid_div_cls_code": "0",
+                "fid_input_iscd": iscd,
+                "fid_trgt_cls_code": "0",
+                "fid_trgt_exls_cls_code": "0",
+                "fid_input_price_1": "",
+                "fid_vol_cnt": "",
+            },
+        )
+    # amount — 거래대금 상위
+    return kis_get(
+        "/uapi/domestic-stock/v1/quotations/volume-rank",
+        "FHPST01710000",
+        {
+            "fid_cond_mrkt_div_code": "J",
+            "fid_cond_scr_div_code": "20171",
+            "fid_input_iscd": iscd,
+            "fid_div_cls_code": "0",
+            "fid_blng_cls_code": "3",
+            "fid_trgt_cls_code": "111111111",
+            "fid_trgt_exls_cls_code": "0000000000",
+            "fid_input_price_1": "",
+            "fid_input_price_2": "",
+            "fid_vol_cnt": "",
+            "fid_input_date_1": "",
+        },
+    )
+
+
+def fetch_ranking(kind: str, market: str = "all", limit: int = 10) -> dict:
     """
-    한투 순위 조회
-      kind: up(등락률 상위) / down(등락률 하위) / cap(시총 상위) / amount(거래대금 상위)
+    순위 조회 → {"items": [...], "error": "..."}
+      kind: up / down / cap / amount
+      market: all / kospi / kosdaq
     """
     import time as _t
-    key = f"{kind}|{limit}"
+    key = f"{kind}|{market}|{limit}"
     c = _rank_cache.get(key)
     if c and (_t.time() - c["at"]) < 60:
-        return c["items"]
+        return {"items": c["items"], "cached": True}
 
     try:
-        if kind in ("up", "down"):
-            # 등락률 순위
-            r = kis_get(
-                "/uapi/domestic-stock/v1/ranking/fluctuation",
-                "FHPST01700000",
-                {
-                    "fid_cond_mrkt_div_code": "J",
-                    "fid_cond_scr_div_code": "20170",
-                    "fid_input_iscd": "0000",          # 전체
-                    "fid_rank_sort_cls_code": "0" if kind == "up" else "1",
-                    "fid_input_cnt_1": "0",
-                    "fid_prc_cls_code": "0",
-                    "fid_input_price_1": "",
-                    "fid_input_price_2": "",
-                    "fid_vol_cnt": "",
-                    "fid_trgt_cls_code": "0",
-                    "fid_trgt_exls_cls_code": "0",
-                    "fid_div_cls_code": "0",
-                    "fid_rsfl_rate1": "",
-                    "fid_rsfl_rate2": "",
-                },
-            )
-        elif kind == "cap":
-            r = kis_get(
-                "/uapi/domestic-stock/v1/ranking/market-cap",
-                "FHPST01740000",
-                {
-                    "fid_cond_mrkt_div_code": "J",
-                    "fid_cond_scr_div_code": "20174",
-                    "fid_input_iscd": "0000",
-                    "fid_div_cls_code": "0",
-                    "fid_trgt_cls_code": "0",
-                    "fid_trgt_exls_cls_code": "0",
-                    "fid_input_price_1": "",
-                    "fid_input_price_2": "",
-                    "fid_vol_cnt": "",
-                },
-            )
-        else:  # amount — 거래대금 상위
-            r = kis_get(
-                "/uapi/domestic-stock/v1/quotations/volume-rank",
-                "FHPST01710000",
-                {
-                    "fid_cond_mrkt_div_code": "J",
-                    "fid_cond_scr_div_code": "20171",
-                    "fid_input_iscd": "0000",
-                    "fid_div_cls_code": "0",
-                    "fid_blng_cls_code": "3",      # 3 = 거래대금순
-                    "fid_trgt_cls_code": "111111111",
-                    "fid_trgt_exls_cls_code": "0000000000",
-                    "fid_input_price_1": "",
-                    "fid_input_price_2": "",
-                    "fid_vol_cnt": "",
-                    "fid_input_date_1": "",
-                },
-            )
+        r = _rank_raw(kind, market)
+        rt = str(r.get("rt_cd", ""))
+        if rt and rt != "0":
+            msg = r.get("msg1") or r.get("msg_cd") or "조회 실패"
+            print(f"[ranking] {kind}/{market} rt_cd={rt} {msg}")
+            return {"items": [], "error": f"{msg} (rt_cd={rt})"}
 
-        rows = r.get("output") or r.get("output1") or []
+        rows = r.get("output") or r.get("output1") or r.get("output2") or []
         if isinstance(rows, dict):
             rows = [rows]
+        if not rows:
+            return {"items": [], "error": "응답에 데이터 없음"}
 
         items = []
         for o in rows[:limit]:
-            code = (o.get("mksc_shrn_iscd") or o.get("stck_shrn_iscd")
-                    or o.get("mksc_shrn_iscd1") or "").strip()
-            name = (o.get("hts_kor_isnm") or o.get("kor_isnm") or "").strip()
+            code = ""
+            for ck in ("mksc_shrn_iscd", "stck_shrn_iscd", "mksc_shrn_iscd1", "stck_cd"):
+                v = o.get(ck)
+                if isinstance(v, str) and v.strip():
+                    code = v.strip()
+                    break
+            name = ""
+            for nk in ("hts_kor_isnm", "kor_isnm", "prdt_abrv_name"):
+                v = o.get(nk)
+                if isinstance(v, str) and v.strip():
+                    name = v.strip()
+                    break
             if not code:
                 continue
             price = _rank_num(o.get("stck_prpr"))
@@ -780,26 +805,46 @@ def fetch_ranking(kind: str, limit: int = 10) -> list:
             })
         if items:
             _rank_cache[key] = {"at": _t.time(), "items": items}
-        return items
+        return {"items": items}
     except Exception as e:
-        print(f"[ranking] {kind} 실패: {e}")
-        return []
+        print(f"[ranking] {kind}/{market} 예외: {e}")
+        return {"items": [], "error": f"{type(e).__name__}: {str(e)[:120]}"}
+
+
+@app.route("/api/rankings")
+@requires_auth
+def api_rankings():
+    """등락률·시총·거래대금 순위를 한 번에 (병렬)"""
+    import concurrent.futures
+    market = (request.args.get("market") or "all").strip()
+    fluc = (request.args.get("fluc") or "up").strip()
+    if market not in RANK_MARKET:
+        market = "all"
+    if fluc not in ("up", "down"):
+        fluc = "up"
+    kinds = [fluc, "cap", "amount"]
+    out = {}
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+            futs = {k: ex.submit(fetch_ranking, k, market, 10) for k in kinds}
+            for k, f in futs.items():
+                out[k] = f.result()
+        return jsonify({"ok": True, "market": market, "fluc": fluc, "data": out})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"})
 
 
 @app.route("/api/ranking")
 @requires_auth
 def api_ranking():
-    """순위 조회 — up / down / cap / amount"""
+    """순위 단건 조회"""
     kind = (request.args.get("kind") or "up").strip()
+    market = (request.args.get("market") or "all").strip()
     if kind not in ("up", "down", "cap", "amount"):
         return jsonify({"ok": False, "error": "invalid kind"}), 400
-    try:
-        items = fetch_ranking(kind, 10)
-        return jsonify({"ok": True, "kind": kind, "items": items})
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"ok": False, "items": [],
-                        "error": f"{type(e).__name__}: {str(e)[:200]}"})
+    r = fetch_ranking(kind, market, 10)
+    return jsonify({"ok": True, "kind": kind, "market": market, **r})
 
 
 @app.route("/api/ranking-debug")
@@ -807,38 +852,15 @@ def api_ranking():
 def api_ranking_debug():
     """순위 API 원본 응답 확인"""
     kind = (request.args.get("kind") or "up").strip()
-    out = {"kind": kind}
+    market = (request.args.get("market") or "all").strip()
+    out = {"kind": kind, "market": market}
     try:
-        if kind in ("up", "down"):
-            r = kis_get("/uapi/domestic-stock/v1/ranking/fluctuation", "FHPST01700000", {
-                "fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20170",
-                "fid_input_iscd": "0000",
-                "fid_rank_sort_cls_code": "0" if kind == "up" else "1",
-                "fid_input_cnt_1": "0", "fid_prc_cls_code": "0",
-                "fid_input_price_1": "", "fid_input_price_2": "", "fid_vol_cnt": "",
-                "fid_trgt_cls_code": "0", "fid_trgt_exls_cls_code": "0",
-                "fid_div_cls_code": "0", "fid_rsfl_rate1": "", "fid_rsfl_rate2": "",
-            })
-        elif kind == "cap":
-            r = kis_get("/uapi/domestic-stock/v1/ranking/market-cap", "FHPST01740000", {
-                "fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20174",
-                "fid_input_iscd": "0000", "fid_div_cls_code": "0",
-                "fid_trgt_cls_code": "0", "fid_trgt_exls_cls_code": "0",
-                "fid_input_price_1": "", "fid_input_price_2": "", "fid_vol_cnt": "",
-            })
-        else:
-            r = kis_get("/uapi/domestic-stock/v1/quotations/volume-rank", "FHPST01710000", {
-                "fid_cond_mrkt_div_code": "J", "fid_cond_scr_div_code": "20171",
-                "fid_input_iscd": "0000", "fid_div_cls_code": "0",
-                "fid_blng_cls_code": "3", "fid_trgt_cls_code": "111111111",
-                "fid_trgt_exls_cls_code": "0000000000",
-                "fid_input_price_1": "", "fid_input_price_2": "",
-                "fid_vol_cnt": "", "fid_input_date_1": "",
-            })
+        r = _rank_raw(kind, market)
         out["rt_cd"] = r.get("rt_cd")
         out["msg1"] = r.get("msg1")
-        out["keys"] = [k for k in r.keys()]
-        rows = r.get("output") or r.get("output1") or []
+        out["msg_cd"] = r.get("msg_cd")
+        out["keys"] = list(r.keys())
+        rows = r.get("output") or r.get("output1") or r.get("output2") or []
         if isinstance(rows, dict):
             rows = [rows]
         out["count"] = len(rows)
