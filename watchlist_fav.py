@@ -139,6 +139,40 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   .split-right{position:static}
 }
 
+/* 즐겨찾기 2열 그리드 */
+#fav-body.cols2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+#fav-body.cols2 .group{
+  margin-bottom:0;background:#fff;border:1px solid #e5e7eb;
+  border-radius:10px;padding:11px 13px;
+}
+#fav-body.cols2 .group-header{margin-top:0}
+#fav-body.cols2 .stock-table th{font-size:10px;padding:5px 6px}
+#fav-body.cols2 .stock-row td{padding:6px;font-size:12px}
+#fav-body.cols2 .memo-cell{max-width:150px}
+@media (max-width:900px){ #fav-body.cols2{grid-template-columns:1fr} }
+
+/* 📰 종목 뉴스 */
+.news-panel{
+  margin-top:20px;padding-top:16px;border-top:2px solid #e5e7eb;
+}
+.news-head{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.news-title{font-size:14px;font-weight:700;white-space:nowrap}
+.news-sub{font-size:11.5px;color:#a8b0bd}
+.news-item{
+  display:block;padding:9px 11px;border-radius:8px;
+  text-decoration:none;color:inherit;transition:background .1s;
+  border-bottom:1px solid #f4f6f8;
+}
+.news-item:last-child{border-bottom:none}
+.news-item:hover{background:#f8f9fa}
+.news-t{font-size:13px;font-weight:600;color:#1a1d23;line-height:1.45;margin-bottom:3px}
+.news-item:hover .news-t{color:#0984e3}
+.news-d{font-size:11.5px;color:#7a8099;line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.news-m{font-size:10.5px;color:#a8b0bd;margin-top:3px;display:flex;gap:8px}
+.news-src{font-weight:600}
+.news-empty{font-size:12px;color:#a8b0bd;font-style:italic;padding:16px 2px}
+
 /* 🔎 전역 종목 검색 */
 .gs-wrap{position:relative}
 .gs-box{
@@ -209,6 +243,12 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
   font-weight:700;min-width:52px;text-align:right;
   font-variant-numeric:tabular-nums;flex:0 0 auto;
 }
+.info-ic{
+  background:transparent;border:0;cursor:pointer;font-size:11px;
+  opacity:0.25;padding:0 2px;transition:opacity .12s;
+}
+.info-ic:hover{opacity:1}
+.stock-row:hover .info-ic{opacity:0.7}
 .chart-ic{
   text-decoration:none;font-size:12px;opacity:0.35;
   padding:0 3px;transition:opacity .12s;flex:0 0 auto;
@@ -387,6 +427,17 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
     <div class="split-left">
       <div class="sector-tabs" id="sector-tabs"></div>
       <div id="fav-body"><div class="content-empty">불러오는 중...</div></div>
+
+      <!-- 📰 선택 종목 뉴스 -->
+      <div class="news-panel" id="news-panel">
+        <div class="news-head">
+          <span class="news-title" id="news-title">📰 뉴스</span>
+          <span class="news-sub" id="news-sub">종목을 클릭하면 관련 뉴스가 나옵니다</span>
+          <button class="btn btn-mini" id="news-refresh" style="margin-left:auto;display:none"
+                  onclick="loadNews(_newsCode, _newsName, true)">🔄</button>
+        </div>
+        <div id="news-body"></div>
+      </div>
     </div>
     <div class="split-right">
       <div class="rank-market">
@@ -648,6 +699,9 @@ function renderBody(){
     }
   }
   body.innerHTML = html;
+  // 그룹이 2개 이상이면 2열로
+  const gcount = (s.groups || []).filter(g => (g.stocks||[]).length || g.name).length;
+  body.classList.toggle('cols2', gcount >= 2);
 }
 
 function renderGroup(g, hideHeader, inToday){
@@ -733,9 +787,11 @@ function renderRow(gid, st, isNxt){
   }
 
   return '<tr class="stock-row">' +
-    '<td><span class="stock-name clickable" onclick="openStock(\'' + st.code + '\',\'' +
-      esc(st.name).replace(/'/g, "\\'") + '\')">' + esc(st.name) + '</span>' +
-      '<span class="stock-code">' + esc(st.code) + '</span>' + badge + hot + '</td>' +
+    '<td><span class="stock-name clickable" onclick="loadNews(\'' + st.code + '\',\'' +
+      esc(st.name).replace(/'/g, "\\'") + '\')" title="뉴스 보기">' + esc(st.name) + '</span>' +
+      '<span class="stock-code">' + esc(st.code) + '</span>' + badge + hot +
+      '<button class="info-ic" onclick="event.stopPropagation();openStock(\'' + st.code + '\',\'' +
+      esc(st.name).replace(/'/g, "\\'") + '\')" title="상세 정보">ℹ️</button></td>' +
     cols +
     '<td class="num">' + num(q.volume) + '</td>' +
     '<td class="memo-cell"><input class="memo-input" placeholder="메모..." ' +
@@ -1063,8 +1119,8 @@ function renderRank(elId, items){
       '<button class="rk-star' + (isFavCode(it.code) ? ' on' : '') + '" ' +
         'onclick="event.stopPropagation();favStock(\'' + it.code + '\',\'' +
         esc(it.name).replace(/'/g,"\\'") + '\', this)" title="TODAY에 담기">★</button>' +
-      '<span class="rk-name" onclick="openStock(\'' + it.code + '\',\'' +
-        esc(it.name).replace(/'/g,"\\'") + '\')">' + esc(it.name) + '</span>' +
+      '<span class="rk-name" onclick="loadNews(\'' + it.code + '\',\'' +
+        esc(it.name).replace(/'/g,"\\'") + '\')" title="뉴스 보기">' + esc(it.name) + '</span>' +
       (sub ? '<span class="rk-sub">' + sub + '</span>' : '') +
       '<span class="rk-pct ' + cls + '">' + (it.chg_pct>0?'+':'') +
         it.chg_pct.toFixed(2) + '%</span>' +
@@ -1103,6 +1159,45 @@ function favStock(code, name, btn){
   scheduleSave();
   render();
   refreshQuotes({force:true});
+}
+
+// ── 📰 선택 종목 뉴스 ─────────────────────
+let _newsCode = '', _newsName = '', _newsLoading = false;
+
+async function loadNews(code, name, force){
+  if(!code) return;
+  if(_newsLoading && !force) return;
+  _newsCode = code; _newsName = name || code;
+  _newsLoading = true;
+  const t = document.getElementById('news-title');
+  const s = document.getElementById('news-sub');
+  const b = document.getElementById('news-body');
+  const rb = document.getElementById('news-refresh');
+  if(t) t.textContent = '📰 ' + _newsName;
+  if(s) s.textContent = code;
+  if(rb) rb.style.display = '';
+  if(b) b.innerHTML = '<div class="news-empty">뉴스 불러오는 중...</div>';
+  try {
+    const r = await fetch('/api/stock-news?q=' + encodeURIComponent(_newsName));
+    const d = await r.json();
+    if(!d.ok || !(d.items || []).length){
+      b.innerHTML = '<div class="news-empty">' +
+        esc(d.error || '관련 뉴스를 찾지 못했습니다') + '</div>';
+      return;
+    }
+    b.innerHTML = d.items.map(n =>
+      '<a class="news-item" href="' + esc(n.link) + '" target="_blank">' +
+      '<div class="news-t">' + esc(n.title) + '</div>' +
+      (n.desc ? '<div class="news-d">' + esc(n.desc) + '</div>' : '') +
+      '<div class="news-m">' +
+        (n.source ? '<span class="news-src">' + esc(n.source) + '</span>' : '') +
+        (n.time ? '<span>' + esc(n.time) + '</span>' : '') +
+      '</div></a>').join('');
+  } catch(e){
+    b.innerHTML = '<div class="news-empty">⚠️ ' + esc(e.message || e) + '</div>';
+  } finally {
+    _newsLoading = false;
+  }
 }
 
 // 네이버 차트 링크
