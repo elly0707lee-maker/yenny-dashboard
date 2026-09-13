@@ -964,6 +964,42 @@ def api_stock_news():
                         "error": f"{type(e).__name__}: {str(e)[:150]}"})
 
 
+@app.route("/api/buzz-api-test")
+@requires_auth
+def api_buzz_api_test():
+    """네이버 금융 SPA 내부 API 후보 시험"""
+    UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+    H = {"User-Agent": UA, "Referer": "https://m.stock.naver.com/",
+         "Accept": "application/json, text/plain, */*"}
+    code = (request.args.get("code") or "005930").strip()
+    out = {}
+    cands = [
+        ("board_v1", f"https://m.stock.naver.com/api/discuss/domestic/stock/{code}",
+         {"page": 1, "size": 10}),
+        ("board_v2", f"https://m.stock.naver.com/api/discussion/domestic/{code}",
+         {"page": 1, "size": 10}),
+        ("board_v3", "https://m.stock.naver.com/front-api/discuss/list",
+         {"itemCode": code, "page": 1, "size": 10}),
+        ("hot_search", "https://m.stock.naver.com/api/stocks/searchTop",
+         {"page": 1, "pageSize": 10}),
+        ("hot_v2", "https://m.stock.naver.com/front-api/stock/searchTop",
+         {"page": 1, "pageSize": 10}),
+        ("hot_v3", "https://m.stock.naver.com/api/stocks/marketValue/KOSPI",
+         {"page": 1, "pageSize": 10}),
+        ("trade_top", "https://m.stock.naver.com/api/stocks/tradingValue/KOSPI",
+         {"page": 1, "pageSize": 10}),
+    ]
+    for tag, url, params in cands:
+        try:
+            r = requests.get(url, params=params, headers=H, timeout=7)
+            body = r.text[:300]
+            out[tag] = {"status": r.status_code, "bytes": len(r.content), "body": body}
+        except Exception as e:
+            out[tag] = {"error": f"{type(e).__name__}: {str(e)[:100]}"}
+    return jsonify(out)
+
+
 @app.route("/api/buzz-debug")
 @requires_auth
 def api_buzz_debug():
