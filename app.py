@@ -964,6 +964,78 @@ def api_stock_news():
                         "error": f"{type(e).__name__}: {str(e)[:150]}"})
 
 
+@app.route("/api/buzz-debug")
+@requires_auth
+def api_buzz_debug():
+    """커뮤니티 버즈 단계별 진단 — 어디서 막히는지 확인"""
+    import asyncio as _aio
+    import community_buzz as cb
+    out = {}
+    UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+    # 1) 네이버 인기종목 페이지 직접 접근
+    try:
+        r = requests.get("https://finance.naver.com/sise/lastsearch2.naver",
+                         headers={"User-Agent": UA,
+                                  "Referer": "https://finance.naver.com/"},
+                         timeout=10)
+        r.encoding = "euc-kr"
+        codes = re.findall(r"code=(\d{6})", r.text)
+        out["naver_hot_page"] = {
+            "status": r.status_code,
+            "bytes": len(r.content),
+            "codes_found": len(set(codes)),
+            "sample_codes": list(dict.fromkeys(codes))[:5],
+            "head": r.text[:200],
+        }
+    except Exception as e:
+        out["naver_hot_page"] = {"error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # 2) 종토방 페이지 직접 접근 (삼성전자)
+    try:
+        r = requests.get("https://finance.naver.com/item/board.naver?code=005930",
+                         headers={"User-Agent": UA,
+                                  "Referer": "https://finance.naver.com/"},
+                         timeout=10)
+        r.encoding = "euc-kr"
+        titles = re.findall(r'class="title"', r.text)
+        out["naver_board"] = {
+            "status": r.status_code,
+            "bytes": len(r.content),
+            "title_marks": len(titles),
+            "head": r.text[:200],
+        }
+    except Exception as e:
+        out["naver_board"] = {"error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # 3) 모듈 함수로 실제 실행
+    try:
+        loop = _aio.new_event_loop()
+        _aio.set_event_loop(loop)
+        stocks = loop.run_until_complete(cb.fetch_naver_hot_stocks(5))
+        out["fetch_hot_stocks"] = {"count": len(stocks), "sample": stocks[:3]}
+        if stocks:
+            posts = loop.run_until_complete(
+                cb.fetch_naver_board(stocks[0]["code"], stocks[0]["name"], 5))
+            out["fetch_board"] = {"count": len(posts), "sample": posts[:2]}
+        loop.close()
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        out["module_run"] = {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+    # 4) 레딧
+    try:
+        r = requests.get("https://www.reddit.com/r/stocks/hot/.rss?limit=5",
+                         headers={"User-Agent": UA}, timeout=10)
+        out["reddit"] = {"status": r.status_code, "bytes": len(r.content),
+                         "head": r.text[:200]}
+    except Exception as e:
+        out["reddit"] = {"error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    return jsonify(out)
+
+
 @app.route("/api/myip")
 @requires_auth
 def api_myip():
