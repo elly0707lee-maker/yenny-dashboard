@@ -839,6 +839,19 @@ def fetch_ranking(kind: str, market: str = "all", limit: int = 10) -> dict:
         return {"items": [], "error": f"{type(e).__name__}: {str(e)[:120]}"}
 
 
+def _hot_stocks_for_buzz(top_n=10):
+    """커뮤니티 버즈용 인기 종목 = 거래대금 상위"""
+    r = fetch_ranking("amount", "all", max(top_n, 10))
+    return [{"name": x["name"], "code": x["code"]} for x in (r.get("items") or [])][:top_n]
+
+
+try:
+    import community_buzz as _cb
+    _cb.set_hot_stock_provider(_hot_stocks_for_buzz)
+except Exception as _e:
+    print(f"[buzz] provider 등록 실패: {_e}")
+
+
 @app.route("/api/rankings")
 @requires_auth
 def api_rankings():
@@ -967,37 +980,30 @@ def api_stock_news():
 @app.route("/api/buzz-api-test")
 @requires_auth
 def api_buzz_api_test():
-    """네이버 금융 SPA 내부 API 후보 시험"""
-    UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-          "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-    H = {"User-Agent": UA, "Referer": "https://m.stock.naver.com/",
-         "Accept": "application/json, text/plain, */*"}
+    """종토방 API 응답 구조 확인"""
     code = (request.args.get("code") or "005930").strip()
-    out = {}
-    cands = [
-        ("board_v1", f"https://m.stock.naver.com/api/discuss/domestic/stock/{code}",
-         {"page": 1, "size": 10}),
-        ("board_v2", f"https://m.stock.naver.com/api/discussion/domestic/{code}",
-         {"page": 1, "size": 10}),
-        ("board_v3", "https://m.stock.naver.com/front-api/discuss/list",
-         {"itemCode": code, "page": 1, "size": 10}),
-        ("hot_search", "https://m.stock.naver.com/api/stocks/searchTop",
-         {"page": 1, "pageSize": 10}),
-        ("hot_v2", "https://m.stock.naver.com/front-api/stock/searchTop",
-         {"page": 1, "pageSize": 10}),
-        ("hot_v3", "https://m.stock.naver.com/api/stocks/marketValue/KOSPI",
-         {"page": 1, "pageSize": 10}),
-        ("trade_top", "https://m.stock.naver.com/api/stocks/tradingValue/KOSPI",
-         {"page": 1, "pageSize": 10}),
-    ]
-    for tag, url, params in cands:
+    try:
+        r = requests.get(
+            "https://stock.naver.com/api/community/discussion/posts",
+            params={"itemCode": code, "discussionType": "domesticStock",
+                    "isHolderOnly": "false", "excludesItemNews": "false",
+                    "isItemNewsOnly": "false", "pageSize": "5"},
+            headers={"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                    "Chrome/120.0.0.0 Safari/537.36"),
+                     "Referer": f"https://stock.naver.com/domestic/stock/{code}/discuss",
+                     "Accept": "application/json, text/plain, */*"},
+            timeout=10)
+        out = {"status": r.status_code, "bytes": len(r.content)}
         try:
-            r = requests.get(url, params=params, headers=H, timeout=7)
-            body = r.text[:300]
-            out[tag] = {"status": r.status_code, "bytes": len(r.content), "body": body}
-        except Exception as e:
-            out[tag] = {"error": f"{type(e).__name__}: {str(e)[:100]}"}
-    return jsonify(out)
+            d = r.json()
+            out["top_keys"] = list(d.keys()) if isinstance(d, dict) else "list"
+            out["body"] = str(d)[:900]
+        except Exception:
+            out["body"] = r.text[:500]
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": f"{type(e).__name__}: {str(e)[:200]}"})
 
 
 @app.route("/api/buzz-debug")
