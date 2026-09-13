@@ -203,13 +203,31 @@ async def _naver_fetch_html(url: str, timeout: int = 15) -> tuple:
     return ("", 0, "모든 UA 시도 실패")
 
 
+_hot_provider = None
+
+
+def set_hot_stock_provider(fn):
+    """인기 종목 공급 함수 등록 (app.py에서 KIS 거래대금 상위를 넘겨줌)"""
+    global _hot_provider
+    _hot_provider = fn
+
+
 async def fetch_naver_hot_stocks(top_n: int = 10) -> list:
-    """네이버 금융 인기 검색 종목 TOP N"""
-    url = "https://finance.naver.com/sise/lastsearch2.naver"
-    html, status, err = await _naver_fetch_html(url)
-    if not html:
-        print(f"[naver] 인기종목 접근 실패: status={status}, err={err}")
-        return []
+    """
+    인기 종목 목록.
+    네이버 인기검색 페이지가 SPA로 바뀌어 크롤 불가 → 거래대금 상위로 대체.
+    app.py가 set_hot_stock_provider()로 주입한 함수를 사용한다.
+    """
+    if _hot_provider:
+        try:
+            stocks = _hot_provider(top_n)
+            if stocks:
+                print(f"[naver] 인기종목 {len(stocks)}개 (거래대금 상위)")
+                return stocks[:top_n]
+        except Exception as e:
+            print(f"[naver] 인기종목 provider 에러: {e}")
+    print("[naver] 인기종목을 가져오지 못함")
+    return []
     print(f"[naver] 인기종목 페이지 fetch 성공, HTML {len(html)}자")
     try:
         soup = BeautifulSoup(html, "html.parser")
@@ -241,36 +259,87 @@ async def fetch_naver_hot_stocks(top_n: int = 10) -> list:
 
 
 async def fetch_naver_board(code: str, name: str, limit: int = 10) -> list:
-    """특정 종목의 종토방 상위 게시글"""
-    url = f"https://finance.naver.com/item/board.naver?code={code}"
-    html, status, err = await _naver_fetch_html(url, timeout=12)
-    if not html:
-        return []
+    """
+    종목 토론방 게시글 (네이버 커뮤니티 API).
+    네이버 금융이 SPA로 바뀌면서 HTML 크롤이 불가능해져 내부 API를 사용.
+    """
+    url = "https://stock.naver.com/api/community/discussion/posts"
+    params = {
+        "itemCode": code,
+        "discussionType": "domesticStock",
+        "isHolderOnly": "false",
+        "excludesItemNews": "false",
+        "isItemNewsOnly": "false",
+        "pageSize": str(max(limit, 10)),
+    }
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"),
+        "Referer": f"https://stock.naver.com/domestic/stock/{code}/discuss",
+        "Accept": "application/json, text/plain, */*",
+    }
     posts = []
     try:
-        soup = BeautifulSoup(html, "html.parser")
-        for tr in soup.select("table.type2 tr"):
-            tds = tr.select("td")
-            if len(tds) < 6:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, params=params, headers=headers,
+                             timeout=aiohttp.ClientTimeout(total=12)) as r:
+                if r.status != 200:
+                    print(f"[naver] {name} 토론방 HTTP {r.status}")
+                    return []
+                data = await r.json(content_type=None)
+
+        # 응답 구조가 버전마다 달라 리스트를 재귀로 찾는다
+        found = []
+
+        def walk(node, depth=0):
+            if depth > 6 or found:
+                return
+            if isinstance(node, list):
+                if node and isinstance(node[0], dict):
+                    keys = set(node[0].keys())
+                    if keys & {"contents", "body", "title", "comment", "text"}:
+                        found.extend(node)
+                        return
+                for v in node:
+                    walk(v, depth + 1)
+            elif isinstance(node, dict):
+                for v in node.values():
+                    walk(v, depth + 1)
+
+        walk(data)
+
+        for p in found[:limit]:
+            if not isinstance(p, dict):
                 continue
-            title_el = tds[1].select_one("a")
-            if not title_el:
-                continue
-            title = title_el.get_text(strip=True)
+            title = ""
+            for k in ("title", "contents", "body", "text", "comment"):
+                v = p.get(k)
+                if isinstance(v, str) and v.strip():
+                    title = re.sub(r"<[^>]+>", " ", v).strip()
+                    title = re.sub(r"\s+", " ", title)
+                    break
             if not title:
                 continue
-            try: views = int(tds[3].get_text(strip=True).replace(",", "") or 0)
-            except: views = 0
-            try: up = int(tds[4].get_text(strip=True).replace(",", "") or 0)
-            except: up = 0
-            try: down = int(tds[5].get_text(strip=True).replace(",", "") or 0)
-            except: down = 0
-            posts.append({"stock": name, "code": code, "title": title,
-                          "views": views, "up": up, "down": down})
-            if len(posts) >= limit:
-                break
+
+            def _n(*keys):
+                for k in keys:
+                    v = p.get(k)
+                    if isinstance(v, (int, float)):
+                        return int(v)
+                    if isinstance(v, str) and v.strip().replace(",", "").isdigit():
+                        return int(v.replace(",", ""))
+                return 0
+
+            posts.append({
+                "stock": name, "code": code,
+                "title": title[:200],
+                "views": _n("readCount", "viewCount", "hit", "views"),
+                "up": _n("likeCount", "agreeCount", "up", "sympathyCount"),
+                "down": _n("dislikeCount", "disagreeCount", "down", "antipathyCount"),
+            })
     except Exception as e:
-        print(f"[naver] {name} 파싱 에러: {e}")
+        print(f"[naver] {name} 토론방 에러: {e}")
     return posts
 
 
