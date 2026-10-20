@@ -5687,8 +5687,14 @@ async function generateTgpulse(){
   const body = document.getElementById('tgpulse-body');
   const updated = document.getElementById('tgpulse-updated');
   btn.disabled = true;
-  btn.textContent = '⏳ 실행 중...';
-  body.innerHTML = '<span class="content-empty">⏳ 18개 채널 스크래핑 + Claude 크로스체크 중... (30초~1분)</span>';
+  const _t0 = Date.now();
+  const _tick = setInterval(() => {
+    const s = Math.round((Date.now() - _t0) / 1000);
+    btn.textContent = '⏳ ' + s + '초';
+    body.innerHTML = '<span class="content-empty">⏳ 채널 스크래핑 + 3갈래 동시 분석 중... ' + s + '초 경과</span>';
+  }, 1000);
+  btn.textContent = '⏳ 0초';
+  body.innerHTML = '<span class="content-empty">⏳ 채널 스크래핑 + 3갈래 동시 분석 중...</span>';
   try {
     const res = await fetch('/api/telegram-pulse', {
       method: 'POST',
@@ -5706,6 +5712,7 @@ async function generateTgpulse(){
   } catch(e) {
     body.innerHTML = '<span class="content-empty">⚠️ 오류: ' + (e.message || e) + '</span>';
   } finally {
+    clearInterval(_tick);
     btn.disabled = false;
     btn.textContent = '🔄 생성';
   }
@@ -5785,7 +5792,8 @@ function renderTgpulse(){
     '</div>' +
     '<div style="font-size:10.5px;color:#aaa;margin-bottom:10px;">📊 ' +
       d.ok_channel_count + '/' + d.channel_count + '채널 · ' +
-      d.total_messages + '건 · ' + d.hours + 'h' + esc(errMsg) + '</div>';
+      d.total_messages + '건 · ' + d.hours + 'h' +
+      (d.elapsed ? ' · ⏱ ' + d.elapsed + '초' : '') + esc(errMsg) + '</div>';
 
   if(d.error && !all.length){
     body.innerHTML = head + '<span class="content-empty">⚠️ ' + esc(d.error) + '</span>';
