@@ -1141,6 +1141,71 @@ def _parse_rss(raw: bytes) -> list:
     return []
 
 
+@app.route("/api/news-collect")
+@requires_auth
+def api_news_collect():
+    """1단계 수집 확인 — 세 갈래가 각각 몇 건 들어오는지"""
+    import news_hub
+
+    mode = (request.args.get("mode") or "all").strip()
+    hours = int(request.args.get("hours") or 12)
+
+    # 종목뉴스 대상 = 즐겨찾기 종목 (없으면 거래대금 상위)
+    codes, name_map = [], {}
+    try:
+        fav = get_latest_post("watchlist_fav")
+        if fav and fav.get("content"):
+            import json as _json
+            d = _json.loads(fav["content"])
+            for s in (d.get("sectors") or []):
+                for g in (s.get("groups") or []):
+                    for st in (g.get("stocks") or []):
+                        c = st.get("code")
+                        if c and c not in name_map:
+                            name_map[c] = st.get("name") or c
+                            codes.append(c)
+    except Exception as e:
+        print(f"[news] 즐겨찾기 로드 실패: {e}")
+
+    if not codes:
+        try:
+            r = fetch_ranking("amount", "all", 20)
+            for x in (r.get("items") or []):
+                name_map[x["code"]] = x["name"]
+                codes.append(x["code"])
+        except Exception:
+            pass
+
+    codes = codes[:40]        # 1단계 확인용으로 40종목까지
+
+    res = news_hub.collect_sync(
+        codes=codes if mode in ("all", "naver") else None,
+        name_map=name_map,
+        hours=hours,
+        with_rss=(mode in ("all", "rss")),
+    )
+
+    def brief(items, n=6):
+        return [{
+            "title": i["title"][:70],
+            "office": i.get("office", ""),
+            "cluster": i.get("cluster", 1),
+            "codes": i.get("codes", []),
+            "ts": i["ts"].strftime("%m-%d %H:%M") if i.get("ts") else "",
+        } for i in items[:n]]
+
+    return jsonify({
+        "요청종목수": len(codes),
+        "수집": {"네이버종목뉴스": len(res["naver"]),
+                 "섹션RSS": len(res["rss"]),
+                 "텔레그램": len(res["tele"]),
+                 "합계": res["total"]},
+        "샘플": {"naver": brief(res["naver"]),
+                 "rss": brief(res["rss"]),
+                 "tele": brief(res["tele"])},
+    })
+
+
 @app.route("/api/stocknews-test")
 @requires_auth
 def api_stocknews_test():
