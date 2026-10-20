@@ -1078,6 +1078,109 @@ def api_buzz_debug():
     return jsonify(out)
 
 
+def _parse_rss(raw: bytes) -> list:
+    """
+    RSS 바이트 → [{title, link, pub}]
+    EUC-KR 인코딩과 살짝 깨진 XML까지 받아낸다.
+    """
+    import xml.etree.ElementTree as _ET
+
+    def _from_xml(data):
+        root = _ET.fromstring(data)
+        out = []
+        for it in root.findall(".//item"):
+            t = (it.findtext("title") or "").strip()
+            if not t:
+                continue
+            out.append({
+                "title": t,
+                "link": (it.findtext("link") or "").strip(),
+                "pub": (it.findtext("pubDate") or "").strip(),
+            })
+        return out
+
+    # 1) 바이트 그대로
+    try:
+        return _from_xml(raw)
+    except Exception:
+        pass
+
+    # 2) 인코딩을 찾아 UTF-8 선언으로 바꿔 재시도 (EUC-KR 등)
+    for enc in ("euc-kr", "cp949", "utf-8"):
+        try:
+            text = raw.decode(enc, errors="replace")
+            text = re.sub(r'encoding=["\'][^"\']+["\']', 'encoding="utf-8"',
+                          text, count=1)
+            return _from_xml(text.encode("utf-8"))
+        except Exception:
+            continue
+
+    # 3) XML이 깨졌으면 정규식으로 건져냄
+    for enc in ("utf-8", "euc-kr", "cp949"):
+        try:
+            text = raw.decode(enc, errors="replace")
+        except Exception:
+            continue
+        blocks = re.findall(r"<item[^>]*>(.*?)</item>", text, re.S | re.I)
+        if not blocks:
+            continue
+        out = []
+        for b in blocks:
+            def pick(tag):
+                m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", b, re.S | re.I)
+                if not m:
+                    return ""
+                v = m.group(1)
+                v = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", v, flags=re.S)
+                return re.sub(r"<[^>]+>", "", v).strip()
+            t = pick("title")
+            if t:
+                out.append({"title": t, "link": pick("link"), "pub": pick("pubDate")})
+        if out:
+            return out
+    return []
+
+
+@app.route("/api/stocknews-test")
+@requires_auth
+def api_stocknews_test():
+    """네이버 종목별 뉴스 API 후보 탐색"""
+    code = (request.args.get("code") or "005930").strip()
+    H = {
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0.0.0 Safari/537.36"),
+        "Referer": f"https://stock.naver.com/domestic/stock/{code}/news",
+        "Accept": "application/json, text/plain, */*",
+    }
+    cands = [
+        ("news_a", f"https://stock.naver.com/api/news/domesticStock",
+         {"itemCode": code, "pageSize": 10}),
+        ("news_b", f"https://stock.naver.com/api/news/stock/{code}",
+         {"pageSize": 10}),
+        ("news_c", f"https://m.stock.naver.com/api/news/stock/{code}",
+         {"pageSize": 10, "page": 1}),
+        ("news_d", f"https://m.stock.naver.com/api/stock/{code}/news",
+         {"pageSize": 10, "page": 1}),
+        ("news_e", "https://m.stock.naver.com/front-api/news/list",
+         {"itemCode": code, "pageSize": 10}),
+        ("news_f", f"https://api.stock.naver.com/news/domestic/{code}",
+         {"pageSize": 10}),
+        ("news_g", f"https://m.stock.naver.com/api/news/domestic/stock/{code}",
+         {"pageSize": 10, "page": 1}),
+    ]
+    out = {}
+    for tag, url, params in cands:
+        try:
+            r = requests.get(url, params=params, headers=H, timeout=7)
+            body = r.text[:400]
+            out[tag] = {"url": url, "status": r.status_code,
+                        "bytes": len(r.content), "body": body}
+        except Exception as e:
+            out[tag] = {"url": url, "error": f"{type(e).__name__}: {str(e)[:90]}"}
+    return jsonify(out)
+
+
 @app.route("/api/rss-test")
 @requires_auth
 def api_rss_test():
@@ -1096,10 +1199,13 @@ def api_rss_test():
         ("매경 경제",     "https://www.mk.co.kr/rss/30100041/"),
         ("매경 기업",     "https://www.mk.co.kr/rss/50100032/"),
         ("이데일리 증권", "https://rss.edaily.co.kr/stock_news.xml"),
-        ("서울경제 증권", "https://www.sedaily.com/RSS/Stock.xml"),
+        ("서울경제 증권", "https://www.sedaily.com/RSS/S1N.xml"),
+        ("서울경제 경제", "https://www.sedaily.com/RSS/S1P.xml"),
         ("아시아경제",    "https://www.asiae.co.kr/rss/stock.htm"),
         ("연합 경제",     "https://www.yna.co.kr/rss/economy.xml"),
-        ("파이낸셜뉴스",  "https://www.fnnews.com/rss/fn_realnews_stock.xml"),
+        ("파이낸셜뉴스",  "https://www.fnnews.com/rss/r_stock.xml"),
+        ("뉴스핌 증권",   "https://www.newspim.com/rss/stock.xml"),
+        ("이투데이",      "https://www.etoday.co.kr/inc/rss_news.php?mid=1"),
         ("머니투데이",    "https://rss.mt.co.kr/mt_news_stock.xml"),
         ("뉴시스 경제",   "https://newsis.com/RSS/economy.xml"),
         ("헤럴드경제",    "https://biz.heraldcorp.com/rss/010000000000.xml"),
@@ -1111,11 +1217,9 @@ def api_rss_test():
             r = requests.get(url, headers=UA, timeout=8)
             if r.status_code != 200:
                 return name, {"ok": False, "status": r.status_code}
-            root = _ET.fromstring(r.content)
-            items = root.findall(".//item")
-            titles = [(it.findtext("title") or "").strip()[:60]
-                      for it in items[:3]]
-            return name, {"ok": True, "count": len(items), "sample": titles}
+            items = _parse_rss(r.content)
+            return name, {"ok": True, "count": len(items),
+                          "sample": [i["title"][:60] for i in items[:3]]}
         except Exception as e:
             return name, {"ok": False, "error": f"{type(e).__name__}: {str(e)[:80]}"}
 
