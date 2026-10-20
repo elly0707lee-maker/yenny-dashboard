@@ -1078,6 +1078,55 @@ def api_buzz_debug():
     return jsonify(out)
 
 
+@app.route("/api/rss-test")
+@requires_auth
+def api_rss_test():
+    """경제·증권 RSS 피드가 Railway에서 열리는지 확인"""
+    import xml.etree.ElementTree as _ET
+    import concurrent.futures
+
+    UA = {"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) "
+                         "Chrome/120.0.0.0 Safari/537.36")}
+    FEEDS = [
+        ("한경 증권",     "https://www.hankyung.com/feed/finance"),
+        ("한경 경제",     "https://www.hankyung.com/feed/economy"),
+        ("한경 산업",     "https://www.hankyung.com/feed/industry"),
+        ("매경 증권",     "https://www.mk.co.kr/rss/50200011/"),
+        ("매경 경제",     "https://www.mk.co.kr/rss/30100041/"),
+        ("매경 기업",     "https://www.mk.co.kr/rss/50100032/"),
+        ("이데일리 증권", "https://rss.edaily.co.kr/stock_news.xml"),
+        ("서울경제 증권", "https://www.sedaily.com/RSS/Stock.xml"),
+        ("아시아경제",    "https://www.asiae.co.kr/rss/stock.htm"),
+        ("연합 경제",     "https://www.yna.co.kr/rss/economy.xml"),
+        ("파이낸셜뉴스",  "https://www.fnnews.com/rss/fn_realnews_stock.xml"),
+        ("머니투데이",    "https://rss.mt.co.kr/mt_news_stock.xml"),
+        ("뉴시스 경제",   "https://newsis.com/RSS/economy.xml"),
+        ("헤럴드경제",    "https://biz.heraldcorp.com/rss/010000000000.xml"),
+    ]
+
+    def check(pair):
+        name, url = pair
+        try:
+            r = requests.get(url, headers=UA, timeout=8)
+            if r.status_code != 200:
+                return name, {"ok": False, "status": r.status_code}
+            root = _ET.fromstring(r.content)
+            items = root.findall(".//item")
+            titles = [(it.findtext("title") or "").strip()[:60]
+                      for it in items[:3]]
+            return name, {"ok": True, "count": len(items), "sample": titles}
+        except Exception as e:
+            return name, {"ok": False, "error": f"{type(e).__name__}: {str(e)[:80]}"}
+
+    out = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        for name, res in ex.map(check, FEEDS):
+            out[name] = res
+    alive = [k for k, v in out.items() if v.get("ok")]
+    return jsonify({"alive": alive, "alive_count": len(alive), "detail": out})
+
+
 @app.route("/api/myip")
 @requires_auth
 def api_myip():
