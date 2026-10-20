@@ -158,109 +158,171 @@ def _detect_kind(text: str) -> str:
     return "news"
 
 
-async def analyze_issues(channel_data: list) -> dict:
-    """
-    채널 메시지를 Claude에 던져 이슈를 구조화해 받는다.
-    1곳만 언급된 것도 버리지 않고 따로 담는다.
-    """
-    if not _client:
-        return {"issues": [], "error": "ANTHROPIC_API_KEY 미설정"}
-
-    parts = []
-    for cd in channel_data:
-        if cd.get("error") or not cd.get("messages"):
+def _salvage_issues(raw: str) -> list:
+    """잘린 JSON에서도 완성된 이슈 객체만 건져낸다."""
+    import json as _json
+    out, stack, instr, esc = [], [], False, False
+    for i, ch in enumerate(raw):
+        if instr:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                instr = False
             continue
-        parts.append(f"\n=== @{cd['channel']} ===")
-        for m in cd["messages"][:15]:
-            parts.append(f"- {m['text'][:300]}")
-            for l in (m.get("links") or [])[:2]:
-                parts.append(f"  LINK {l}")
+        if ch == '"':
+            instr = True
+        elif ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            st = stack.pop()
+            try:
+                o = _json.loads(raw[st:i + 1])
+            except Exception:
+                continue
+            if isinstance(o, dict) and str(o.get("title") or "").strip():
+                out.append(o)
+    return out
 
-    if not parts:
-        return {"issues": [], "error": "수집된 메시지 없음"}
 
-    all_text = "\n".join(parts)[:28000]
+def _norm_title(t: str) -> str:
+    return re.sub(r"[\s\W_]+", "", (t or "").lower())[:20]
 
-    prompt = f"""아래는 증권가 텔레그램 채널들의 최근 메시지입니다.
+
+def _shard(channel_data: list, n: int) -> list:
+    """메시지 수가 고르게 퍼지도록 채널을 n조각으로."""
+    live = [c for c in channel_data if not c.get("error") and c.get("messages")]
+    live.sort(key=lambda c: -len(c["messages"]))
+    groups = [[] for _ in range(n)]
+    for i, c in enumerate(live):
+        groups[i % n].append(c)
+    return [g for g in groups if g]
+
+
+_PROMPT = """아래는 증권가 텔레그램 채널들의 최근 메시지입니다.
 방송 앵커가 오늘 뭐가 움직이는지 파악하게 이슈를 정리해줘.
 
 규칙:
-1. 종목·이슈 단위로 묶을 것. 겹치는 채널 수를 정확히 세기
-2. **1개 채널만 언급한 것도 버리지 말 것** — 의미 있으면 포함
-3. 요약은 음슴체 한두 줄 ('~함', '~됨', '~임'). 마크다운 기호 쓰지 말 것
+1. 종목·이슈 단위로 묶고, 언급한 채널을 전부 적을 것
+2. 1개 채널만 언급한 것도 버리지 말 것
+3. summary는 음슴체 한 줄(최대 60자). 마크다운 기호 금지
 4. "관심 집중", "주목됨" 같은 공허한 표현 금지. 구체적 사실만
-5. kind 분류:
-   - disclosure: 공시·계약·증자·자사주 등 기업 액션
-   - market: 지수·환율·수급 등 시황
-   - news: 그 외 종목 뉴스
-6. 개수 제한 없음
+5. kind: disclosure(공시·계약·증자·자사주), market(지수·환율·수급), news(그 외)
+6. 최대 15개까지만
 
-반드시 아래 JSON만 출력(설명 금지):
-{{"issues":[
-  {{"title":"종목명 또는 이슈명",
-    "summary":"한두 줄 음슴체 요약",
-    "channels":["채널명","채널명"],
-    "count":2,
-    "kind":"news",
-    "stocks":["종목명"],
-    "links":["https://..."]}}
-]}}
+JSON만 출력(설명 금지):
+{{"issues":[{{"title":"종목명/이슈명","summary":"한 줄 음슴체","channels":["채널명"],"kind":"news","stocks":["종목명"],"links":["https://..."]}}]}}
 
 메시지:
-{all_text}"""
+{body}"""
 
-    try:
-        resp = _client.messages.create(
+
+async def _analyze_shard(group: list) -> list:
+    parts = []
+    for cd in group:
+        parts.append(f"\n=== @{cd['channel']} ===")
+        seen = set()
+        for m in cd["messages"][:12]:
+            t = (m.get("text") or "")[:220]
+            k = t[:40]
+            if not t or k in seen:
+                continue
+            seen.add(k)
+            parts.append(f"- {t}")
+            for l in (m.get("links") or [])[:1]:
+                parts.append(f"  LINK {l}")
+
+    body = "\n".join(parts)[:14000]
+    if not body.strip():
+        return []
+
+    def _call():
+        return _client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=5000,
-            messages=[{"role": "user", "content": prompt}],
+            max_tokens=3000,
+            messages=[{"role": "user", "content": _PROMPT.format(body=body)}],
         )
-        raw = resp.content[0].text.strip()
-    except Exception as e:
-        return {"issues": [], "error": f"분석 실패: {e}"}
 
-    import json as _json
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        return {"issues": [], "error": "JSON 파싱 실패", "raw": raw[:300]}
     try:
-        data = _json.loads(m.group(0))
+        resp = await asyncio.to_thread(_call)
+        return _salvage_issues(resp.content[0].text)
     except Exception as e:
-        return {"issues": [], "error": f"JSON 오류: {e}", "raw": raw[:300]}
+        print(f"[tgpulse] shard 실패: {e}")
+        return []
+
+
+async def analyze_issues(channel_data: list) -> dict:
+    """채널을 여러 조각으로 나눠 동시 분석 → 제목 기준 병합."""
+    if not _client:
+        return {"issues": [], "error": "ANTHROPIC_API_KEY 미설정"}
+
+    groups = _shard(channel_data, 3)
+    if not groups:
+        return {"issues": [], "error": "수집된 메시지 없음"}
+
+    results = await asyncio.gather(*[_analyze_shard(g) for g in groups],
+                                   return_exceptions=True)
+
+    merged = {}
+    for r in results:
+        if isinstance(r, Exception) or not r:
+            continue
+        for it in r:
+            title = str(it.get("title") or "").strip()
+            if not title:
+                continue
+            key = _norm_title(title)
+            summary = str(it.get("summary") or "").strip()
+            kind = str(it.get("kind") or "").strip()
+            if kind not in ("disclosure", "market", "news"):
+                kind = _detect_kind(title + " " + summary)
+
+            cur = merged.get(key)
+            if not cur:
+                cur = merged[key] = {
+                    "title": title, "summary": summary, "kind": kind,
+                    "channels": [], "stocks": [], "links": [],
+                }
+            else:
+                if len(summary) > len(cur["summary"]):
+                    cur["summary"] = summary
+                if kind == "disclosure":
+                    cur["kind"] = "disclosure"
+
+            for c in (it.get("channels") or []):
+                c = str(c).strip().lstrip("@")
+                if c and c not in cur["channels"]:
+                    cur["channels"].append(c)
+            for s in (it.get("stocks") or []):
+                s = str(s).strip()
+                if s and s not in cur["stocks"]:
+                    cur["stocks"].append(s)
+            for l in (it.get("links") or []):
+                l = str(l).strip()
+                if l.startswith("http") and l not in cur["links"]:
+                    cur["links"].append(l)
 
     issues = []
-    for it in (data.get("issues") or []):
-        if not isinstance(it, dict):
-            continue
-        title = str(it.get("title") or "").strip()
-        if not title:
-            continue
-        chans = [str(c).strip() for c in (it.get("channels") or []) if str(c).strip()]
-        cnt = int(it.get("count") or len(chans) or 1)
-        summary = str(it.get("summary") or "").strip()
-        kind = str(it.get("kind") or "").strip()
-        if kind not in ("disclosure", "market", "news"):
-            kind = _detect_kind(title + " " + summary)
-        issues.append({
-            "title": title,
-            "summary": summary,
-            "channels": chans,
-            "count": cnt,
-            "kind": kind,
-            "stocks": [str(s).strip() for s in (it.get("stocks") or []) if str(s).strip()],
-            "links": [str(l).strip() for l in (it.get("links") or [])
-                      if str(l).strip().startswith("http")][:3],
-        })
+    for v in merged.values():
+        v["links"] = v["links"][:3]
+        v["count"] = max(1, len(v["channels"]))
+        issues.append(v)
 
-    issues.sort(key=lambda x: (-x["count"],
-                               0 if x["kind"] == "disclosure" else 1))
+    issues.sort(key=lambda x: (-x["count"], 0 if x["kind"] == "disclosure" else 1))
+
+    if not issues:
+        return {"issues": [], "error": "분석 결과 없음 — 다시 생성해주세요"}
     return {"issues": issues}
 
 
-# ── 오케스트레이션 ────────────────────────
 async def generate_pulse(hours: int = 12) -> dict:
+    import time as _t
+    _t0 = _t.time()
     channel_data = await fetch_all_channels(hours)
+    _t1 = _t.time()
     result = await analyze_issues(channel_data)
+    _t2 = _t.time()
 
     total_msgs = sum(len(c.get("messages", [])) for c in channel_data)
     ok_channels = sum(1 for c in channel_data
@@ -276,6 +338,9 @@ async def generate_pulse(hours: int = 12) -> dict:
         "total_messages": total_msgs,
         "error_channels": error_channels,
         "hours": hours,
+        "elapsed": round(_t2 - _t0, 1),
+        "elapsed_fetch": round(_t1 - _t0, 1),
+        "elapsed_ai": round(_t2 - _t1, 1),
         "stats": {
             "hot": sum(1 for i in issues if i["count"] >= 5),
             "warm": sum(1 for i in issues if 3 <= i["count"] < 5),
