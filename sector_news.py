@@ -1,288 +1,273 @@
 """
-섹터별 뉴스 (/sector-news)
-- 구글 뉴스 RSS 검색 endpoint으로 섹터별 뉴스 병렬 fetch
-- Claude 요약 (선택적)
+뉴스 허브 화면 (/sector-news)
+
+고정 섹터로 검색하던 방식을 버리고,
+섹션 RSS + 네이버 종목뉴스 + 텔레그램을 모아
+예니 워치리스트로 분류해 보여준다.
 """
-import asyncio
-import aiohttp
-import re
-import urllib.parse
-import xml.etree.ElementTree as ET
-from datetime import datetime, timezone, timedelta
-
-# 예니가 방송에서 자주 다루는 섹터 리스트
-SECTORS = [
-    {"key": "semi",       "name": "반도체",     "icon": "🔬", "q": "반도체 삼성전자 SK하이닉스 HBM"},
-    {"key": "ai",         "name": "AI",         "icon": "🤖", "q": "AI 인공지능 챗GPT 엔비디아"},
-    {"key": "battery",    "name": "2차전지",    "icon": "🔋", "q": "2차전지 배터리 LG에너지솔루션 삼성SDI"},
-    {"key": "bio",        "name": "바이오",     "icon": "💊", "q": "바이오 제약 신약 셀트리온 삼성바이오"},
-    {"key": "defense",    "name": "방산",       "icon": "🛡️", "q": "방산 한화에어로스페이스 K9 KAI"},
-    {"key": "ship",       "name": "조선",       "icon": "🚢", "q": "조선 HD현대 삼성중공업 한화오션"},
-    {"key": "nuclear",    "name": "원전",       "icon": "⚛️", "q": "원전 원자력 두산에너빌리티"},
-    {"key": "finance",    "name": "금융",       "icon": "🏦", "q": "은행 금융지주 KB금융 신한금융"},
-    {"key": "auto",       "name": "자동차",     "icon": "🚗", "q": "현대차 기아 자동차 전기차"},
-    {"key": "robot",      "name": "로봇",       "icon": "🦾", "q": "로봇 로보틱스 두산로보틱스"},
-    {"key": "space",      "name": "우주항공",   "icon": "🚀", "q": "우주 항공 위성 발사체"},
-    {"key": "telco",      "name": "통신",       "icon": "📡", "q": "5G SKT KT LG유플러스"},
-    {"key": "game",       "name": "게임",       "icon": "🎮", "q": "게임 넥슨 크래프톤 엔씨"},
-    {"key": "enter",      "name": "엔터",       "icon": "🎬", "q": "엔터 하이브 SM엔터 JYP"},
-    {"key": "cosmetic",   "name": "화장품",     "icon": "💄", "q": "화장품 K뷰티 아모레퍼시픽 LG생활건강"},
-]
-
-UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
-async def fetch_sector_rss(sector: dict, limit: int = 8) -> dict:
-    """한 섹터의 구글 뉴스 RSS 검색."""
-    q = sector["q"] + " 주가 OR 실적 OR 급등 OR 급락 OR 계약 OR 수주"
-    encoded = urllib.parse.quote(q)
-    url = f"https://news.google.com/rss/search?q={encoded}&hl=ko&gl=KR&ceid=KR:ko"
-
-    items = []
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(url, headers={"User-Agent": UA},
-                             timeout=aiohttp.ClientTimeout(total=12)) as r:
-                if r.status != 200:
-                    return {"sector": sector, "items": [], "error": f"HTTP {r.status}"}
-                text = await r.text()
-                try:
-                    root = ET.fromstring(text)
-                except ET.ParseError:
-                    return {"sector": sector, "items": [], "error": "XML 파싱 실패"}
-
-                # 24시간 이내만 (더 넉넉하게 48시간)
-                cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
-
-                for it in root.findall(".//item")[:limit * 2]:
-                    title = (it.findtext("title") or "").strip()
-                    link = (it.findtext("link") or "").strip()
-                    pub = (it.findtext("pubDate") or "").strip()
-                    src_el = it.find("source")
-                    source = (src_el.text or "").strip() if src_el is not None else ""
-
-                    # 매체명 제거 ("XXX 뉴스 - 매체명" 형태)
-                    title = re.sub(r"\s*-\s*[^-]+$", "", title).strip()
-
-                    # 시간 파싱
-                    try:
-                        dt = datetime.strptime(pub, "%a, %d %b %Y %H:%M:%S %Z")
-                        dt = dt.replace(tzinfo=timezone.utc)
-                        if dt < cutoff:
-                            continue
-                        rel = _rel_time(dt)
-                    except Exception:
-                        rel = ""
-
-                    items.append({
-                        "title": title,
-                        "link": link,
-                        "source": source,
-                        "time": rel,
-                    })
-                    if len(items) >= limit:
-                        break
-
-    except Exception as e:
-        return {"sector": sector, "items": [], "error": str(e)[:100]}
-
-    return {"sector": sector, "items": items}
-
-
-def _rel_time(dt: datetime) -> str:
-    """상대 시간 (예: '3시간 전')"""
-    now = datetime.now(timezone.utc)
-    diff = now - dt
-    hours = int(diff.total_seconds() / 3600)
-    if hours < 1:
-        mins = int(diff.total_seconds() / 60)
-        return f"{mins}분 전" if mins > 0 else "방금"
-    if hours < 24:
-        return f"{hours}시간 전"
-    days = int(hours / 24)
-    return f"{days}일 전"
-
-
-async def fetch_all_sectors(limit: int = 8) -> list:
-    """모든 섹터 병렬 fetch"""
-    tasks = [fetch_sector_rss(s, limit) for s in SECTORS]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return [r if isinstance(r, dict) else {"sector": SECTORS[i], "items": [], "error": str(r)[:80]}
-            for i, r in enumerate(results)]
-
-
-def fetch_all_sectors_sync(limit: int = 8) -> list:
-    """Flask 동기 wrapper"""
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(fetch_all_sectors(limit))
-    finally:
-        try: loop.close()
-        except Exception: pass
-
-
-# ── HTML 페이지 ──────────────────────────────────
 def get_sector_news_html() -> str:
     return r"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>섹터 뉴스 · Yenny Dashboard</title>
+<title>📰 뉴스 허브 · Yenny Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2280%22>📰</text></svg>">
 <link rel="stylesheet" href="https://webfontworld.github.io/gmarket/GmarketSans.css">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{
   font-family:'GmarketSans','GmarketSansMedium',-apple-system,'Segoe UI','Noto Sans KR',sans-serif;
-  background:#f8f9fa;color:#1a1d23;min-height:100vh;
-  font-weight:500;letter-spacing:-0.01em;
+  background:#f8f9fa;color:#1a1d23;min-height:100vh;font-weight:500;letter-spacing:-0.01em;
 }
-.topbar{background:#1a1d23;color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
+.topbar{background:#1a1d23;color:#fff;padding:14px 24px;display:flex;
+  justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
 .topbar-title{font-size:18px;font-weight:700}
-.topbar-actions{display:flex;gap:8px;align-items:center}
-.btn{background:#fff;border:1px solid #e5e7eb;color:#1a1d23;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;font-family:inherit;transition:all .12s}
+.topbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{background:#fff;border:1px solid #e5e7eb;color:#1a1d23;padding:8px 14px;
+  border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;font-family:inherit;transition:all .12s}
 .btn:hover{background:#f1f3f5;border-color:#1a1d23}
 .btn-primary{background:#1a1d23;color:#fff;border-color:#1a1d23}
+.btn:disabled{opacity:.5;cursor:default}
 a.btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px}
-.wrap{max-width:1600px;margin:0 auto;padding:24px}
-.header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
-.header-title{font-size:22px;font-weight:700}
-.header-meta{font-size:12px;color:#7a8099}
-.filter-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #e5e7eb}
-.filter-chip{background:#fff;border:1px solid #e5e7eb;color:#1a1d23;padding:6px 12px;border-radius:16px;font-size:12px;cursor:pointer;font-family:inherit;transition:all .12s}
-.filter-chip:hover{background:#f1f3f5}
-.filter-chip.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
-.sector-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 18px;transition:all .15s}
-.sector-card:hover{border-color:#1a1d23;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
-.sector-header{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:1.5px solid #1a1d23}
-.sector-icon{font-size:20px}
-.sector-name{font-size:16px;font-weight:700}
-.sector-count{margin-left:auto;font-size:11px;color:#7a8099}
-.news-item{display:block;padding:8px 0;border-bottom:1px dashed #e5e7eb;font-size:13px;line-height:1.5;color:#2d3436;text-decoration:none;transition:background .1s}
-.news-item:hover{background:#f8f9fa}
-.news-item:last-child{border-bottom:none}
-.news-title{font-weight:500;color:#1a1d23;margin-bottom:3px}
-.news-item:hover .news-title{color:#0984e3}
-.news-meta{font-size:10.5px;color:#7a8099;display:flex;gap:8px}
-.news-source{font-weight:600}
-.card-empty{color:#b2bec3;font-style:italic;font-size:12px;padding:16px 0}
-.loading{text-align:center;padding:80px;color:#7a8099;font-size:14px}
-.spinner{display:inline-block;width:20px;height:20px;border:2px solid #e5e7eb;border-top-color:#1a1d23;border-radius:50%;animation:spin 1s linear infinite;margin-right:8px;vertical-align:middle}
-@keyframes spin{to{transform:rotate(360deg)}}
+
+.controlbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:9px 24px;
+  display:flex;gap:14px;align-items:center;flex-wrap:wrap;position:sticky;top:57px;z-index:90}
+.ctrl-label{font-size:10.5px;color:#7a8099;font-weight:600;margin-right:3px}
+.ctrl-group{display:flex;gap:3px;align-items:center}
+.seg{padding:5px 11px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;
+  color:#1a1d23;font-size:11.5px;font-weight:500;cursor:pointer;font-family:inherit;
+  transition:all .12s;white-space:nowrap}
+.seg:hover{background:#f1f3f5;border-color:#1a1d23}
+.seg.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
+.search-box{padding:5px 12px;border:1px solid #e5e7eb;border-radius:16px;
+  font-size:11.5px;font-family:inherit;outline:none;width:180px;background:#f8f9fa}
+.search-box:focus{border-color:#1a1d23;background:#fff;width:240px}
+.meta{font-size:11px;color:#a8b0bd;margin-left:auto;font-style:italic}
+
+.wrap{max-width:1500px;margin:0 auto;padding:16px 24px 60px}
+
+/* 테마 칩 */
+.themes{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:12px;
+  border-bottom:1.5px solid #e5e7eb;margin-bottom:16px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:6px 13px;
+  border:1px solid #e5e7eb;border-radius:18px;background:#fff;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:all .12s;white-space:nowrap}
+.chip:hover{border-color:#1a1d23;background:#f8f9fa}
+.chip.active{background:#1a1d23;color:#fff;border-color:#1a1d23}
+.chip-n{font-size:10px;opacity:.65;font-variant-numeric:tabular-nums}
+.chip.unmatched{border-style:dashed;color:#e17055;border-color:#ffd9c4}
+.chip.unmatched.active{background:#e17055;color:#fff;border-color:#e17055}
+
+/* 기사 */
+.list{display:flex;flex-direction:column;gap:2px}
+.item{display:block;background:#fff;border:1px solid #eceff1;border-radius:10px;
+  padding:12px 15px;text-decoration:none;color:inherit;transition:all .12s}
+.item:hover{border-color:#c5ccd6;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+.item.hot{border-left:3px solid #d63031}
+.item.warm{border-left:3px solid #e17055}
+.it-head{display:flex;align-items:center;gap:7px;margin-bottom:5px;flex-wrap:wrap}
+.strength{font-size:11px;font-weight:700;padding:1px 8px;border-radius:9px;
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+.s-hot{background:#ffe7e4;color:#d63031}
+.s-warm{background:#fff2e8;color:#e17055}
+.s-cool{background:#f1f3f5;color:#7a8099}
+.it-title{font-size:14px;font-weight:700;line-height:1.45;flex:1;min-width:200px}
+.item:hover .it-title{color:#0984e3}
+.it-body{font-size:12px;color:#7a8099;line-height:1.55;margin:4px 0 6px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.it-foot{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:10.5px;color:#a8b0bd}
+.tag{padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap}
+.tag-theme{background:#e8f4fd;color:#0277bd}
+.tag-alert{background:#fff8e1;color:#a06d00}
+.tag-src{background:#f1f3f5;color:#7a8099}
+.office{font-weight:600;color:#7a8099}
+
+.empty{text-align:center;padding:60px 20px;color:#b2bec3;font-style:italic}
+.loading{text-align:center;padding:60px 20px;color:#7a8099}
+.spin{display:inline-block;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hint{background:#fff8f3;border:1px solid #ffd9c4;border-radius:9px;
+  padding:10px 14px;font-size:12px;color:#a0522d;margin-bottom:14px}
+.hint b{color:#e17055}
 </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="topbar-title">📰 섹터 뉴스</div>
+  <div class="topbar-title">📰 뉴스 허브</div>
   <div class="topbar-actions">
     <a href="/" class="btn">← 대시보드</a>
-    <button class="btn btn-primary" onclick="loadNews()" id="refresh-btn">🔄 새로고침</button>
+    <a href="/watchlist" class="btn">📊 관심종목</a>
+    <a href="/watchlist/fav" class="btn">⭐ 즐겨찾기</a>
+    <button class="btn btn-primary" onclick="load(true)" id="refresh-btn">🔄 새로고침</button>
   </div>
+</div>
+
+<div class="controlbar">
+  <div class="ctrl-group">
+    <span class="ctrl-label">보기</span>
+    <button class="seg active" data-view="all" onclick="setView('all')">전체</button>
+    <button class="seg" data-view="mine" onclick="setView('mine')">내 종목</button>
+    <button class="seg" data-view="alert" onclick="setView('alert')">🔔 신호</button>
+    <button class="seg" data-view="new" onclick="setView('new')">미분류</button>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">기간</span>
+    <button class="seg" data-h="6" onclick="setHours(6)">6h</button>
+    <button class="seg active" data-h="12" onclick="setHours(12)">12h</button>
+    <button class="seg" data-h="24" onclick="setHours(24)">24h</button>
+  </div>
+  <div class="ctrl-group">
+    <input type="text" class="search-box" id="q" placeholder="🔎 기사 검색"
+           oninput="render()" oncompositionstart="_ime=true"
+           oncompositionend="_ime=false;render()"/>
+  </div>
+  <span class="meta" id="meta"></span>
 </div>
 
 <div class="wrap">
-  <div class="header-row">
-    <div class="header-title">지금 섹터별 뉴스</div>
-    <div class="header-meta" id="updated"></div>
-  </div>
-  <div class="filter-bar" id="filter-bar">
-    <button class="filter-chip active" onclick="filterBy(this,'all')">전체</button>
-  </div>
-  <div id="news-body">
-    <div class="loading"><span class="spinner"></span>불러오는 중...</div>
-  </div>
+  <div class="themes" id="themes"></div>
+  <div id="body"><div class="loading"><span class="spin">⏳</span> 뉴스 모으는 중...</div></div>
 </div>
 
 <script>
-(function(){
-  const orig = window.fetch;
-  window.fetch = function(url, opts){
-    opts = opts || {};
-    opts.headers = opts.headers || {};
-    if(typeof url === 'string' && url.startsWith('/api')){
-      opts.headers['X-API-Secret'] = window._API_SECRET || '';
-      opts.credentials = 'include';
-    }
-    return orig(url, opts);
-  };
-})();
-
-let _data = [];
-let _filter = 'all';
+let _items = [], _view = 'all', _theme = null, _hours = 12, _ime = false, _loading = false;
 
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-async function loadNews(){
-  const btn = document.getElementById('refresh-btn');
-  btn.disabled = true; btn.textContent = '⏳ 로딩...';
-  document.getElementById('news-body').innerHTML = '<div class="loading"><span class="spinner"></span>15개 섹터 뉴스 병렬 수집 중...</div>';
+async function load(force){
+  if(_loading) return;
+  _loading = true;
+  const b = document.getElementById('refresh-btn');
+  if(b){ b.disabled = true; b.textContent = '⏳ 수집 중...'; }
+  document.getElementById('body').innerHTML =
+    '<div class="loading"><span class="spin">⏳</span> 뉴스 모으는 중...</div>';
   try {
-    const res = await fetch('/api/sector-news');
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    _data = data.sectors || [];
-    document.getElementById('updated').textContent = '갱신 ' + (data.generated_at || '');
-    renderFilters();
+    const r = await fetch('/api/news-hub?hours=' + _hours + (force ? '&force=1' : ''));
+    const d = await r.json();
+    if(!d.ok){
+      document.getElementById('body').innerHTML =
+        '<div class="empty">⚠️ ' + esc(d.error || '불러오기 실패') + '</div>';
+      return;
+    }
+    _items = d.items || [];
+    document.getElementById('meta').textContent =
+      d.total + '건 · ' + (d.sources || '') + ' · ' + new Date().toLocaleTimeString('ko-KR');
+    renderThemes();
     render();
   } catch(e){
-    document.getElementById('news-body').innerHTML = '<div class="loading">⚠️ 오류: ' + esc(e.message) + '</div>';
+    document.getElementById('body').innerHTML =
+      '<div class="empty">⚠️ ' + esc(e.message || e) + '</div>';
   } finally {
-    btn.disabled = false; btn.textContent = '🔄 새로고침';
+    _loading = false;
+    if(b){ b.disabled = false; b.textContent = '🔄 새로고침'; }
   }
 }
 
-function renderFilters(){
-  const bar = document.getElementById('filter-bar');
-  bar.innerHTML = '<button class="filter-chip ' + (_filter==='all'?'active':'') + '" onclick="filterBy(this,\'all\')">전체</button>';
-  for(const s of _data){
-    const sk = s.sector.key;
-    const active = _filter === sk;
-    bar.innerHTML += '<button class="filter-chip ' + (active?'active':'') + '" onclick="filterBy(this,\'' + sk + '\')">' + s.sector.icon + ' ' + esc(s.sector.name) + '</button>';
-  }
-}
-
-function filterBy(el, key){
-  document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
-  el.classList.add('active');
-  _filter = key;
+function setView(v){
+  _view = v;
+  document.querySelectorAll('.seg[data-view]').forEach(x =>
+    x.classList.toggle('active', x.getAttribute('data-view') === v));
   render();
 }
 
+function setHours(h){
+  _hours = h;
+  document.querySelectorAll('.seg[data-h]').forEach(x =>
+    x.classList.toggle('active', +x.getAttribute('data-h') === h));
+  load(true);
+}
+
+function renderThemes(){
+  const cnt = {};
+  let unmatched = 0;
+  for(const it of _items){
+    if(!it.themes || !it.themes.length){ unmatched++; continue; }
+    const seen = new Set();
+    for(const t of it.themes){
+      const k = t.sector;
+      if(seen.has(k)) continue;
+      seen.add(k);
+      cnt[k] = (cnt[k] || 0) + 1;
+    }
+  }
+  const rows = Object.entries(cnt).sort((a,b) => b[1] - a[1]);
+  let html = '<button class="chip' + (_theme === null ? ' active' : '') +
+             '" onclick="pickTheme(null)">전체 <span class="chip-n">' +
+             _items.length + '</span></button>';
+  html += rows.map(([k,v]) =>
+    '<button class="chip' + (_theme === k ? ' active' : '') + '" onclick="pickTheme(\'' +
+    esc(k).replace(/'/g,"\\'") + '\')">' + esc(k) +
+    ' <span class="chip-n">' + v + '</span></button>').join('');
+  if(unmatched){
+    html += '<button class="chip unmatched' + (_theme === '__new__' ? ' active' : '') +
+            '" onclick="pickTheme(\'__new__\')">📌 미분류 <span class="chip-n">' +
+            unmatched + '</span></button>';
+  }
+  document.getElementById('themes').innerHTML = html;
+}
+
+function pickTheme(t){ _theme = t; renderThemes(); render(); }
+
 function render(){
-  const body = document.getElementById('news-body');
-  const list = _filter === 'all' ? _data : _data.filter(s => s.sector.key === _filter);
-  if(!list.length){
-    body.innerHTML = '<div class="loading">데이터 없음</div>';
+  if(_ime) return;
+  const q = (document.getElementById('q').value || '').trim().toLowerCase();
+  let rows = _items.slice();
+
+  if(_view === 'mine')  rows = rows.filter(x => x.themes && x.themes.length);
+  if(_view === 'alert') rows = rows.filter(x => x.alerts && x.alerts.length);
+  if(_view === 'new')   rows = rows.filter(x => !x.themes || !x.themes.length);
+
+  if(_theme === '__new__') rows = rows.filter(x => !x.themes || !x.themes.length);
+  else if(_theme) rows = rows.filter(x => (x.themes||[]).some(t => t.sector === _theme));
+
+  if(q) rows = rows.filter(x =>
+    (x.title||'').toLowerCase().includes(q) || (x.body||'').toLowerCase().includes(q));
+
+  const body = document.getElementById('body');
+  if(!rows.length){
+    body.innerHTML = '<div class="empty">조건에 맞는 기사가 없습니다</div>';
     return;
   }
-  let html = '<div class="grid">';
-  for(const s of list){
-    const sec = s.sector;
-    const items = s.items || [];
-    html += '<div class="sector-card">';
-    html += '<div class="sector-header"><span class="sector-icon">' + sec.icon + '</span><span class="sector-name">' + esc(sec.name) + '</span><span class="sector-count">' + items.length + '건</span></div>';
-    if(s.error){
-      html += '<div class="card-empty">⚠️ ' + esc(s.error) + '</div>';
-    } else if(!items.length){
-      html += '<div class="card-empty">최근 뉴스 없음</div>';
-    } else {
-      for(const it of items){
-        html += '<a class="news-item" href="' + esc(it.link) + '" target="_blank">';
-        html += '<div class="news-title">' + esc(it.title) + '</div>';
-        html += '<div class="news-meta"><span class="news-source">' + esc(it.source || '뉴스') + '</span><span>' + esc(it.time || '') + '</span></div>';
-        html += '</a>';
-      }
-    }
-    html += '</div>';
+
+  let html = '';
+  if(_view === 'new' || _theme === '__new__'){
+    html += '<div class="hint"><b>📌 미분류</b> — 워치리스트에 없는 종목·주제입니다. ' +
+            '여기서 새 테마를 발견하면 관심종목에 추가해두세요. 다음부터 자동으로 분류됩니다.</div>';
   }
-  html += '</div>';
+
+  html += '<div class="list">' + rows.slice(0, 200).map(it => {
+    const c = it.cluster || 1;
+    const cls = c >= 8 ? 'hot' : (c >= 3 ? 'warm' : '');
+    const scls = c >= 8 ? 's-hot' : (c >= 3 ? 's-warm' : 's-cool');
+    const strength = c >= 3 ? '<span class="strength ' + scls + '">' +
+                     (c >= 8 ? '🔥 ' : '⚡ ') + c + '곳</span>' : '';
+    const themes = (it.themes || []).slice(0,3).map(t =>
+      '<span class="tag tag-theme">' + esc(t.sector) + ' › ' + esc(t.group) + '</span>').join('');
+    const alerts = (it.alerts || []).map(a =>
+      '<span class="tag tag-alert">' + esc(a) + '</span>').join('');
+    const srcTag = it.src === 'tele' ? '<span class="tag tag-src">✈️ 텔레</span>' :
+                   (it.src === 'naver' ? '<span class="tag tag-src">📊 종목</span>' : '');
+    const offices = (it.offices && it.offices.length > 1)
+      ? it.offices.slice(0,3).filter(Boolean).join(' · ')
+      : (it.office || '');
+    return '<a class="item ' + cls + '" href="' + esc(it.link || '#') + '" target="_blank">' +
+      '<div class="it-head">' + strength +
+        '<span class="it-title">' + esc(it.title) + '</span></div>' +
+      (it.body ? '<div class="it-body">' + esc(it.body) + '</div>' : '') +
+      '<div class="it-foot">' + themes + alerts + srcTag +
+        '<span class="office">' + esc(offices) + '</span>' +
+        '<span>' + esc(it.ago || '') + '</span>' +
+      '</div></a>';
+  }).join('') + '</div>';
+
   body.innerHTML = html;
 }
 
-loadNews();
+load();
+setInterval(() => { if(!document.hidden && !_loading) load(); }, 300000);
 </script>
 </body>
 </html>
