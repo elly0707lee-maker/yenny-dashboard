@@ -62,18 +62,22 @@ async def fetch_stock_news(session, code: str, name: str = "", limit: int = 10) 
             article_id = (it.get("articleId") or "").strip()
             link = (f"https://n.news.naver.com/mnews/article/{office_id}/{article_id}"
                     if office_id and article_id else "")
+            body = _clean(it.get("body"))[:200]
+            # ⚠️ 네이버 종목뉴스에는 일반 시황 기사도 섞여 온다.
+            #    제목·본문에 종목명이 실제로 있을 때만 그 종목 뉴스로 인정.
+            hit = bool(name) and (name in title or name in body)
             out.append({
                 "src": "naver",
                 "title": title,
-                "body": _clean(it.get("body"))[:200],
+                "body": body,
                 "link": link,
                 "office": (it.get("officeName") or "").strip(),
                 "ts": _parse_dt(it.get("datetime")),
                 "cluster": int(total),
-                "codes": [code],
-                "stock_name": name or code,
+                "codes": [code] if hit else [],
+                "stock_name": name if hit else "",
             })
-            break          # 묶음당 대표 기사 1건만 (나머지는 cluster 수로 표현)
+            break          # 묶음당 대표 1건 (나머지는 cluster 수로 표현)
     return out
 
 
@@ -339,3 +343,125 @@ def collect_sync(codes: list = None, name_map: dict = None,
     naver, rss, tele = [r if isinstance(r, list) else [] for r in res]
     return {"naver": naver, "rss": rss, "tele": tele,
             "total": len(naver) + len(rss) + len(tele)}
+
+
+# ── 2단계: 워치리스트 역색인 분류 ────────────────────
+# 일반 단어와 겹쳐 오탐을 부르는 종목명은 제외
+STOP_NAMES = {
+    "대성", "세방", "동양", "한국", "대한", "신원", "유니온",
+    "삼성", "현대", "한화", "미래", "우리", "국보", "성지",
+    "다우", "경동", "서울", "부산", "대구", "광주", "제주",
+    "중앙", "태경", "동국", "영원", "한솔", "금호", "일신", "삼영",
+    "이수", "대림", "신일", "코리아", "글로벌", "스마트", "에이스",
+    "에스엠", "케이씨", "디아이", "아이티", "피에스", "에이티",
+}
+
+
+def build_index(watchlist: dict) -> dict:
+    """
+    워치리스트 → 역색인
+      {종목명: [{"code","sector","group"}...]}  + 코드 색인
+    """
+    by_name, by_code = {}, {}
+    for s in (watchlist.get("sectors") or []):
+        sname = s.get("name") or ""
+        for g in (s.get("groups") or []):
+            gname = g.get("name") or ""
+            for st in (g.get("stocks") or []):
+                code = (st.get("code") or "").strip()
+                nm = (st.get("name") or "").strip()
+                if not code:
+                    continue
+                entry = {"code": code, "name": nm, "sector": sname, "group": gname}
+                by_code.setdefault(code, []).append(entry)
+                # 2글자 이하이거나 일반어와 겹치면 이름 매칭에서 제외
+                if nm and len(nm) >= 3 and nm not in STOP_NAMES:
+                    by_name.setdefault(nm, []).append(entry)
+    return {"by_name": by_name, "by_code": by_code}
+
+
+# 섹터 무관하게 반드시 띄워야 할 신호
+ALERT_WORDS = [
+    "유상증자", "무상증자", "자사주", "소각", "분할", "합병", "인수",
+    "상장폐지", "거래정지", "감자", "전환사채", "공급계약", "수주",
+    "임상", "승인", "허가", "특허", "횡령", "배임", "실적", "흑자전환",
+    "적자전환", "어닝", "목표가", "투자의견",
+]
+
+
+def classify(items: list, index: dict) -> list:
+    """
+    기사마다 테마를 붙이고 점수를 매긴다.
+    네이버 경로로 이미 종목이 확정된 건 그 코드를 그대로 쓰고,
+    나머지는 제목·본문에서 종목명을 찾아 역으로 매칭.
+    """
+    by_name = index.get("by_name") or {}
+    by_code = index.get("by_code") or {}
+
+    for it in items:
+        hits, themes = [], []
+
+        # 1) 이미 확정된 코드
+        for c in (it.get("codes") or []):
+            hits.extend(by_code.get(c, []))
+
+        # 2) 제목·본문에서 종목명 찾기
+        text = (it.get("title") or "") + " " + (it.get("body") or "")
+        for nm, entries in by_name.items():
+            if nm in text:
+                hits.extend(entries)
+
+        seen = set()
+        for h in hits:
+            key = (h["sector"], h["group"])
+            if key in seen:
+                continue
+            seen.add(key)
+            themes.append({"sector": h["sector"], "group": h["group"],
+                           "name": h["name"], "code": h["code"]})
+
+        it["themes"] = themes[:4]
+        it["matched"] = bool(themes)
+
+        # 3) 점수 — 매체 수가 기본, 내 종목이면 가점, 신호어도 가점
+        score = min(int(it.get("cluster") or 1), 20) * 3
+        if themes:
+            score += 12 + min(len(themes), 3) * 2
+        alerts = [w for w in ALERT_WORDS if w in text]
+        it["alerts"] = alerts[:3]
+        score += min(len(alerts), 3) * 4
+        if it.get("src") == "tele":
+            score += 2
+        it["score"] = score
+
+    items.sort(key=lambda x: (-x.get("score", 0), x.get("ts") or datetime.now(KST)),
+               reverse=False)
+    items.sort(key=lambda x: -x.get("score", 0))
+    return items
+
+
+def dedupe(items: list) -> list:
+    """제목이 거의 같은 기사를 묶고, 묶인 수를 cluster에 더한다."""
+    def norm(t):
+        t = re.sub(r"\[[^\]]*\]", "", t or "")
+        t = re.sub(r"[^\w가-힣]", "", t)
+        return t[:28]
+
+    bucket = {}
+    for it in items:
+        k = norm(it.get("title"))
+        if not k:
+            continue
+        if k in bucket:
+            cur = bucket[k]
+            cur["cluster"] = max(cur.get("cluster", 1), it.get("cluster", 1)) \
+                             + 1
+            offs = cur.setdefault("offices", [cur.get("office", "")])
+            if it.get("office") and it["office"] not in offs:
+                offs.append(it["office"])
+            if not cur.get("codes") and it.get("codes"):
+                cur["codes"] = it["codes"]
+        else:
+            it["offices"] = [it.get("office", "")]
+            bucket[k] = it
+    return list(bucket.values())
