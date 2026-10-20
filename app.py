@@ -1141,6 +1141,104 @@ def _parse_rss(raw: bytes) -> list:
     return []
 
 
+_newshub_cache = {"at": 0.0, "hours": 0, "items": [], "src": ""}
+
+
+@app.route("/api/news-hub")
+@requires_auth
+def api_news_hub():
+    """뉴스 허브 — 수집 → 중복 묶기 → 워치리스트 분류 → 점수순"""
+    import time as _t
+    import json as _json
+    import news_hub
+
+    hours = int(request.args.get("hours") or 12)
+    force = request.args.get("force") == "1"
+
+    if (not force and _newshub_cache["items"]
+            and _newshub_cache["hours"] == hours
+            and (_t.time() - _newshub_cache["at"]) < 180):
+        return jsonify({"ok": True, "cached": True,
+                        "total": len(_newshub_cache["items"]),
+                        "sources": _newshub_cache["src"],
+                        "items": _newshub_cache["items"]})
+
+    # 워치리스트 — 분류 사전
+    watch = {}
+    try:
+        row = get_latest_post("watchlist")
+        if row and row.get("content"):
+            watch = _json.loads(row["content"])
+    except Exception as e:
+        print(f"[newshub] 워치리스트 로드 실패: {e}")
+
+    index = news_hub.build_index(watch)
+
+    # 종목뉴스 대상 = 즐겨찾기 (없으면 거래대금 상위)
+    codes, name_map = [], {}
+    try:
+        fav = get_latest_post("watchlist_fav")
+        if fav and fav.get("content"):
+            d = _json.loads(fav["content"])
+            for s in (d.get("sectors") or []):
+                for g in (s.get("groups") or []):
+                    for st in (g.get("stocks") or []):
+                        c = st.get("code")
+                        if c and c not in name_map:
+                            name_map[c] = st.get("name") or c
+                            codes.append(c)
+    except Exception:
+        pass
+    if not codes:
+        try:
+            r = fetch_ranking("amount", "all", 15)
+            for x in (r.get("items") or []):
+                name_map[x["code"]] = x["name"]
+                codes.append(x["code"])
+        except Exception:
+            pass
+    codes = codes[:40]
+
+    try:
+        res = news_hub.collect_sync(codes=codes, name_map=name_map, hours=hours)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+    items = res["naver"] + res["rss"] + res["tele"]
+    items = news_hub.dedupe(items)
+    items = news_hub.classify(items, index)
+
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    KST = _tz(_td(hours=9))
+    now = _dt.now(KST)
+    out = []
+    for it in items[:300]:
+        ts = it.get("ts")
+        ago = ""
+        if ts:
+            try:
+                mins = int((now - ts).total_seconds() / 60)
+                ago = (f"{max(mins,1)}분 전" if mins < 60
+                       else (f"{mins//60}시간 전" if mins < 1440 else f"{mins//1440}일 전"))
+            except Exception:
+                pass
+        out.append({
+            "title": it.get("title", ""), "body": it.get("body", ""),
+            "link": it.get("link", ""), "office": it.get("office", ""),
+            "offices": it.get("offices", []), "src": it.get("src", ""),
+            "cluster": it.get("cluster", 1), "themes": it.get("themes", []),
+            "alerts": it.get("alerts", []), "score": it.get("score", 0),
+            "ago": ago,
+        })
+
+    src = (f"종목{len(res['naver'])}·RSS{len(res['rss'])}"
+           + (f"·텔레{len(res['tele'])}" if res["tele"] else ""))
+    _newshub_cache.update({"at": _t.time(), "hours": hours,
+                           "items": out, "src": src})
+    return jsonify({"ok": True, "total": len(out), "sources": src, "items": out})
+
+
 @app.route("/api/stocknews-verify")
 @requires_auth
 def api_stocknews_verify():
