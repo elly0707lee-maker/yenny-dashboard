@@ -11,7 +11,7 @@ from wandaebon import get_wandaebon_html, parse_wandaebon_docx
 from community_buzz import generate_buzz_sync
 from checkpoint_page import get_checkpoint_page_html
 from postit_board import get_postit_board_html
-from sector_news import get_sector_news_html, fetch_all_sectors_sync
+from sector_news import get_sector_news_html
 from telegram_pulse import generate_pulse_sync
 from watchlist import get_watchlist_html, fetch_stock_quotes, fetch_quotes_with_gap
 from watchlist_fav import get_fav_html
@@ -446,22 +446,6 @@ def sector_news_page():
     secret_script = f'<script>window._API_SECRET="{API_SECRET}";</script>'
     html = html.replace('</head>', f'{secret_script}</head>', 1)
     return Response(html, mimetype="text/html")
-
-
-@app.route("/api/sector-news")
-@requires_auth
-def api_sector_news():
-    """섹터별 뉴스 병렬 fetch."""
-    try:
-        sectors = fetch_all_sectors_sync(limit=8)
-        return jsonify({
-            "ok": True,
-            "sectors": sectors,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        })
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/telegram-pulse", methods=["POST"])
