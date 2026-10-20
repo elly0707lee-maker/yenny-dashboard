@@ -5711,6 +5711,25 @@ async function generateTgpulse(){
   }
 }
 
+let _tgFilter = 'all';
+let _tgQ = '';
+
+function tgSetFilter(f){ _tgFilter = f; renderTgpulse(); }
+function tgSearch(v){ _tgQ = (v||'').trim(); renderTgpulse(); }
+
+function _tgBadge(c){
+  if(c >= 5) return {ico:'🔥', label:c+'곳', bg:'#ffeaa7', fg:'#b8540a', bd:'#fdcb6e'};
+  if(c >= 3) return {ico:'⚡', label:c+'곳', bg:'#ffeef0', fg:'#d63031', bd:'#fab1a0'};
+  if(c === 2) return {ico:'📌', label:'2곳', bg:'#eef4ff', fg:'#0984e3', bd:'#a9c7f5'};
+  return {ico:'·', label:'1곳', bg:'#f1f2f6', fg:'#8a8f98', bd:'#dfe4ea'};
+}
+
+const _TG_KIND = {
+  disclosure: {ico:'📄', label:'공시', color:'#6c5ce7'},
+  market:     {ico:'📊', label:'시황', color:'#00a8a8'},
+  news:       {ico:'📰', label:'뉴스', color:'#636e72'},
+};
+
 function renderTgpulse(){
   const body = document.getElementById('tgpulse-body');
   const d = _tgpulseData;
@@ -5718,20 +5737,105 @@ function renderTgpulse(){
     body.innerHTML = '<span class="content-empty">아직 데이터 없음 · 🔄 생성 눌러주세요</span>';
     return;
   }
-  const summary = d.summary || '(요약 없음)';
-  // 마크다운 정리 + URL 자동 링크
-  let html = esc(summary);
-  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" style="color:#0984e3;text-decoration:none;">🔗 $1</a>');
-  html = html.replace(/&quot;([^&\n]{2,50}?)&quot;/g, '<span style="color:#0984e3;">"$1"</span>');
 
-  const errorMsg = d.error_channels && d.error_channels.length > 0
-    ? ' · ⚠️ 접근 실패: ' + d.error_channels.join(', ')
-    : '';
+  // 구버전(텍스트 덩어리) 데이터 호환
+  if(!d.issues && d.summary){
+    body.innerHTML =
+      '<div style="font-size:11px;color:#888;margin-bottom:8px;">구버전 데이터 · 🔄 생성을 다시 눌러주세요</div>' +
+      '<div style="white-space:pre-wrap;line-height:1.7;font-size:12px;color:#636e72;">' + esc(d.summary) + '</div>';
+    return;
+  }
 
-  body.innerHTML =
-    '<div style="font-size:11px;color:#888;margin-bottom:8px;">📊 ' + d.ok_channel_count + '/' + d.channel_count + '개 채널 · ' + d.total_messages + '개 메시지 분석 (' + d.hours + '시간)' + esc(errorMsg) + '</div>' +
-    '<div style="white-space:pre-wrap;line-height:1.75;font-size:12.5px;color:#2d3436;">' + html + '</div>';
+  const all = d.issues || [];
+  const st = d.stats || {};
+
+  let list = all.slice();
+  if(_tgFilter === 'disclosure') list = list.filter(i => i.kind === 'disclosure');
+  else if(_tgFilter === 'multi')  list = list.filter(i => (i.count||1) >= 2);
+  else if(_tgFilter === 'solo')   list = list.filter(i => (i.count||1) <= 1);
+  if(_tgQ){
+    const q = _tgQ.toLowerCase();
+    list = list.filter(i =>
+      (i.title||'').toLowerCase().includes(q) ||
+      (i.summary||'').toLowerCase().includes(q) ||
+      (i.stocks||[]).some(s => s.toLowerCase().includes(q)));
+  }
+
+  const chip = (key, label, n) =>
+    '<button onclick="tgSetFilter(\'' + key + '\')" style="' +
+    'border:1px solid ' + (_tgFilter===key ? '#2d3436' : '#dfe4ea') + ';' +
+    'background:' + (_tgFilter===key ? '#2d3436' : '#fff') + ';' +
+    'color:' + (_tgFilter===key ? '#fff' : '#636e72') + ';' +
+    'border-radius:14px;padding:4px 11px;font-size:11px;cursor:pointer;' +
+    'font-weight:' + (_tgFilter===key ? '700' : '500') + ';">' +
+    label + (n != null ? ' <span style="opacity:.65;">' + n + '</span>' : '') + '</button>';
+
+  const errMsg = (d.error_channels && d.error_channels.length)
+    ? ' · ⚠️ 실패 ' + d.error_channels.length + '곳' : '';
+
+  let head =
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;">' +
+      chip('all','전체',all.length) +
+      chip('disclosure','📄 공시', st.disclosure||0) +
+      chip('multi','🔥 2곳+', (st.hot||0)+(st.warm||0)+(st.pin||0)) +
+      chip('solo','· 1곳', st.solo||0) +
+      '<input oninput="tgSearch(this.value)" value="' + esc(_tgQ) + '" placeholder="종목·키워드" ' +
+      'style="flex:1;min-width:90px;border:1px solid #dfe4ea;border-radius:14px;' +
+      'padding:4px 10px;font-size:11px;outline:none;">' +
+    '</div>' +
+    '<div style="font-size:10.5px;color:#aaa;margin-bottom:10px;">📊 ' +
+      d.ok_channel_count + '/' + d.channel_count + '채널 · ' +
+      d.total_messages + '건 · ' + d.hours + 'h' + esc(errMsg) + '</div>';
+
+  if(d.error && !all.length){
+    body.innerHTML = head + '<span class="content-empty">⚠️ ' + esc(d.error) + '</span>';
+    return;
+  }
+  if(!list.length){
+    body.innerHTML = head + '<span class="content-empty">해당 조건에 맞는 이슈 없음</span>';
+    return;
+  }
+
+  const cards = list.map(i => {
+    const c = i.count || (i.channels||[]).length || 1;
+    const b = _tgBadge(c);
+    const k = _TG_KIND[i.kind] || _TG_KIND.news;
+
+    const chans = (i.channels||[]).slice(0,6)
+      .map(x => '<span style="font-size:10px;color:#8a8f98;background:#f6f7f9;' +
+                'border-radius:8px;padding:1px 6px;">@' + esc(x) + '</span>').join(' ');
+
+    const stocks = (i.stocks||[]).slice(0,5)
+      .map(s => '<span style="font-size:10.5px;color:#2d3436;background:#fff;' +
+                'border:1px solid #e6e9ed;border-radius:8px;padding:1px 7px;font-weight:600;">' +
+                esc(s) + '</span>').join(' ');
+
+    const links = (i.links||[]).slice(0,3).map((l,n) =>
+      '<a href="' + esc(l) + '" target="_blank" style="font-size:10.5px;color:#0984e3;' +
+      'text-decoration:none;">🔗 원문' + (n ? (n+1) : '') + '</a>').join(' · ');
+
+    return '<div style="border:1px solid ' + b.bd + ';border-left:3px solid ' + k.color + ';' +
+      'border-radius:9px;padding:10px 12px;background:#fff;">' +
+      '<div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:5px;">' +
+        '<span style="background:' + b.bg + ';color:' + b.fg + ';border-radius:9px;' +
+        'padding:1px 7px;font-size:10px;font-weight:700;white-space:nowrap;">' +
+        b.ico + ' ' + b.label + '</span>' +
+        '<span style="font-size:10px;color:' + k.color + ';font-weight:700;white-space:nowrap;' +
+        'padding-top:2px;">' + k.ico + ' ' + k.label + '</span>' +
+        '<span style="font-size:13px;font-weight:700;color:#2d3436;line-height:1.35;">' +
+        esc(i.title||'') + '</span>' +
+      '</div>' +
+      (i.summary ? '<div style="font-size:12px;color:#55606a;line-height:1.6;margin-bottom:6px;">' +
+        esc(i.summary) + '</div>' : '') +
+      (stocks ? '<div style="margin-bottom:5px;display:flex;gap:4px;flex-wrap:wrap;">' + stocks + '</div>' : '') +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">' + chans +
+        (links ? '<span style="margin-left:auto;">' + links + '</span>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  body.innerHTML = head +
+    '<div style="display:flex;flex-direction:column;gap:7px;">' + cards + '</div>';
 }
 
 async function loadTgpulseOnStart(){
