@@ -1141,6 +1141,58 @@ def _parse_rss(raw: bytes) -> list:
     return []
 
 
+@app.route("/api/stocknews-verify")
+@requires_auth
+def api_stocknews_verify():
+    """종목코드가 실제로 반영되는지 — 두 종목 결과를 비교"""
+    H = {"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"),
+         "Accept": "application/json, text/plain, */*"}
+    out = {}
+    titles_by_code = {}
+    for code, label in [("005930", "삼성전자"), ("000660", "SK하이닉스"),
+                        ("034020", "두산에너빌리티")]:
+        try:
+            r = requests.get(
+                f"https://m.stock.naver.com/api/news/stock/{code}",
+                params={"pageSize": 8, "page": 1},
+                headers={**H, "Referer":
+                         f"https://m.stock.naver.com/domestic/stock/{code}/news"},
+                timeout=8)
+            d = r.json()
+            groups = d if isinstance(d, list) else [d]
+            rows, titles = [], []
+            for g in groups:
+                if not isinstance(g, dict):
+                    continue
+                for it in (g.get("items") or []):
+                    t = (it.get("title") or "").strip()
+                    if not t:
+                        continue
+                    titles.append(t)
+                    rows.append({"total": g.get("total"), "type": it.get("type"),
+                                 "title": t[:55],
+                                 "office": it.get("officeName"),
+                                 "relatedStocks": it.get("relatedStocks"),
+                                 "keys": [k for k in it.keys()][:18]})
+            titles_by_code[code] = set(titles)
+            out[f"{label}({code})"] = {"count": len(rows), "rows": rows[:8]}
+        except Exception as e:
+            out[f"{label}({code})"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+
+    codes = list(titles_by_code.keys())
+    if len(codes) >= 2:
+        a, b = titles_by_code[codes[0]], titles_by_code[codes[1]]
+        both = a & b
+        out["_겹침"] = {"삼성전자∩SK하이닉스": len(both),
+                        "각각": [len(a), len(b)],
+                        "판정": ("종목 무시 — 전체 뉴스" if len(both) > min(len(a), len(b)) * 0.7
+                                 else "종목별로 다름 — 정상"),
+                        "샘플": list(both)[:3]}
+    return jsonify(out)
+
+
 @app.route("/api/news-collect")
 @requires_auth
 def api_news_collect():
